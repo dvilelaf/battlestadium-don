@@ -53,7 +53,11 @@ PERSONAL_LINE = re.compile(r"^- `(.+)`\s*$")
 # Strings blanked out of a line before the personal patterns are matched (case-insensitive). The project's own
 # source URL holds the account name; the owner decided on 2026-10-27 that it may be published. The name is split
 # so that this file does not trip the owner's real patterns. Any other use of the name stays a hit.
-PUBLIC_IDENTITY_ALLOW = ("https://github.com/" + "d" + "vilelaf" + "/battlestadium-don",)
+# 2026-11-02 the owner also allowed his account as the maintainer in .recomp.json (recomp.fyi listing): that one
+# entry, exactly as written there.
+_ACCOUNT = "d" + "vilelaf"
+PUBLIC_IDENTITY_ALLOW = ("https://github.com/" + _ACCOUNT + "/battlestadium-don",
+                         '{ "name": "' + _ACCOUNT + '", "link": "https://github.com/' + _ACCOUNT + '" }')
 
 # A dump line is a line made only of byte tokens (16 or more two-digit hex values, separated by
 # spaces), with an optional leading offset such as `00000000`. A byte run inside a table cell or a

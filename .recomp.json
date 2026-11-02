@@ -1,10 +1,39 @@
 {
   "$schema": "https://recomp.fyi/schema/v1.json",
   "game": "Battle Stadium D.O.N",
+  "wikidata": "Q780225",
   "system": "PS2",
   "type": "recomp",
-  "toolchain": "PS2Recomp",
-  "status": "in-progress",
-  "targets": ["Windows", "Linux"],
-  "original": { "region": "Japan", "serial": "SLPS-25675" }
+  "original": {
+    "region": "Japan",
+    "serial": "SLPS-25675"
+  },
+  "project": "Battle Stadium D.O.N for PC",
+  "status": "released",
+  "targets": [
+    "Linux",
+    "Windows"
+  ],
+  "toolchain": "Ps2recomp",
+  "approach": "Static recompilation with PS2Recomp; PCSX2's GS, microVU and SPU2 as libraries. The game code is translated and compiled on the player's PC from their own disc.",
+  "started": "2026-10-11",
+  "notes": "Menus, fights, videos, sound, memory card, keyboard and gamepads at 60 fps, up to 4 players. Works with the Japanese disc and with Lord Izen's English fan translations. Online play for 4 exists, not yet tried between two PCs. Downloads ship no game material: the first run checks your disc image and builds the game code locally.",
+  "help": [
+    "Online play tests between two PCs"
+  ],
+  "tags": [
+    "fighting",
+    "party",
+    "4-players",
+    "static-recompilation"
+  ],
+  "maintainers": [
+    { "name": "dvilelaf", "link": "https://github.com/dvilelaf" }
+  ],
+  "links": [
+    {
+      "label": "Releases",
+      "url": "https://github.com/dvilelaf/battlestadium-don/releases"
+    }
+  ]
 }
