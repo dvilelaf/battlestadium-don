@@ -7,6 +7,7 @@ It sits beside package_windows.sh and the build_*.sh scripts, and is Python so t
 
     uv run --no-project python -I tools/pipeline/package_linux.py [--jobs N] [--skip-build] [--version V] [--out DIR]
     uv run --no-project python -I tools/pipeline/package_linux.py --from-builds DIR [--version V] [--out DIR]
+    ... --appimage   also makes BattleStadiumDON-<version>-x86_64.AppImage from the archive (make_appimage.py)
 
 What it does, all under the folder of the checkout that holds this script (called ROOT below):
   1. work/player-src: a detached git worktree of HEAD (never the working tree), with symlinks to the shared
@@ -51,6 +52,7 @@ sys.path.insert(0, str(ROOT / "tools" / "module"))
 sys.path.insert(0, str(ROOT / "tools" / "pipeline"))
 import stage_install  # noqa: E402
 from package_checks import cached_var, check_path_maps  # noqa: E402
+import make_appimage  # noqa: E402
 JOBS_DEFAULT = int(os.environ.get("DON_JOBS", "4"))
 
 
@@ -340,6 +342,8 @@ def package(stage: Path, args: argparse.Namespace, libs: Path, recomp: Path, too
     archive = args.out / f"don-linux-{args.version}.tar.gz"
     digest, size = stage_install.write_archive(stage, archive)
     print(f"{archive}\nsha256 {digest}\n{size} bytes")
+    if args.appimage:
+        make_appimage.make(archive, args.out)
     return archive
 
 
@@ -350,6 +354,7 @@ def main_() -> int:
     parser.add_argument("--from-builds", type=Path, help="package already built pieces (no build); see the module doc")
     parser.add_argument("--version", help="default: git describe --tags --always of HEAD")
     parser.add_argument("--out", type=Path, default=ROOT / "build" / "player", help="folder of the .tar.gz")
+    parser.add_argument("--appimage", action="store_true", help="also make the AppImage (tools/pipeline/make_appimage.py)")
     args = parser.parse_args()
     commit = out(["git", "-C", ROOT, "rev-parse", "HEAD"])
     args.version = args.version or out(["git", "-C", ROOT, "describe", "--tags", "--always"])

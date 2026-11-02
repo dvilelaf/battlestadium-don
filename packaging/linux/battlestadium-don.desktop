@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Battle Stadium D.O.N
+Comment=Battle Stadium D.O.N (PS2) for PC: bring your own disc image
+Exec=don
+Icon=battlestadium-don
+Terminal=false
+Categories=Game;
+StartupWMClass=don
