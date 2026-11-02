@@ -9,10 +9,12 @@ data, not the translated code. Each person generates it on their own machine fro
 
 ## Status
 
-**In progress.** The game boots and runs on Linux (menus, fights, videos, sound); a Windows cross-build exists and has only
-been run under Wine. Online play for up to 4 players is being finished (the start screen, the lobby and the net mode
-exist, not yet tried between two PCs), and the port needs a processor with **AVX2** (Intel 2013 or later, AMD Ryzen).
-The detail, task by task, is in [docs/STATUS.md](docs/STATUS.md). To build and run it from a fresh clone:
+**Version 1.0: playable on Linux and Windows.** Downloads (the program only, no game material) are on the
+[Releases](https://github.com/dvilelaf/battlestadium-don/releases) page: unpack, start the program and point it at your
+own disc image; the first run checks the image and prepares the game on your PC (about 5-15 minutes). Menus, fights,
+videos, sound, memory card and gamepads work. Online play for up to 4 players exists but has not been tried between two
+PCs yet. The port needs a 64-bit processor with **AVX2** (Intel 2013 or later, AMD Ryzen); on Windows, a graphics card with a Vulkan driver.
+The detail, task by task, is in [docs/STATUS.md](docs/STATUS.md). To build it from source:
 [docs/BUILDING.md](docs/BUILDING.md), then [docs/RUNNING.md](docs/RUNNING.md).
 
 ## Scope of the first stage
