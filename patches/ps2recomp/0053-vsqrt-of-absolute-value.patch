@@ -1,0 +1,23 @@
+Recompiler: vsqrt takes the square root of the absolute value.
+
+What it fixes: the emitted text was sqrtf(max(0, ft)), so a negative operand gave 0. The reference (VUops.cpp _vuSQRT) sets the
+status sign flag and takes sqrt(|ft|). The flag is not modelled by this runtime (the game reads it at one context-save site with no
+consumer); the quotient register is now right.
+
+How it was verified: tests/conformance family "vu0", vsqrt: 316 cases differed in Q besides the exponent-all-ones operands before,
+none after (the remaining differences are those operands, VU_NO_CLAMP in test_conformance.py).
+Sites in the game: 1 (0x1b805c). Whether a fight's 3D path takes a negative operand there is not measured.
+
+Original work for this repository (no code from another project).
+
+--- a/ps2xRecomp/src/lib/vu_translation_helpers.cpp
++++ b/ps2xRecomp/src/lib/vu_translation_helpers.cpp
+@@ -82,7 +82,7 @@
+     {
+         uint8_t ftf = inst.vectorInfo.ftf;
+         uint8_t ft_reg = inst.rt;
+-        return fmt::format("{{ float ft = _mm_cvtss_f32(_mm_shuffle_ps(ctx->vu0_vf[{}], ctx->vu0_vf[{}], _MM_SHUFFLE(0,0,0,{}))); ctx->vu0_q = sqrtf(std::max(0.0f, ft)); }}", ft_reg, ft_reg, ftf);
++        return fmt::format("{{ float ft = _mm_cvtss_f32(_mm_shuffle_ps(ctx->vu0_vf[{}], ctx->vu0_vf[{}], _MM_SHUFFLE(0,0,0,{}))); ctx->vu0_q = sqrtf(fabsf(ft)); }}", ft_reg, ft_reg, ftf);
+     }
+ 
+     std::string CodeGenerator::translateVU_VRSQRT(const Instruction &inst)

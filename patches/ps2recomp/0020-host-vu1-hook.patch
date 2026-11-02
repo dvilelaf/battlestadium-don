@@ -1,0 +1,491 @@
+Host VU1 hook: let the program that embeds the runtime supply the VU1 (the DON port connects PCSX2's microVU)
+
+What it fixes: the runtime always ran microprograms on its own VU1 interpreter. This adds an optional host
+VU1 (ps2xRuntime/include/runtime/ps2_host_vu1.h, PS2Runtime::setHostVu1 / PS2Memory::setHostVu1). VIF1 keeps
+being interpreted by the runtime; with a host VU1 bound:
+  - UNPACK writes land in the host's data memory (m_vu1Data aliases the pointer from data(), so the EE window at
+    0x1100C000 is the same memory);
+  - MPG (ps2_vif1_interpreter.cpp) and EE stores to the code window at 0x11008000 (write8..write128 in
+    ps2_memory.cpp) keep the runtime's code mirror and also call write_micro with the exact bytes and address;
+  - MSCAL / MSCALF call set_top(TOP, ITOP) then execute(pc_bytes, 65536); MSCNT calls execute(0xFFFFFFFF, ...);
+    while running() says the program is unfinished it is continued in 65536-cycle slices, at most 64 per command.
+    Returned cycle counts are only summed in a statistic; nothing depends on them;
+  - XGKICK packets are delivered by the host VU1 to a sink the runtime hands to thread_begin
+    (ps2HostVu1Xgkick), which calls PS2Memory::submitGifPacket(Path1) like the interpreter's XGKICK does, so with a
+    host GS (patch 0005) they are forwarded to it and without one they reach the runtime's own GS.
+Callbacks run on the game thread; begin/end are called next to the host GS thread_begin/thread_end
+(PS2Memory::beginHostVu1 / endHostVu1). Without a host VU1, or if data() returns null, nothing changes. Also adds
+PS2Memory::setVif1Tap: a callback that receives every chunk given to processVIF1Data, for recording a VIF1 stream.
+Not handled: the FBRST D/T-bit stops and the vpu_stat bits that the interpreter path sets after a start (the
+library API has no equivalent); VU0 is untouched.
+
+How it was verified: tests/runtime/host_vu1_hook_test.cpp (fake host VU1 and fake host GS; the same hand-built
+VIF1 stream run with and without the host: data memory, code mirror, starts, TOP/ITOP compared; call order;
+XGKICK on path 1 to a host GS and to the runtime's own GS; continuation; the memory windows; the tap; fallbacks),
+built from a tree with patches 0001-0009 plus this one, together with the five existing runtime tests. Not
+exercised: a real microVU, a real microprogram, a real PS2Runtime game thread.
+
+Based on: original code (the thread/threading wording mirrors patch 0005); the Killzone reference was only read.
+
+diff --git a/ps2xRuntime/include/ps2_runtime.h b/ps2xRuntime/include/ps2_runtime.h
+index 31975e5..705b1c1 100644
+--- a/ps2xRuntime/include/ps2_runtime.h
++++ b/ps2xRuntime/include/ps2_runtime.h
+@@ -483,6 +483,11 @@ public:
+     // gif_transfer) removes it. Call while the game thread is not running.
+     void setHostGs(const Ps2HostGs *host);
+     inline const Ps2HostGs *hostGs() const { return m_hostGs ? &m_hostGsStorage : nullptr; }
++    // Host VU1 (runtime/ps2_host_vu1.h): VIF1 stays in the runtime, microcode upload and microprogram
++    // execution go to the host. The struct is copied; nullptr (or one without data, write_micro and
++    // execute) removes it. Call while the game thread is not running. Its callbacks run on the game thread.
++    inline void setHostVu1(const Ps2HostVu1 *host) { m_memory.setHostVu1(host); }
++    inline const Ps2HostVu1 *hostVu1() const { return m_memory.hostVu1(); }
+     // Called by the EE scheduler at each vertical blank (game thread). Does nothing without a host GS.
+     void notifyHostGsVsync();
+     inline VU1Interpreter &vu0() { return m_vu0; }
+diff --git a/ps2xRuntime/include/runtime/ps2_host_vu1.h b/ps2xRuntime/include/runtime/ps2_host_vu1.h
+new file mode 100644
+index 0000000..e43a0c7
+--- /dev/null
++++ b/ps2xRuntime/include/runtime/ps2_host_vu1.h
+@@ -0,0 +1,117 @@
++#ifndef PS2_HOST_VU1_H
++#define PS2_HOST_VU1_H
++
++#include <cstdint>
++
++// Host VU1: an optional replacement for the runtime's own VU1 interpreter, installed by the program
++// that embeds the runtime with PS2Runtime::setHostVu1() (PS2Memory::setHostVu1() for tests). The DON
++// port connects PCSX2's microVU through src/vubridge/don_vu.h; the argument meanings and units of every
++// callback match that header (don_vu1_data, don_vu1_write_micro, don_vu1_set_top, don_vu1_execute,
++// don_vu1_continue, don_vu1_running, don_vu1_reset, don_vu1_set_regs, don_vu1_get_regs), so connecting
++// them is one line each.
++//
++// What stays in the runtime: VIF1 itself. The VIF1 interpreter (ps2_vif1_interpreter.cpp) still decodes
++// the command stream (STCYCL, OFFSET, BASE, ITOP, STMOD, STMASK, STROW, STCOL, MPG, UNPACK, FLUSH*,
++// MSCAL, MSCALF, MSCNT, DIRECT...) and keeps the VIF registers (TOPS, BASE, OFST, DBF...). With a host
++// VU1 installed and bound:
++//   * UNPACK writes land in the host's data memory (the pointer returned by data(), also the memory
++//     behind the EE-visible window at 0x1100C000), through the same code as without a host;
++//   * MPG uploads still update the runtime's mirror of the code memory (what the window at 0x11008000
++//     shows) and are also passed to write_micro; direct EE stores to that window are passed too;
++//   * MSCAL / MSCALF call execute(start_pc_bytes, ...), MSCNT calls execute(0xFFFFFFFF, ...), after
++//     set_top(TOP, ITOP) with the values the runtime's own VU1 would see in XTOP / XITOP;
++//   * XGKICK packets are delivered by the host VU1 to the sink that thread_begin receives, which hands
++//     them to the same GIF arbiter entry as the interpreter's XGKICK (path 1), so with a host GS they
++//     are forwarded to it and without one they reach the runtime's own GS.
++// Without a host VU1 (or if data() returns null) nothing changes: the runtime's interpreter runs.
++//
++// Threads: every callback is called on the game thread (the thread that runs the EE scheduler and with
++// it the DMA channels and the VIF1 FIFO; the same thread as the Ps2HostGs callbacks), never
++// concurrently, and the XGKICK sink is called on that thread from inside execute / continue_. A library
++// that must be opened and used on one thread (microVU) is opened in thread_begin and closed in
++// thread_end. thread_begin is called before data(); install/uninstall must happen while the game
++// thread is not running.
++//
++// Timing: the runtime does not model VU1 time. It gives each start (MSCAL/MSCNT) a budget of
++// PS2_HOST_VU1_SLICE_CYCLES cycles, the same figure the interpreter path uses, and then, while
++// running() says the program is not finished, continues it with the same budget, up to
++// PS2_HOST_VU1_MAX_SLICES slices per command. The returned cycle counts are only added to a statistic
++// (PS2Memory::hostVu1Stats()): nothing depends on their value, so engines that count differently
++// behave the same. A program still unfinished after the last slice is left suspended (as the runtime's
++// interpreter leaves it): the host library finishes it before it starts the next one.
++//
++// Everything except data, write_micro and execute may be null.
++
++#define PS2_HOST_VU1_SLICE_CYCLES 65536u
++#define PS2_HOST_VU1_MAX_SLICES 64u
++#define PS2_HOST_VU1_CONTINUE_PC 0xFFFFFFFFu // execute() start address of MSCNT: continue at the current TPC
++
++// Receives one complete GIF packet (tags and data up to and including the EOP tag, contiguous, a
++// multiple of 16 bytes, valid only during the call).
++typedef void (*Ps2HostVu1XgkickFn)(void *user, const uint8_t *packet, uint32_t bytes);
++
++// The XGKICK sink the runtime supplies: `user` is the PS2Memory (given to thread_begin). It submits the
++// packet on GIF path 1 and drains the arbiter, exactly like the interpreter's XGKICK.
++void ps2HostVu1Xgkick(void *memory, const uint8_t *packet, uint32_t bytes);
++
++struct Ps2HostVu1
++{
++    // Passed back as the first argument of every callback.
++    void *user = nullptr;
++
++    // Game thread, before the first guest instruction (thread_begin) and after the guest scheduler
++    // returns (thread_end). thread_begin receives the XGKICK sink and its user pointer: pass them to the
++    // library when opening it (don_vu1_open(sink, sink_user)). Optional.
++    void (*thread_begin)(void *user, Ps2HostVu1XgkickFn xgkick, void *xgkick_user) = nullptr;
++    void (*thread_end)(void *user) = nullptr;
++
++    // The 16 KiB of VU1 data memory (1024 quadwords) that UNPACK writes into. Valid after thread_begin.
++    // The runtime keeps using the returned pointer until thread_end. Required.
++    uint8_t *(*data)(void *user) = nullptr;
++
++    // Microcode upload: bytes at byte address addr_bytes of the 16 KiB code memory (VIF1 MPG, and EE
++    // stores to the code window). Required.
++    void (*write_micro)(void *user, uint32_t addr_bytes, const uint8_t *data, uint32_t bytes) = nullptr;
++
++    // The VIF1 TOP and ITOP registers (10 bits each) that XTOP / XITOP read, set before every start.
++    void (*set_top)(void *user, uint32_t top, uint32_t itop) = nullptr;
++
++    // Start a microprogram at byte address start_pc_bytes (MSCAL, MSCALF), or at the current TPC when it
++    // is PS2_HOST_VU1_CONTINUE_PC (MSCNT). Runs to its end or until about max_cycles have been used.
++    // Returns the cycles used. Required.
++    uint32_t (*execute)(void *user, uint32_t start_pc_bytes, uint32_t max_cycles) = nullptr;
++
++    // Continue a program that execute / continue_ stopped because of the budget. Returns cycles used.
++    uint32_t (*continue_)(void *user, uint32_t max_cycles) = nullptr;
++
++    // Nonzero while a program is stopped by its budget (VPU_STAT bit 8).
++    int (*running)(void *user) = nullptr;
++
++    // Reset registers and pipeline state (memories kept). Called once, right after thread_begin.
++    void (*reset)(void *user) = nullptr;
++
++    // Direct access to the registers: vf is 32 x 4 uint32, vi is 32 uint32 in the VU control register
++    // order (see don_vu.h). The runtime itself reads and writes none of them (the VIF only touches
++    // TOP/ITOP, passed with set_top); they are here for the host, tests and debuggers, through
++    // PS2Memory::hostVu1(). Optional.
++    void (*set_regs)(void *user, const void *vf, const void *vi) = nullptr;
++    void (*get_regs)(void *user, void *vf, void *vi) = nullptr;
++};
++
++// Counters of the host VU1 path (game thread only; read them when the game thread is not running).
++struct Ps2HostVu1Stats
++{
++    uint64_t executes = 0;       // MSCAL / MSCALF / MSCNT delegated to execute()
++    uint64_t continues = 0;      // continue_() slices
++    uint64_t cycles = 0;         // sum of the cycles returned (an engine-specific figure)
++    uint64_t unfinished = 0;     // starts still running after PS2_HOST_VU1_MAX_SLICES slices
++    uint64_t microWrites = 0;    // write_micro calls
++};
++
++// Receives each chunk handed to the VIF1 interpreter (DMA channel 1 data, FIFO writes), before it is
++// interpreted, one call per processVIF1Data call. Replaying the chunks, in order and with the same
++// sizes, through PS2Memory::processVIF1Data reproduces the stream. Works with or without a host VU1.
++// The data is valid only during the call.
++typedef void (*Ps2Vif1TapFn)(void *user, const uint8_t *data, uint32_t bytes);
++
++#endif
+diff --git a/ps2xRuntime/include/runtime/ps2_memory.h b/ps2xRuntime/include/runtime/ps2_memory.h
+index ea86a9c..44413d1 100644
+--- a/ps2xRuntime/include/runtime/ps2_memory.h
++++ b/ps2xRuntime/include/runtime/ps2_memory.h
+@@ -12,6 +12,7 @@
+ #include <mutex>
+ 
+ #include "gs/ps2_gif_arbiter.h"
++#include "ps2_host_vu1.h"
+ #if defined(_MSC_VER)
+ #include <intrin.h>
+ #elif defined(USE_SSE2NEON)
+@@ -322,6 +323,23 @@ public:
+     using Vu1MscntCallback = std::function<void(uint32_t top, uint32_t itop)>;
+     void setVu1MscntCallback(Vu1MscntCallback cb) { m_vu1MscntCallback = std::move(cb); }
+ 
++    // Host VU1 (ps2_host_vu1.h). The struct is copied; nullptr (or a struct without data, write_micro or
++    // execute) removes it. Call while the game thread is not running. beginHostVu1 / endHostVu1 are called
++    // by PS2Runtime on the game thread (tests call them directly): begin calls thread_begin, binds the
++    // data memory and resets the host VU1; end takes the data memory back and calls thread_end.
++    void setHostVu1(const Ps2HostVu1 *host);
++    const Ps2HostVu1 *hostVu1() const { return m_hostVu1Installed ? &m_hostVu1 : nullptr; }
++    bool hostVu1Bound() const { return m_hostVu1Bound; }
++    void beginHostVu1();
++    void endHostVu1();
++    const Ps2HostVu1Stats &hostVu1Stats() const { return m_hostVu1Stats; }
++    // Tap on the VIF1 stream (ps2_host_vu1.h, Ps2Vif1TapFn). nullptr removes it.
++    void setVif1Tap(Ps2Vif1TapFn tap, void *user)
++    {
++        m_vif1Tap = tap;
++        m_vif1TapUser = user;
++    }
++
+     uint8_t *getVU1Code() { return m_vu1Code; }
+     const uint8_t *getVU1Code() const { return m_vu1Code; }
+     uint8_t *getVU1Data() { return m_vu1Data; }
+@@ -405,7 +423,15 @@ public:
+     uint8_t *m_vu0Code = nullptr;
+     uint8_t *m_vu0Data = nullptr;
+     uint8_t *m_vu1Code = nullptr;
+-    uint8_t *m_vu1Data = nullptr;
++    uint8_t *m_vu1Data = nullptr; // the VU1 data memory in use: m_vu1DataOwned, or the host VU1's while bound
++    uint8_t *m_vu1DataOwned = nullptr;
++    Ps2HostVu1 m_hostVu1;
++    bool m_hostVu1Installed = false;
++    bool m_hostVu1Begun = false; // thread_begin was called
++    bool m_hostVu1Bound = false; // data memory aliased, MPG / MSCAL / MSCNT delegated
++    Ps2HostVu1Stats m_hostVu1Stats;
++    Ps2Vif1TapFn m_vif1Tap = nullptr;
++    void *m_vif1TapUser = nullptr;
+     bool m_path3Masked = false;
+     uint32_t m_vif1PendingPath2ImageQwc = 0u;
+     bool m_vif1PendingPath2DirectHl = false;
+@@ -436,6 +462,11 @@ public:
+     void markModified(uint32_t address, uint32_t size);
+     void markVU0CodeModified() { m_vu0CodeGeneration.fetch_add(1, std::memory_order_relaxed); }
+     void markVU1CodeModified() { m_vu1CodeGeneration.fetch_add(1, std::memory_order_relaxed); }
++    // The bytes [offset, offset + bytes) of the VU1 code memory (the runtime's mirror) were written: bump the
++    // generation and, with a bound host VU1, pass them on to write_micro.
++    void vu1CodeWritten(uint32_t offset, uint32_t bytes);
++    // MSCAL / MSCALF (startPC in bytes) and MSCNT (PS2_HOST_VU1_CONTINUE_PC) with a bound host VU1.
++    void runHostVu1(uint32_t startPC, uint32_t top, uint32_t itop);
+     bool isScratchpad(uint32_t address) const;
+     uint8_t *mapVuMemory(uint32_t physAddr, uint32_t size, uint32_t &offset, uint32_t &limit);
+     const uint8_t *mapVuMemory(uint32_t physAddr, uint32_t size, uint32_t &offset, uint32_t &limit) const;
+diff --git a/ps2xRuntime/src/lib/ps2_memory.cpp b/ps2xRuntime/src/lib/ps2_memory.cpp
+index 559b959..f4bbfef 100644
+--- a/ps2xRuntime/src/lib/ps2_memory.cpp
++++ b/ps2xRuntime/src/lib/ps2_memory.cpp
+@@ -271,11 +271,13 @@ PS2Memory::~PS2Memory()
+         delete[] m_vu1Code;
+         m_vu1Code = nullptr;
+     }
+-    if (m_vu1Data)
++    if (m_vu1DataOwned)
+     {
+-        delete[] m_vu1Data;
+-        m_vu1Data = nullptr;
++        delete[] m_vu1DataOwned;
++        m_vu1DataOwned = nullptr;
+     }
++    m_vu1Data = nullptr;
++    m_hostVu1Bound = false;
+     if (m_vu0Code)
+     {
+         delete[] m_vu0Code;
+@@ -305,7 +307,9 @@ bool PS2Memory::initialize(size_t ramSize)
+         delete[] m_vu0Code;
+         delete[] m_vu0Data;
+         delete[] m_vu1Code;
+-        delete[] m_vu1Data;
++        delete[] m_vu1DataOwned;
++        m_vu1DataOwned = nullptr;
++        m_hostVu1Bound = false;
+         m_rdram = nullptr;
+         m_scratchpad = nullptr;
+         ps2SetScratchpadHostPtr(nullptr);
+@@ -377,7 +381,8 @@ bool PS2Memory::initialize(size_t ramSize)
+         std::memset(m_vu0Data, 0, PS2_VU0_DATA_SIZE);
+ 
+         m_vu1Code = new uint8_t[PS2_VU1_CODE_SIZE];
+-        m_vu1Data = new uint8_t[PS2_VU1_DATA_SIZE];
++        m_vu1DataOwned = new uint8_t[PS2_VU1_DATA_SIZE];
++        m_vu1Data = m_vu1DataOwned;
+         std::memset(m_vu1Code, 0, PS2_VU1_CODE_SIZE);
+         std::memset(m_vu1Data, 0, PS2_VU1_DATA_SIZE);
+         markVU0CodeModified();
+@@ -888,7 +893,7 @@ void PS2Memory::write8(uint32_t address, uint8_t value)
+             if (vuMem == m_vu0Code)
+                 markVU0CodeModified();
+             else if (vuMem == m_vu1Code)
+-                markVU1CodeModified();
++                vu1CodeWritten(vuOffset, 1);
+             return;
+         }
+     }
+@@ -931,7 +936,7 @@ void PS2Memory::write16(uint32_t address, uint16_t value)
+             if (vuMem == m_vu0Code)
+                 markVU0CodeModified();
+             else if (vuMem == m_vu1Code)
+-                markVU1CodeModified();
++                vu1CodeWritten(vuOffset, 2);
+             return;
+         }
+     }
+@@ -997,7 +1002,7 @@ void PS2Memory::write32(uint32_t address, uint32_t value)
+             if (vuMem == m_vu0Code)
+                 markVU0CodeModified();
+             else if (vuMem == m_vu1Code)
+-                markVU1CodeModified();
++                vu1CodeWritten(vuOffset, 4);
+             return;
+         }
+     }
+@@ -1054,7 +1059,7 @@ void PS2Memory::write64(uint32_t address, uint64_t value)
+             if (vuMem == m_vu0Code)
+                 markVU0CodeModified();
+             else if (vuMem == m_vu1Code)
+-                markVU1CodeModified();
++                vu1CodeWritten(vuOffset, 8);
+             return;
+         }
+     }
+@@ -1112,7 +1117,7 @@ void PS2Memory::write128(uint32_t address, __m128i value)
+             if (vuMem == m_vu0Code)
+                 markVU0CodeModified();
+             else if (vuMem == m_vu1Code)
+-                markVU1CodeModified();
++                vu1CodeWritten(vuOffset, 16);
+             return;
+         }
+     }
+@@ -2549,3 +2554,105 @@ void PS2Memory::clearModifiedFlag(uint32_t address, uint32_t size)
+         }
+     }
+ }
++
++// ---- Host VU1 (ps2_host_vu1.h) ---------------------------------------------------------------------
++
++void ps2HostVu1Xgkick(void *memory, const uint8_t *packet, uint32_t bytes)
++{
++    // The same entry the runtime's interpreter uses for XGKICK (PATH1, drained immediately).
++    if (memory)
++        static_cast<PS2Memory *>(memory)->submitGifPacket(GifPathId::Path1, packet, bytes);
++}
++
++void PS2Memory::setHostVu1(const Ps2HostVu1 *host)
++{
++    if (m_hostVu1Installed)
++        endHostVu1();
++    if (host && host->data && host->write_micro && host->execute)
++    {
++        m_hostVu1 = *host;
++        m_hostVu1Installed = true;
++    }
++    else
++    {
++        m_hostVu1 = Ps2HostVu1{};
++        m_hostVu1Installed = false;
++    }
++}
++
++void PS2Memory::beginHostVu1()
++{
++    if (!m_hostVu1Installed || m_hostVu1Begun)
++        return;
++    m_hostVu1Begun = true;
++    if (m_hostVu1.thread_begin)
++        m_hostVu1.thread_begin(m_hostVu1.user, &ps2HostVu1Xgkick, this);
++    uint8_t *hostData = m_hostVu1.data(m_hostVu1.user);
++    if (!hostData || !m_vu1DataOwned)
++        return; // stays on the runtime's interpreter
++    if (m_hostVu1.reset)
++        m_hostVu1.reset(m_hostVu1.user);
++    // Carry over what is already in the runtime's memories (normally zero: this runs before any guest code).
++    std::memcpy(hostData, m_vu1DataOwned, PS2_VU1_DATA_SIZE);
++    for (uint32_t i = 0; i < PS2_VU1_CODE_SIZE; ++i)
++    {
++        if (m_vu1Code && m_vu1Code[i] != 0)
++        {
++            m_hostVu1.write_micro(m_hostVu1.user, 0, m_vu1Code, PS2_VU1_CODE_SIZE);
++            ++m_hostVu1Stats.microWrites;
++            break;
++        }
++    }
++    m_vu1Data = hostData;
++    m_hostVu1Bound = true;
++}
++
++void PS2Memory::endHostVu1()
++{
++    if (!m_hostVu1Begun)
++        return;
++    if (m_hostVu1Bound)
++    {
++        // Take the data memory back before the library is closed (its pointer dies in thread_end).
++        if (m_vu1DataOwned && m_vu1Data)
++            std::memcpy(m_vu1DataOwned, m_vu1Data, PS2_VU1_DATA_SIZE);
++        m_vu1Data = m_vu1DataOwned;
++        m_hostVu1Bound = false;
++    }
++    m_hostVu1Begun = false;
++    if (m_hostVu1.thread_end)
++        m_hostVu1.thread_end(m_hostVu1.user);
++}
++
++void PS2Memory::vu1CodeWritten(uint32_t offset, uint32_t bytes)
++{
++    markVU1CodeModified();
++    if (m_hostVu1Bound && m_vu1Code && offset < PS2_VU1_CODE_SIZE)
++    {
++        if (bytes > PS2_VU1_CODE_SIZE - offset)
++            bytes = PS2_VU1_CODE_SIZE - offset;
++        m_hostVu1.write_micro(m_hostVu1.user, offset, m_vu1Code + offset, bytes);
++        ++m_hostVu1Stats.microWrites;
++    }
++}
++
++void PS2Memory::runHostVu1(uint32_t startPC, uint32_t top, uint32_t itop)
++{
++    if (m_hostVu1.set_top)
++        m_hostVu1.set_top(m_hostVu1.user, top, itop);
++    m_hostVu1Stats.cycles += m_hostVu1.execute(m_hostVu1.user, startPC, PS2_HOST_VU1_SLICE_CYCLES);
++    ++m_hostVu1Stats.executes;
++    // Only the host's own "still running" answer decides whether to go on, never the cycle count.
++    uint32_t slices = 1;
++    while (m_hostVu1.continue_ && m_hostVu1.running && m_hostVu1.running(m_hostVu1.user))
++    {
++        if (slices >= PS2_HOST_VU1_MAX_SLICES)
++        {
++            ++m_hostVu1Stats.unfinished;
++            break;
++        }
++        m_hostVu1Stats.cycles += m_hostVu1.continue_(m_hostVu1.user, PS2_HOST_VU1_SLICE_CYCLES);
++        ++m_hostVu1Stats.continues;
++        ++slices;
++    }
++}
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index e791014..6ad4aae 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -2447,6 +2447,7 @@ bool PS2Runtime::startGameThread()
+         ThreadNaming::SetCurrentThreadName("GameThread");
+         if (m_hostGs && m_hostGsStorage.thread_begin)
+             m_hostGsStorage.thread_begin(m_hostGsStorage.user);
++        m_memory.beginHostVu1(); // after the host GS: XGKICK output goes to it
+         try
+         {
+             m_eeScheduler->reset(m_memory.getRDRAM(), m_cpuContext);
+@@ -2471,6 +2472,7 @@ bool PS2Runtime::startGameThread()
+             std::cerr << "Error during program execution: unknown exception" << std::endl;
+             m_gameThreadFailed.store(true, std::memory_order_release);
+         }
++        m_memory.endHostVu1();
+         if (m_hostGs && m_hostGsStorage.thread_end)
+             m_hostGsStorage.thread_end(m_hostGsStorage.user);
+         m_gameThreadFinished.store(true, std::memory_order_release); });
+diff --git a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+index b02c7ca..536f77c 100644
+--- a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
++++ b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+@@ -300,6 +300,9 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+     if (sizeBytes == 0u)
+         return;
+ 
++    if (m_vif1Tap)
++        m_vif1Tap(m_vif1TapUser, data, sizeBytes);
++
+     uint32_t pos = 0;
+ 
+     while (pos + 4 <= sizeBytes)
+@@ -416,7 +419,9 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+                 vif1_regs.tops = (vif1_regs.base + vif1_regs.ofst) & 0x3FFu;
+             vif1_regs.stat ^= (1u << 7); // toggle DBF
+ 
+-            if (m_vu1MscalCallback)
++            if (m_hostVu1Bound)
++                runHostVu1(startPC, runTop, runItop);
++            else if (m_vu1MscalCallback)
+                 m_vu1MscalCallback(startPC, runTop, runItop);
+             continue;
+         }
+@@ -434,7 +439,9 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+                 vif1_regs.tops = (vif1_regs.base + vif1_regs.ofst) & 0x3FFu;
+             vif1_regs.stat ^= (1u << 7); // toggle DBF
+ 
+-            if (m_vu1MscntCallback)
++            if (m_hostVu1Bound)
++                runHostVu1(PS2_HOST_VU1_CONTINUE_PC, runTop, runItop);
++            else if (m_vu1MscntCallback)
+                 m_vu1MscntCallback(runTop, runItop);
+             continue;
+         }
+@@ -477,7 +484,7 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+                 if (pos + copyBytes <= sizeBytes)
+                 {
+                     std::memcpy(m_vu1Code + destAddr, data + pos, copyBytes);
+-                    markVU1CodeModified();
++                    vu1CodeWritten(destAddr, copyBytes);
+                 }
+             }
+             pos += mpgBytes;

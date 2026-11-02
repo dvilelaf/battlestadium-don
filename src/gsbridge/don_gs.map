@@ -1,0 +1,8 @@
+/* Exports of libdon_gs.so on Linux: only the C API. Everything else, including the PCSX2
+   objects and the static libraries linked into it, stays internal. */
+{
+  global:
+    don_gs_*;
+  local:
+    *;
+};

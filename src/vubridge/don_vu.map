@@ -1,0 +1,7 @@
+/* Exports of libdon_vu.so on Linux: only the C API. */
+{
+  global:
+    don_vu*;
+  local:
+    *;
+};

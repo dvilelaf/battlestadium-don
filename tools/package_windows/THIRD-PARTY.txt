@@ -1,0 +1,37 @@
+Third-party libraries in this folder
+====================================
+The port itself: GPL-3.0-or-later (LICENSE). Its source and build scripts: see SOURCE in README.txt.
+gs\don_gs.dll contains code of PCSX2 (GPL-3.0-or-later; the GS, plus our patches in patches\pcsx2\ of the
+source); vu\don_vu.dll contains PCSX2's microVU / VU interpreter (GPL-3.0-or-later); don.exe and
+spu2\don_spu2.dll contain PS2Recomp (GPL-3.0, with our patches in patches\ps2recomp\) and PCSX2's SPU2 code
+(GPL-3.0-or-later). Sources: https://github.com/PCSX2/pcsx2 and https://github.com/ran-j/PS2Recomp
+(the exact commits are pinned in the repository's tools\setup scripts).
+
+Dependency libraries (built from source by tools\setup\build_win_deps.sh with the versions pinned there):
+
+ SDL3.dll                      zlib licence         https://libsdl.org
+ z.dll (zlib)                  zlib licence         https://github.com/madler/zlib
+ libpng16.dll                  libpng licence       https://libpng.org (with the APNG patch)
+ jpeg62.dll, turbojpeg.dll     BSD-3 / IJG / zlib   https://github.com/libjpeg-turbo/libjpeg-turbo
+ lz4.dll                       BSD-2 (library)      https://github.com/lz4/lz4
+ zstd.dll                      BSD-3 (or GPLv2)     https://github.com/facebook/zstd
+ libwebp.dll, libwebpdecoder.dll, libwebpdemux.dll, libwebpmux.dll, libsharpyuv.dll
+                               BSD-3                https://chromium.googlesource.com/webm/libwebp
+ freetype.dll                  FreeType licence     https://freetype.org
+ plutovg.dll, plutosvg.dll     MIT                  https://github.com/sammycage/plutovg , plutosvg
+ ryml.dll, c4core.dll          MIT                  https://github.com/biojppm/rapidyaml
+ shaderc_shared.dll            Apache-2.0           https://github.com/google/shaderc (with glslang,
+                                                    SPIRV-Tools, SPIRV-Headers: Apache-2.0 / BSD)
+
+ FFmpeg 7.1.1 (in don.exe)     LGPL-2.1-or-later   https://ffmpeg.org (unmodified official tarball, SHA-256 pinned in
+                                                    tools\setup\build_ffmpeg_windows.sh; built there with no --enable-gpl,
+                                                    no --enable-nonfree and no external libraries; statically linked; only
+                                                    the MPEG-1/2 video decoder, its parser and the MPEG-PS demuxer are in it)
+
+gs\resources\ is PCSX2's resources folder (shaders, fonts, icons, databases: GPL-3.0 and the licences of
+the fonts and icons inside it; see the PCSX2 source).
+
+Microsoft Visual C++ runtime DLLs (msvcp140.dll, msvcp140_atomic_wait.dll, vcruntime140.dll, vcruntime140_1.dll) are
+in this folder, beside the program. They are Microsoft's files, unmodified, from the Visual C++ 2015-2022 x64
+Redistributable, and are redistributed under Microsoft's terms (licenses\Microsoft-VCRedist-license.rtf), not under
+the GPL. The Windows UCRT (ucrtbase.dll, api-ms-win-crt-*) is part of Windows 10 and later and is not in this folder.

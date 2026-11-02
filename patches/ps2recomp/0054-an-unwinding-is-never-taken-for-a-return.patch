@@ -1,0 +1,94 @@
+# 0054-an-unwinding-is-never-taken-for-a-return: once a checkpoint has answered "due", no generated caller
+# takes a callee's return for a normal return until the scheduler's run loop has had its turn
+#
+# What it fixes: the fight stop at blank 7076 of the journal 026 reproduction (docs/journal/026, 027, 028,
+# 029). PS2Runtime::dispatchGuestBranch ends with "if the callee came back with pc equal to its own entry,
+# treat it as returned" (meant for native stubs that return without setting pc). A checkpoint that is due at
+# a nested dispatch makes dispatchGuestBranch return false with ctx->pc = the callee's entry, and every
+# generated caller up the host stack returns in turn. When that pc equals the entry of a callee that is
+# ACTIVE further up the host stack (guest recursion: FUN_002D48D0 -> FUN_002D4240 -> FUN_002D48D0 behind the
+# game's re-entry guard), the level that called that callee saw "pc == my callee's entry", set pc to its
+# fall-through and went on with its own code on the unwound callee's registers and stack pointer; its
+# epilogue then returned to a callee-saved register spilled in the wrong frame (FUN_002E1CD8, the callback
+# pointer kept in s2 by FUN_002C9CC0) and the main thread looped through FUN_002E1CD8 for ever.
+#
+# What it changes: EeScheduler::checkpointDue sets a flag when it answers "due" (the generated back-edge
+# check eeCheckpointDue() goes through it too); the run loop clears it right before it calls a guest
+# function; dispatchGuestBranch returns false after a callee comes back while the flag is set, whatever pc
+# holds. One byte load on the path after every call. Native stubs are unaffected: the flag is only set while
+# unwinding, and nothing runs guest code between the answer and the run loop.
+#
+# How it was verified: tests/runtime/unwind_not_return_test.cpp (a guest with mutual recursion behind a
+# guard, spilled code addresses, a loop, an indirect call and a native function; a checkpoint forced due at
+# every dispatch in turn): unpatched 6 of 32 forced checkpoints end in another state, patched 0. In the game,
+# a temporary print showed the rule firing on an unwinding once, at blank 7076, entry 0x2D48D0. The fight
+# run: see journal 029.
+#
+# Not covered: a checkpoint due exactly at the dispatch of a native function that never sets pc makes the
+# scheduler call it as the resume address, and it returns with pc unchanged, so it is called again, forever
+# (the test avoids that dispatch). Not related to this patch; not known to happen in the game.
+#
+diff --git a/ps2xRuntime/include/runtime/ee_scheduler.h b/ps2xRuntime/include/runtime/ee_scheduler.h
+index 9a8ba4b..a7b00b4 100644
+--- a/ps2xRuntime/include/runtime/ee_scheduler.h
++++ b/ps2xRuntime/include/runtime/ee_scheduler.h
+@@ -311,6 +311,10 @@ public:
+     void requestStop();
+     void postEvent(EeEvent event);
+     [[nodiscard]] bool checkpointDue(uint32_t cycles = kGeneratedCheckpointCycles) noexcept;
++    // Patch 0054: true from the moment a checkpoint has answered "due" until the run loop is about to call
++    // a guest function again. While it is true the host stack is being unwound to the run loop and no
++    // generated caller may take a callee's return for a normal return.
++    [[nodiscard]] bool unwinding() const noexcept { return m_unwinding; }
+     void accountCycles(uint32_t cycles) noexcept;
+     [[nodiscard]] bool isExecutingGuest() const noexcept;
+ 
+@@ -496,6 +500,7 @@ private:
+     uint64_t m_nextFastPathCycle = 0;
+     // Patch 0041: a queued interrupt handler is waiting for the running context to enable interrupts.
+     bool m_interruptsDeferred = false;
++    bool m_unwinding = false;
+     uint64_t m_dispatchCount = 0;
+     uint64_t m_fastPathCount = 0;
+     uint64_t m_slowPathCount = 0;
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index d9aa8b3..518ab13 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -330,6 +330,7 @@ void EeScheduler::run()
+         try
+         {
+             m_insideInterrupt = !running->invocations.empty() && running->invocations.back().kind == GuestInvocationKind::Interrupt;
++            m_unwinding = false; // the unwinding (if any) has reached the run loop
+             m_guestExecuting.store(true, std::memory_order_release);
+             function(m_rdram, &context, &m_runtime);
+             m_guestExecuting.store(false, std::memory_order_release);
+@@ -404,7 +405,9 @@ bool EeScheduler::checkpointDue(uint32_t cycles) noexcept
+         ++m_fastPathCount;
+         return false;
+     }
+-    return slowPathCheckpoint();
++    const bool due = slowPathCheckpoint();
++    m_unwinding = due;
++    return due;
+ }
+ 
+ bool EeScheduler::slowPathCheckpoint() noexcept
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index c9b163b..acd5a87 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -1464,6 +1464,13 @@ bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
+         return false;
+     }
+ 
++    // Patch 0054: a checkpoint answered "due" somewhere below: ctx->pc is where the guest resumes, not the
++    // callee's return, even when it equals this callee's entry (a recursive call being unwound).
++    if (m_eeScheduler && m_eeScheduler->unwinding())
++    {
++        return false;
++    }
++
+     if (ctx->pc == entryPc)
+     {
+         ctx->pc = fallthroughPc;

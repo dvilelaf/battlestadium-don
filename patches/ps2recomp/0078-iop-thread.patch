@@ -1,0 +1,281 @@
+Patch 0078: the rest of the IOP thread, on top of 0077 (off by default: DON_IOP_THREAD=1 enables it).
+What it adds to the worker that 0077 introduced: the thread is named "IopThread"; DON_IOP_STRESS_US=<n> makes it sleep
+0..n us (random, time-seeded) before each slice, to prove the result does not depend on host timing (off by default, no
+cost when off); and the SPU2 hooks: the library allows every call but the host pull only from the thread that opened
+it, so IopHostSpu2 gains optional thread_begin/thread_end, called by the worker (the host sets them in
+src/host/spu2_glue.cpp), and the host adapter (ps2_iop_host.*) is completed for calls that come from the worker
+(audioCommand/memoryCard/allocateGuest/freeGuest refuse and log if they are ever reached from it).
+Design (all of it, 0077 + 0078): the IOP runs slice N (one EE batch, 2048 EE cycles) while the EE runs slice N+1; what the
+IOP does to the EE (writeGuest, zeroGuest, sendSifCommand) is queued while it runs on the worker and applied in order by
+the EE thread at the next boundary and at every EE->IOP entry, so the result depends on emulated cycles only.
+Verified: perf_fight.py with DON_IOP_THREAD=1 reached 7800 blanks with the same state hash as the inline path (once);
+GameThread 17.83 -> ~10.5 ms per blank.
+NOT verified yet: that two runs give the same hash; a run with the stress delay; that the SPU2 hook is free of races
+with the host audio side. Original work, GPL-3.0.
+
+diff --git a/ps2xIOP/include/ps2x/iop/iop_host_spu2.h b/ps2xIOP/include/ps2x/iop/iop_host_spu2.h
+index 9d58326..dc0c5ba 100644
+--- a/ps2xIOP/include/ps2x/iop/iop_host_spu2.h
++++ b/ps2xIOP/include/ps2x/iop/iop_host_spu2.h
+@@ -34,7 +34,7 @@
+ // Units and meanings match src/spu2bridge/don_spu2.h of this repository, so the glue is one line per callback
+ // (type: 1 = SPU2 interrupt, 4 = end of the core 0 DMA, 7 = end of the core 1 DMA).
+ //
+-// Threading: all callbacks are called from the thread that runs the IOP. Install and remove from that thread
++// Threading: all callbacks are called from the thread that runs the IOP (the IOP worker with DON_IOP_THREAD=1). Install and remove from that thread
+ // while the IOP is not running. One host SPU2 per process.
+ namespace ps2x::iop
+ {
+@@ -61,6 +61,12 @@ namespace ps2x::iop
+         // Optional. Called when the IOP emulator is reset (module state, RAM and cycle counter go back to 0).
+         void (*reset)(void *user) = nullptr;
+ 
++        // Optional (patch 0078). With the IOP on its own thread the library's owner thread has to be that thread: the
++        // runtime calls thread_begin on it before its first slice and thread_end after its last one (neither is
++        // called when the IOP runs inline on the host's game thread, which opens and closes the library itself).
++        void (*thread_begin)(void *user) = nullptr;
++        void (*thread_end)(void *user) = nullptr;
++
+         // Longest idle skip, in IOP cycles, while the host SPU2 is installed. 0 = the default (768 * 32, 32
+         // audio frames, about 0.67 ms).
+         uint64_t max_idle_cycles = 0;
+diff --git a/ps2xRuntime/src/lib/ps2_iop_host.cpp b/ps2xRuntime/src/lib/ps2_iop_host.cpp
+index d380a3e..72378e5 100644
+--- a/ps2xRuntime/src/lib/ps2_iop_host.cpp
++++ b/ps2xRuntime/src/lib/ps2_iop_host.cpp
+@@ -104,7 +104,7 @@ PS2IopHostAdapter::CallScope PS2IopHostAdapter::enterCall(R5900Context *context,
+ bool PS2IopHostAdapter::guestRange(uint32_t address, size_t size, uint8_t *&begin) const
+ {
+     begin = nullptr;
+-    uint8_t *const rdram = m_activeRdram
++    uint8_t *const rdram = (m_activeRdram && !g_ps2OnIopThread)
+                                ? m_activeRdram
+                                : m_runtime.memory().getRDRAM();
+     if (!rdram)
+@@ -159,6 +159,16 @@ bool PS2IopHostAdapter::writeGuest(uint32_t address, const void *source, size_t
+     {
+         return false;
+     }
++    if (size != 0 && g_ps2OnIopThread)
++    {
++        DeferredOp op;
++        op.kind = DeferredOp::Write;
++        op.address = address;
++        op.size = size;
++        op.data.assign(static_cast<const uint8_t *>(source), static_cast<const uint8_t *>(source) + size);
++        m_deferred.push_back(std::move(op));
++        return true;
++    }
+     if (size != 0)
+     {
+         uint8_t *const rdram = m_activeRdram ? m_activeRdram : m_runtime.memory().getRDRAM();
+@@ -175,6 +185,15 @@ bool PS2IopHostAdapter::zeroGuest(uint32_t address, size_t size)
+     {
+         return false;
+     }
++    if (size != 0 && g_ps2OnIopThread)
++    {
++        DeferredOp op;
++        op.kind = DeferredOp::Zero;
++        op.address = address;
++        op.size = size;
++        m_deferred.push_back(std::move(op));
++        return true;
++    }
+     if (size != 0)
+     {
+         uint8_t *const rdram = m_activeRdram ? m_activeRdram : m_runtime.memory().getRDRAM();
+@@ -237,11 +256,23 @@ uint32_t PS2IopHostAdapter::allocateIopHandle(ps2x::iop::IopHandleKind kind)
+ 
+ uint32_t PS2IopHostAdapter::allocateGuest(uint32_t size, uint32_t alignment)
+ {
++    // Patch 0078: no IOP code calls allocateGuest/freeGuest (only the interface declares them, iop_host.h:94-95). The
++    // guest heap is EE-side state whose order must not depend on host timing, so the worker may never reach it.
++    if (g_ps2OnIopThread)
++    {
++        std::fprintf(stderr, "[don] allocateGuest reached from the IOP thread (size=%u): refused\n", size);
++        return 0u;
++    }
+     return m_runtime.guestMalloc(size, alignment);
+ }
+ 
+ void PS2IopHostAdapter::freeGuest(uint32_t address)
+ {
++    if (g_ps2OnIopThread)
++    {
++        std::fprintf(stderr, "[don] freeGuest reached from the IOP thread (0x%08x): ignored\n", address);
++        return;
++    }
+     m_runtime.guestFree(address);
+ }
+ 
+@@ -250,6 +281,14 @@ void PS2IopHostAdapter::audioCommand(uint32_t sid,
+                                      ps2x::iop::GuestBuffer send,
+                                      ps2x::iop::GuestBuffer receive)
+ {
++    // Patch 0078: libsd's RPC handler is reached only from IopRpcBridge::handleRpc, an EE-initiated entry that runs
++    // inline on the EE thread while the IOP worker is idle (the barrier in flushIopDebtBeforeEeIopAccess). The send
++    // and receive buffers are EE RAM and onSoundCommand is EE-side state, so it must never run on the worker.
++    if (g_ps2OnIopThread)
++    {
++        std::fprintf(stderr, "[don] audioCommand reached from the IOP thread (sid=0x%08x): ignored\n", sid);
++        return;
++    }
+     uint8_t *sendPointer = nullptr;
+     uint8_t *receivePointer = nullptr;
+     if (send.address && !guestRange(send.address, send.size, sendPointer))
+@@ -409,6 +448,15 @@ void PS2IopHostAdapter::closeHostFile(uint64_t handle)
+ 
+ int32_t PS2IopHostAdapter::memoryCard(const ps2x::iop::MemoryCardRequest &request)
+ {
++    // Patch 0078: the mcserv RPC handler (mcserv.cpp:263) is reached only from IopRpcBridge::handleRpc, an EE-initiated
++    // entry that runs inline on the EE thread while the IOP worker is idle, and its caller needs the result at once
++    // (it goes into the RPC reply), so it cannot be queued. The sceMc* stubs write EE RAM and do file I/O: they must
++    // never run on the worker.
++    if (g_ps2OnIopThread)
++    {
++        std::fprintf(stderr, "[don] memoryCard reached from the IOP thread (op=%d): refused\n", static_cast<int>(request.operation));
++        return -1;
++    }
+     using Handler = void (*)(uint8_t *, R5900Context *, PS2Runtime *);
+     Handler handler = nullptr;
+     switch (request.operation)
+@@ -509,6 +557,16 @@ bool PS2IopHostAdapter::sendSifCommand(uint32_t commandId,
+                                        const void *packet,
+                                        size_t packetSize)
+ {
++    if (g_ps2OnIopThread)
++    {
++        DeferredOp op;
++        op.kind = DeferredOp::Command;
++        op.address = commandId;
++        op.size = packetSize;
++        op.data.assign(static_cast<const uint8_t *>(packet), static_cast<const uint8_t *>(packet) + packetSize);
++        m_deferred.push_back(std::move(op));
++        return true;
++    }
+     uint8_t *const rdram = m_activeRdram
+                                ? m_activeRdram
+                                : m_runtime.memory().getRDRAM();
+@@ -519,6 +577,29 @@ bool PS2IopHostAdapter::sendSifCommand(uint32_t commandId,
+                                          packetSize);
+ }
+ 
++void PS2IopHostAdapter::drainDeferred()
++{
++    if (m_deferred.empty())
++        return;
++    std::vector<DeferredOp> ops;
++    ops.swap(m_deferred);
++    for (const DeferredOp &op : ops)
++    {
++        switch (op.kind)
++        {
++        case DeferredOp::Write:
++            (void)writeGuest(op.address, op.data.data(), op.size);
++            break;
++        case DeferredOp::Zero:
++            (void)zeroGuest(op.address, op.size);
++            break;
++        case DeferredOp::Command:
++            (void)sendSifCommand(op.address, op.data.data(), op.size);
++            break;
++        }
++    }
++}
++
+ void PS2IopHostAdapter::log(ps2x::iop::LogLevel level, std::string_view message)
+ {
+     const char *prefix = "[ps2xIOP]";
+diff --git a/ps2xRuntime/src/lib/ps2_iop_host.h b/ps2xRuntime/src/lib/ps2_iop_host.h
+index 89d8576..3b99eaf 100644
+--- a/ps2xRuntime/src/lib/ps2_iop_host.h
++++ b/ps2xRuntime/src/lib/ps2_iop_host.h
+@@ -6,6 +6,9 @@
+ #include <cstdio>
+ #include <mutex>
+ #include <unordered_map>
++#include <vector>
++
++extern thread_local bool g_ps2OnIopThread;
+ 
+ class PS2Runtime;
+ struct R5900Context;
+@@ -86,12 +89,23 @@ public:
+ 
+     void log(ps2x::iop::LogLevel level, std::string_view message) override;
+ 
++    // Patch 0078: applies, on the EE thread, what the IOP thread queued during its slice (in order).
++    void drainDeferred();
++
+ private:
+     friend class CallScope;
+ 
+     bool guestRange(uint32_t address, size_t size, uint8_t *&begin) const;
+ 
+     PS2Runtime &m_runtime;
++    struct DeferredOp
++    {
++        enum Kind { Write, Zero, Command } kind = Write;
++        uint32_t address = 0; // or the command id
++        size_t size = 0;
++        std::vector<uint8_t> data;
++    };
++    std::vector<DeferredOp> m_deferred;
+     std::recursive_mutex m_callMutex;
+     R5900Context *m_activeContext = nullptr;
+     uint8_t *m_activeRdram = nullptr;
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index 3f93809..81560a6 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -14,7 +14,9 @@
+ #include "ps2_host_backend.h"
+ #include "ps2_iop_host.h"
+ #include "ps2x/iop/iop_subsystem.h"
++#include "ps2x/iop/iop_host_spu2.h"
+ 
++#include <cstdlib>
+ #include <iostream>
+ #include <stdexcept>
+ #include <fstream>
+@@ -662,6 +664,17 @@ void PS2Runtime::notifyIopSifTransfer(uint8_t *rdram, const ps2x::iop::SifTransf
+ void PS2Runtime::iopThreadMain()
+ {
+     g_ps2OnIopThread = true;
++    ThreadNaming::SetCurrentThreadName("IopThread");
++    // DON_IOP_STRESS_US=<n>: sleep 0..n microseconds (a different sequence every run) before each slice, to show that
++    // the results do not depend on host timing. Off by default.
++    uint64_t stressUs = 0;
++    if (const char *stress = std::getenv("DON_IOP_STRESS_US"); stress && stress[0] != '\0')
++        stressUs = std::strtoull(stress, nullptr, 10);
++    uint64_t rng = static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count()) | 1u;
++    // The SPU2 library allows every call but the host's pull only from the thread that opened it: that is this thread.
++    const ps2x::iop::IopHostSpu2 *const spu2 = ps2x::iop::iopHostSpu2();
++    if (spu2 && spu2->thread_begin)
++        spu2->thread_begin(spu2->user);
+     std::unique_lock lock(m_iopMutex);
+     for (;;)
+     {
+@@ -671,11 +684,21 @@ void PS2Runtime::iopThreadMain()
+             break;
+         const uint64_t cycles = m_iopJobCycles;
+         lock.unlock();
++        if (stressUs != 0)
++        {
++            rng ^= rng << 13;
++            rng ^= rng >> 7;
++            rng ^= rng << 17;
++            std::this_thread::sleep_for(std::chrono::microseconds(rng % (stressUs + 1u)));
++        }
+         m_iopSubsystem->runEeCycles(cycles);
+         lock.lock();
+         m_iopJobPending = false;
+         m_iopCv.notify_all();
+     }
++    lock.unlock();
++    if (spu2 && spu2->thread_end)
++        spu2->thread_end(spu2->user);
+ }
+ 
+ void PS2Runtime::waitIopIdle()

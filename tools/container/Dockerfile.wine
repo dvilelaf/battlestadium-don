@@ -1,0 +1,46 @@
+# Wine runtime image for running the Windows build under Wine with a software Vulkan
+# driver (lavapipe), so its graphics and sound can be compared with the Linux build on
+# the same machine. Tag: don-wine:1.
+#
+# Base image pinned by digest (ubuntu:24.04 noble). Nothing from the game is in the image.
+#
+# Build:  docker build -t don-wine:1 -f tools/container/Dockerfile.wine tools/container
+#
+# Checked (2026-10-16): `wine --version` = wine-9.0 (Ubuntu 9.0~repack-4build3);
+# `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json vulkaninfo --summary` reports
+# llvmpipe (Mesa 25.2.8, Vulkan 1.4.318); the Windows build's Vulkan renderer opens headless
+# and the game runs to exit 0 (journal 041).
+FROM ubuntu@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV WINEPREFIX=/tmp/wineprefix
+ENV WINEDEBUG=-all
+ENV WINEDLLOVERRIDES=mscoree,mshtml=
+
+# wine64/wine (the 64-bit loader and the `wine` launcher), a private X server, lavapipe
+# (mesa-vulkan-drivers) and vulkaninfo (vulkan-tools). Nothing else.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        wine \
+        wine64 \
+        xvfb \
+        mesa-vulkan-drivers \
+        vulkan-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+# Runtime libraries the Linux build (build/player/don-linux/don) needs to run inside this
+# container, so the Windows-under-Wine and Linux Vulkan runs share one lavapipe. The game's
+# own SDL3 is bundled next to `don`; these are the system libs SDL3 and the C++ runtime use.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libstdc++6 \
+        libx11-6 \
+        libxext6 \
+        libxkbcommon0 \
+        libwayland-client0 \
+        libwayland-egl1 \
+        libdecor-0-0 \
+        libxrandr2 \
+        libxfixes3 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /work

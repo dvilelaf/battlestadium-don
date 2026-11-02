@@ -1,0 +1,155 @@
+# second client (player 3) of a four-player online session (T-510): one player of the four-player route of
+# journal 026 (T-306, work/t306/full.txt), split by the P1..P4 prefixes. In net mode the host uses the
+# script's player-1 pad for its local player on every copy, so on a client these unprefixed commands drive
+# the local player, which is the session's player 2, 3 or 4. Player 1's lines (and the menu) are in
+# net_host_4p.txt; every pad's Select plugs it into the ENTRY EDITING screen and every pad's Circle at the
+# character select is needed, so a client that only fights does not reach the fight.
+#
+#   build/linux-dev/don --headless --sound on --mute --net-players 4 --input-script <this file> \
+#       ~/.local/share/don/variants/en-jpvoice/SLPS_256.75
+#
+# It quits at 18400 (about 5 minutes) so a loopback test sees all four instances exit 0.
+
+2640 tap SELECT 4
+4800 tap CIRCLE 6
+6700 press LEFT
+6730 tap CROSS 6
+6760 release LEFT
+6770 tap SQUARE 4
+7000 press LEFT
+7030 tap CROSS 6
+7060 release LEFT
+7070 tap SQUARE 4
+7300 press LEFT
+7330 tap CROSS 6
+7360 release LEFT
+7370 tap SQUARE 4
+7600 press LEFT
+7630 tap CROSS 6
+7660 release LEFT
+7670 tap SQUARE 4
+7900 press LEFT
+7930 tap CROSS 6
+7960 release LEFT
+7970 tap SQUARE 4
+8200 press LEFT
+8230 tap CROSS 6
+8260 release LEFT
+8270 tap SQUARE 4
+8500 press LEFT
+8530 tap CROSS 6
+8560 release LEFT
+8570 tap SQUARE 4
+8800 press LEFT
+8830 tap CROSS 6
+8860 release LEFT
+8870 tap SQUARE 4
+9100 press LEFT
+9130 tap CROSS 6
+9160 release LEFT
+9170 tap SQUARE 4
+9400 press LEFT
+9430 tap CROSS 6
+9460 release LEFT
+9470 tap SQUARE 4
+9700 press LEFT
+9730 tap CROSS 6
+9760 release LEFT
+9770 tap SQUARE 4
+10000 press LEFT
+10030 tap CROSS 6
+10060 release LEFT
+10070 tap SQUARE 4
+10300 press LEFT
+10330 tap CROSS 6
+10360 release LEFT
+10370 tap SQUARE 4
+10600 press LEFT
+10630 tap CROSS 6
+10660 release LEFT
+10670 tap SQUARE 4
+10900 press LEFT
+10930 tap CROSS 6
+10960 release LEFT
+10970 tap SQUARE 4
+11200 press LEFT
+11230 tap CROSS 6
+11260 release LEFT
+11270 tap SQUARE 4
+11500 press LEFT
+11530 tap CROSS 6
+11560 release LEFT
+11570 tap SQUARE 4
+11800 press LEFT
+11830 tap CROSS 6
+11860 release LEFT
+11870 tap SQUARE 4
+12100 press LEFT
+12130 tap CROSS 6
+12160 release LEFT
+12170 tap SQUARE 4
+12400 press LEFT
+12430 tap CROSS 6
+12460 release LEFT
+12470 tap SQUARE 4
+12700 press LEFT
+12730 tap CROSS 6
+12760 release LEFT
+12770 tap SQUARE 4
+13000 press LEFT
+13030 tap CROSS 6
+13060 release LEFT
+13070 tap SQUARE 4
+13300 press LEFT
+13330 tap CROSS 6
+13360 release LEFT
+13370 tap SQUARE 4
+13600 press LEFT
+13630 tap CROSS 6
+13660 release LEFT
+13670 tap SQUARE 4
+13900 press LEFT
+13930 tap CROSS 6
+13960 release LEFT
+13970 tap SQUARE 4
+14200 press LEFT
+14230 tap CROSS 6
+14260 release LEFT
+14270 tap SQUARE 4
+14500 press LEFT
+14530 tap CROSS 6
+14560 release LEFT
+14570 tap SQUARE 4
+14800 press LEFT
+14830 tap CROSS 6
+14860 release LEFT
+14870 tap SQUARE 4
+15100 press LEFT
+15130 tap CROSS 6
+15160 release LEFT
+15170 tap SQUARE 4
+15400 press LEFT
+15430 tap CROSS 6
+15460 release LEFT
+15470 tap SQUARE 4
+15700 press LEFT
+15730 tap CROSS 6
+15760 release LEFT
+15770 tap SQUARE 4
+16000 press LEFT
+16030 tap CROSS 6
+16060 release LEFT
+16070 tap SQUARE 4
+16300 press LEFT
+16330 tap CROSS 6
+16360 release LEFT
+16370 tap SQUARE 4
+16600 press LEFT
+16630 tap CROSS 6
+16660 release LEFT
+16670 tap SQUARE 4
+16900 press LEFT
+16930 tap CROSS 6
+16960 release LEFT
+16970 tap SQUARE 4
+18400 quit

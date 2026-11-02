@@ -1,0 +1,139 @@
+# 4-player fight (--players 4, multitap in port 0), P1 = Naruto, doing his special move (ougi),
+# to reproduce the friend's texture corruption after the cutscene (full-screen red streak + close-up).
+#
+# Menu path from multiplayer_match.txt (journal 026/033); the ultra combo is main_mode_match2.txt's
+# pattern (double-tap toward, hold, Square x3, forward+Square, Circle = ultra). Fight runs from FIGHT
+# (~6600) to 7800 with a shot every 30 blanks; the ougi cut-in is expected around 7000-7300.
+#
+# Run with --players 4. Timing holds with --sound on (the friend's case); DO NOT use --sound off.
+#   DON_PLAY_MOVIES=1 DON_TRACE_FRAMES=1 build/player/don-linux/don --headless --renderer vulkan \
+#       --players 4 --sound on --wav W --shots DIR --input-script tools/run/scripts/multiplayer_ougi.txt en_patch/jpvoice/disc/SLPS_256.75
+#
+# Checked (2026-10-16): runs to exit 0 (7800 frames) on Linux (lavapipe and RADV) and on the Windows
+# build under Wine 9 + lavapipe; the ougi red-streak cut-in fires at ~6750 and ~7470; the 41 shots
+# (every 30 blanks, 6600-7800) match byte-for-byte between Windows and Linux except 4 frames that
+# differ by one pixel (journal 041).
+270 tap LEFT 6
+330 tap CIRCLE 6
+2640 tap START 6
+2640 P2:tap SELECT 4
+2640 P3:tap SELECT 4
+2640 P4:tap SELECT 4
+2960 tap DOWN 4
+3020 tap DOWN 4
+3080 tap DOWN 4
+3200 tap CIRCLE 6
+3420 tap START 6
+3620 tap CIRCLE 6
+3820 P2:tap CIRCLE 6
+4020 tap CIRCLE 6
+4220 P2:tap CIRCLE 6
+4420 tap CIRCLE 6
+4620 tap CIRCLE 6
+6600 tap RIGHT 4
+6609 tap RIGHT 4
+6614 press RIGHT
+6660 release RIGHT
+6662 tap SQUARE 4
+6675 tap SQUARE 4
+6688 tap SQUARE 4
+6705 tap RIGHT 4
+6708 tap SQUARE 4
+6735 tap CIRCLE 5
+6770 tap TRIANGLE 5
+6800 press R2
+6825 release R2
+6840 tap LEFT 4
+6849 tap LEFT 4
+6854 press LEFT
+6900 release LEFT
+6902 tap SQUARE 4
+6915 tap SQUARE 4
+6928 tap SQUARE 4
+6945 tap LEFT 4
+6948 tap SQUARE 4
+6975 tap CIRCLE 5
+7010 tap TRIANGLE 5
+7040 press R2
+7065 release R2
+7080 tap RIGHT 4
+7089 tap RIGHT 4
+7094 press RIGHT
+7140 release RIGHT
+7142 tap SQUARE 4
+7155 tap SQUARE 4
+7168 tap SQUARE 4
+7185 tap RIGHT 4
+7188 tap SQUARE 4
+7215 tap CIRCLE 5
+7250 tap TRIANGLE 5
+7280 press R2
+7305 release R2
+7320 tap LEFT 4
+7329 tap LEFT 4
+7334 press LEFT
+7380 release LEFT
+7382 tap SQUARE 4
+7395 tap SQUARE 4
+7408 tap SQUARE 4
+7425 tap LEFT 4
+7428 tap SQUARE 4
+7455 tap CIRCLE 5
+7490 tap TRIANGLE 5
+7520 press R2
+7545 release R2
+7560 tap RIGHT 4
+7569 tap RIGHT 4
+7574 press RIGHT
+7620 release RIGHT
+7622 tap SQUARE 4
+7635 tap SQUARE 4
+7648 tap SQUARE 4
+7665 tap RIGHT 4
+7668 tap SQUARE 4
+7695 tap CIRCLE 5
+7730 tap TRIANGLE 5
+7760 press R2
+7785 release R2
+6600 shot u_06600
+6630 shot u_06630
+6660 shot u_06660
+6690 shot u_06690
+6720 shot u_06720
+6750 shot u_06750
+6780 shot u_06780
+6810 shot u_06810
+6840 shot u_06840
+6870 shot u_06870
+6900 shot u_06900
+6930 shot u_06930
+6960 shot u_06960
+6990 shot u_06990
+7020 shot u_07020
+7050 shot u_07050
+7080 shot u_07080
+7110 shot u_07110
+7140 shot u_07140
+7170 shot u_07170
+7200 shot u_07200
+7230 shot u_07230
+7260 shot u_07260
+7290 shot u_07290
+7320 shot u_07320
+7350 shot u_07350
+7380 shot u_07380
+7410 shot u_07410
+7440 shot u_07440
+7470 shot u_07470
+7500 shot u_07500
+7530 shot u_07530
+7560 shot u_07560
+7590 shot u_07590
+7620 shot u_07620
+7650 shot u_07650
+7680 shot u_07680
+7710 shot u_07710
+7740 shot u_07740
+7770 shot u_07770
+7800 shot u_07800
+7800 quit

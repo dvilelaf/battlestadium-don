@@ -1,0 +1,49 @@
+# Nothing that comes from the game goes into the repository (see AGENTS.md, rule 1).
+
+# Original discs, executables and data (folders anchored to the repository root, so that
+# tools/disc/ and the like are not ignored by accident)
+/disc/
+/disc_en/
+/en_patch/
+/gc_rvz/
+*.iso
+*.rvz
+*.gcm
+*.chd
+*.afs
+*.AFS
+*.fpk
+*.FPK
+*.irx
+*.IRX
+*.dol
+SLPS_*
+*.p2s
+*.gs.zst
+*.gs.xz
+
+# Derived from the game: generated code, dumps and analysis results
+/generated/
+/work/
+*.pkl
+
+# Dependencies cloned locally (downloaded with tools/setup/, not versioned)
+/third_party/
+
+# Paths of this machine (see local.env.example)
+local.env
+
+# Build
+/build/
+out/
+*.o
+*.a
+__pycache__/
+.venv/
+.pytest_cache/
+
+# Written by the runtime's debug panel in the working directory of a run
+imgui.ini
+
+# Orchestrator state, local only (not published)
+HANDOFF.md

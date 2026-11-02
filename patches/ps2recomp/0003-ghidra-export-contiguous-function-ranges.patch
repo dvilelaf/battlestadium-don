@@ -1,0 +1,167 @@
+ExportPS2Functions.java: export contiguous function ranges
+
+What it fixes: in Ghidra the body of a function can be made of several separate address
+ranges. The script wrote one row per function with End = highest address of the body and
+Size = number of bytes of the body, so a small routine that jumps to a shared return far away
+got a span of tens of KB (12 functions of 24 to 92 bytes had spans of 19 to 118 KB in the
+Battle Stadium D.O.N executable), spans overlapped (1,775 nested functions) and Size
+differed from End - Start in 1,114 rows.
+
+Rule: let N be the lowest entry point of another function above this function's entry
+point (infinity if none).
+- The function row goes from the entry point to the end of the last range of the body that
+  starts before N (End exclusive, Size = End - Start). Small holes inside the function stay
+  inside its row and the row never reaches the next function.
+- Every range of the body that starts at or after N, and every range completely before the
+  entry point, becomes a label row entry_<8 hex digits> through collectExecutableLabelRecords,
+  unless a row already starts at that address.
+- A label that is in no function row but lies in the body of a function ends where that
+  range of the body ends (never past the next row start). Other labels keep the original
+  computation (function row whose span contains them, then the next row start).
+- The [ghidra_export] table gets split_function_count (functions with at least one such
+  far range or range before the entry point) and body_range_label_count (label rows added).
+
+Rejected first version: "the row covers the range of the body that contains the entry
+point". About 1,067 functions have small holes in their body (a few words Ghidra's flow does
+not reach); that rule cut each one at its first hole (FUN_00190580 went from 22 KB to 556
+bytes) and left the rest to labels that no function row contains (labels outside every
+function went from 2,826 to 15,478).
+
+Verification: run tools/funcmap/ghidra_export.sh on SLPS_256.75 and then layout.py,
+find_code_pointers.py and validate.py (see docs/tasks/F0-foundations.md, T-025).
+
+Original work for this project, written against PS2Recomp commit
+2c5fbb9389e11dd95693385969490c9e8e6f57b4 (same license as that repository).
+
+diff --git a/ps2xRecomp/tools/ghidra/ExportPS2Functions.java b/ps2xRecomp/tools/ghidra/ExportPS2Functions.java
+index 694c518..8f8ed14 100644
+--- a/ps2xRecomp/tools/ghidra/ExportPS2Functions.java
++++ b/ps2xRecomp/tools/ghidra/ExportPS2Functions.java
+@@ -3,6 +3,7 @@
+ 
+ import ghidra.app.script.GhidraScript;
+ import ghidra.program.model.address.Address;
++import ghidra.program.model.address.AddressRange;
+ import ghidra.program.model.address.AddressSet;
+ import ghidra.program.model.address.AddressSetView;
+ import ghidra.program.model.listing.Instruction;
+@@ -28,6 +29,7 @@ import java.util.HashSet;
+ import java.util.LinkedHashSet;
+ import java.util.List;
+ import java.util.Set;
++import java.util.TreeSet;
+ import java.util.regex.Pattern;
+ 
+ public class ExportPS2Functions extends GhidraScript {
+@@ -271,6 +273,12 @@ public class ExportPS2Functions extends GhidraScript {
+         boolean syntheticEntry = false;
+     }
+ 
++    // Starts of the body ranges of a function that are not the function row itself
++    // (ranges that start at or after the next function, or end before the entry point).
++    private final List<Long> bodyRangeStarts = new ArrayList<>();
++    private int splitFunctionCount = 0;
++    private int bodyRangeLabelCount = 0;
++
+     private static final class AddressTakenCandidate {
+         long sourceOffset;
+         long target;
+@@ -964,6 +972,12 @@ public class ExportPS2Functions extends GhidraScript {
+         collectMaterializedCodeEntries(labelRecords, existingStarts);
+         collectDataFunctionPointerEntries(labelRecords, existingStarts);
+ 
++        for (long rangeStart : bodyRangeStarts) {
++            int before = labelRecords.size();
++            addSyntheticEntry(labelRecords, existingStarts, rangeStart);
++            bodyRangeLabelCount += labelRecords.size() - before;
++        }
++
+         if (labelRecords.isEmpty()) {
+             return labelRecords;
+         }
+@@ -988,6 +1002,20 @@ public class ExportPS2Functions extends GhidraScript {
+                 }
+             }
+ 
++            // A label that is in no function row but lies in the body of a function
++            // ends where that range of the body ends (never past the next row start,
++            // see the boundaries loop below).
++            if (endExclusive == 0L) {
++                Address labelAddress = currentProgram.getAddressFactory().getDefaultAddressSpace().getAddress(record.start);
++                Function container = currentProgram.getFunctionManager().getFunctionContaining(labelAddress);
++                if (container != null) {
++                    AddressRange containingRange = container.getBody().getRangeContaining(labelAddress);
++                    if (containingRange != null) {
++                        endExclusive = containingRange.getMaxAddress().getOffset() + 1L;
++                    }
++                }
++            }
++
+             if (endExclusive == 0L) {
+                 Address startAddress = currentProgram.getAddressFactory().getDefaultAddressSpace().getAddress(record.start);
+                 MemoryBlock block = currentProgram.getMemory().getBlock(startAddress);
+@@ -1035,6 +1063,16 @@ public class ExportPS2Functions extends GhidraScript {
+         Set<String> untrackedStubSelectors = new LinkedHashSet<>();
+         int uncategorizedCount = 0;
+ 
++        TreeSet<Long> functionEntries = new TreeSet<>();
++        FunctionIterator entryIt = fm.getFunctions(true);
++        while (entryIt.hasNext() && !monitor.isCancelled()) {
++            Function entryFunc = entryIt.next();
++            AddressSetView entryBody = entryFunc.getBody();
++            if (entryBody != null && entryBody.getNumAddresses() != 0) {
++                functionEntries.add(entryFunc.getEntryPoint().getOffset());
++            }
++        }
++
+         while (it.hasNext() && !monitor.isCancelled()) {
+             Function func = it.next();
+ 
+@@ -1046,10 +1084,36 @@ public class ExportPS2Functions extends GhidraScript {
+             FunctionRecord record = new FunctionRecord();
+             record.name = func.getName();
+             record.start = func.getEntryPoint().getOffset();
+-            record.endExclusive = body.getMaxAddress().getOffset() + 1L;
+-            record.size = body.getNumAddresses();
++            // The function row goes from the entry point to the end of the last range of
++            // the body that starts before N, the lowest entry point of another function
++            // above this one. Small holes inside the function stay inside its row.
++            // Ranges that start at or after N, and ranges completely before the entry
++            // point, become label rows (see collectExecutableLabelRecords).
++            Long nextEntry = functionEntries.higher(record.start);
++            long limit = nextEntry == null ? Long.MAX_VALUE : nextEntry;
++            long rowEnd = 0L;
++            List<Long> farStarts = new ArrayList<>();
++            for (AddressRange range : body.getAddressRanges()) {
++                long rangeStart = range.getMinAddress().getOffset();
++                long rangeEnd = range.getMaxAddress().getOffset() + 1L;
++                if (rangeEnd <= record.start || rangeStart >= limit) {
++                    farStarts.add(rangeStart);
++                } else if (rangeEnd > rowEnd) {
++                    rowEnd = rangeEnd;
++                }
++            }
++            if (rowEnd == 0L) {
++                rowEnd = body.getMaxAddress().getOffset() + 1L;
++            }
++            record.endExclusive = rowEnd;
++            record.size = record.endExclusive - record.start;
+             functionRecords.add(record);
+ 
++            if (!farStarts.isEmpty()) {
++                splitFunctionCount++;
++                bodyRangeStarts.addAll(farStarts);
++            }
++
+             ClassificationResult classification = classifyFunction(func);
+             if (classification.kind == ClassificationKind.STUB) {
+                 stubSelectors.add(makeSelector(classification.name, record.start, true));
+@@ -1121,6 +1185,8 @@ public class ExportPS2Functions extends GhidraScript {
+             writer.println("[ghidra_export]");
+             writer.println("function_count = " + functionCount);
+             writer.println("code_label_count = " + labelRecords.size());
++            writer.println("split_function_count = " + splitFunctionCount);
++            writer.println("body_range_label_count = " + bodyRangeLabelCount);
+             writer.println("csv_record_count = " + exportRecords.size());
+             writer.println("stub_count = " + stubSelectors.size());
+             writer.println("untracked_stub_count = " + untrackedStubSelectors.size());

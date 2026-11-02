@@ -1,0 +1,52 @@
+# 0037-pexew-lanes: PS2_PEXEW and PS2_PEXEH move the wrong lanes, and the game's 3D constants come out
+# with the y and w lanes wrong (T-202)
+#
+# Why: the port draws the 3D world as flat magenta triangles while every 2D element is right (journal
+# 008). Journal 013 traced it to the game's own vector data: the per-object constant block that
+# FUN_0025b8f0 (0x25b8f0-0x25be44) builds and uploads to VU1 address 0x3FB with `UNPACK V4-32` is, in
+# the port, `a 0 a <stale>` where the console has `a a a a` (measured with tools/verify/gif_stats.py's
+# package, work/ramdump/t114-title.bin against work/ref/x/01/ee_ram.bin). The block is assembled with
+#   mfc1 (the float into lane 0), pexew (move it to lane 2), ppacw (gather x,y,z,w),
+# emitted by generated/FUN_0025b8f0_0x25b8f0.cpp as PS2_PEXEW/PS2_PPACW (0x25bcac, 0x25bcb0, 0x25bcc4).
+#
+# What it changes (ps2xRuntime/include/ps2_runtime_macros.h only, one line):
+#   * PS2_PEXEW(rs) was _MM_SHUFFLE(2, 3, 0, 1), i.e. it swapped the lane pairs (0,1) and (2,3);
+#     the console's PEXEW (PCSX2 2.8.2, third_party/pcsx2/pcsx2/MMI.cpp, PEXEW at "UL[0]=Rt[2];
+#     UL[1]=Rt[1]; UL[2]=Rt[0]; UL[3]=Rt[3]") swaps lanes 0 and 2 and keeps 1 and 3. The macro is
+#     _MM_SHUFFLE(3, 0, 1, 2) now, which is lane0<-src2, lane1<-src1, lane2<-src0, lane3<-src3.
+#
+# How it was verified: tests/runtime/mmi_lanes_test.cpp (new, built with
+#   cmake -S tests/runtime -B build/rt-tests-3d -G Ninja -DPS2X_WITH_RAYLIB=OFF -DFETCHCONTENT_FULLY_DISCONNECTED=ON)
+# checks every MMI macro the game's generated code emits against a reference written from PCSX2's
+# MMI.cpp and then the exact FUN_0025b8f0 sequence. Against third_party/PS2Recomp as it is it fails
+# ("PS2_PEXEW got 40050607 80010203 ffff0b0c 0008090a, want 0008090a 40050607 80010203 ffff0b0c";
+# "the port's constant block is `a a a a` got 3f009a34 00000000 3f009a34 00000000", 5 of 25 checks);
+# against a worktree with this patch applied it is "25 checks, 0 failed".
+#
+# Affected: 116 sites in generated/ (32 files) call PS2_PEXEW, so the generated code has to be rebuilt
+# after this patch (the orchestrator schedules that). Not in patches/ps2recomp/series on purpose.
+#
+# Based on: original code; the reference is PCSX2 2.8.2, third_party/pcsx2/pcsx2/MMI.cpp (GPL-3.0), the
+# same file this repository's runtime macros are derived from.
+#
+#
+# The same one-line defect is in PS2_PEXEH (it swaps the halfword pairs (0,1) and (2,3) inside each
+# 64-bit half; the console swaps halfwords 0 and 2 and 4 and 6): fixed in the same patch, its check in
+# the same test. The game does not emit PS2_PEXEH today (0 sites; PS2_PEXEW has 116 in 32 files), and
+# PS2_PEXCH (the byte variant of the same family) has no macro in this header at all, so a game that
+# emitted it would not compile: noted, not added here.
+diff --git a/ps2xRuntime/include/ps2_runtime_macros.h b/ps2xRuntime/include/ps2_runtime_macros.h
+index 0f19c9f..abb9c62 100644
+--- a/ps2xRuntime/include/ps2_runtime_macros.h
++++ b/ps2xRuntime/include/ps2_runtime_macros.h
+@@ -725,8 +725,8 @@ inline __m128i ps2_qfsrv(__m128i rs, __m128i rt, uint32_t sa)
+ }
+ #define PS2_QFSRV(rs, rt, sa) ps2_qfsrv((__m128i)(rs), (__m128i)(rt), (uint32_t)(sa))
+ #define PS2_PCPYLD(rs, rt) _mm_unpacklo_epi64(rt, rs)
+-#define PS2_PEXEH(rs) _mm_shufflelo_epi16(_mm_shufflehi_epi16(rs, _MM_SHUFFLE(2, 3, 0, 1)), _MM_SHUFFLE(2, 3, 0, 1))
+-#define PS2_PEXEW(rs) _mm_shuffle_epi32(rs, _MM_SHUFFLE(2, 3, 0, 1))
++#define PS2_PEXEH(rs) _mm_shufflehi_epi16(_mm_shufflelo_epi16((__m128i)(rs), _MM_SHUFFLE(3, 0, 1, 2)), _MM_SHUFFLE(3, 0, 1, 2)) // T-202: PEXEH swaps the halfword pairs the same way (PCSX2 MMI.cpp)
++#define PS2_PEXEW(rs) _mm_shuffle_epi32(rs, _MM_SHUFFLE(3, 0, 1, 2)) // T-202: PEXEW swaps lanes 0 and 2 (PCSX2 MMI.cpp)
+ #define PS2_PROT3W(rs) _mm_shuffle_epi32(rs, _MM_SHUFFLE(0, 3, 2, 1))
+ 
+ // Additional VU0 operations

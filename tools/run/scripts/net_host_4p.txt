@@ -1,0 +1,135 @@
+# Host of a four-player online session (T-510): one player of the four-player route of
+# journal 026 (T-306, work/t306/full.txt), split by the P1..P4 prefixes. In net mode the host uses the
+# script's player-1 pad for its local player on every copy, so on a client these unprefixed commands drive
+# the local player, which is the session's player 2, 3 or 4. Player 1's lines (and the menu) are in
+# net_host_4p.txt; every pad's Select plugs it into the ENTRY EDITING screen and every pad's Circle at the
+# character select is needed, so a client that only fights does not reach the fight.
+#
+#   build/linux-dev/don --headless --sound on --mute --net-players 4 --input-script <this file> \
+#       ~/.local/share/don/variants/en-jpvoice/SLPS_256.75
+#
+# It quits at 18400 (about 5 minutes) so a loopback test sees all four instances exit 0.
+
+270 tap LEFT 6
+330 tap CIRCLE 6
+2640 tap START 6
+2960 tap DOWN 4
+3020 tap DOWN 4
+3080 tap DOWN 4
+3200 tap CIRCLE 6
+3420 tap START 6
+3540 tap DOWN 4
+3580 tap DOWN 4
+3620 tap DOWN 4
+3700 tap CIRCLE 6
+4300 tap START 6
+4600 tap CIRCLE 6
+5200 tap CIRCLE 6
+6600 press RIGHT
+6660 release RIGHT
+6670 tap SQUARE 4
+6900 press RIGHT
+6960 release RIGHT
+6970 tap SQUARE 4
+7200 press RIGHT
+7260 release RIGHT
+7270 tap SQUARE 4
+7500 press RIGHT
+7560 release RIGHT
+7570 tap SQUARE 4
+7800 press RIGHT
+7860 release RIGHT
+7870 tap SQUARE 4
+8100 press RIGHT
+8160 release RIGHT
+8170 tap SQUARE 4
+8400 press RIGHT
+8460 release RIGHT
+8470 tap SQUARE 4
+8700 press RIGHT
+8760 release RIGHT
+8770 tap SQUARE 4
+9000 press RIGHT
+9060 release RIGHT
+9070 tap SQUARE 4
+9300 press RIGHT
+9360 release RIGHT
+9370 tap SQUARE 4
+9600 press RIGHT
+9660 release RIGHT
+9670 tap SQUARE 4
+9900 press RIGHT
+9960 release RIGHT
+9970 tap SQUARE 4
+10200 press RIGHT
+10260 release RIGHT
+10270 tap SQUARE 4
+10500 press RIGHT
+10560 release RIGHT
+10570 tap SQUARE 4
+10800 press RIGHT
+10860 release RIGHT
+10870 tap SQUARE 4
+11100 press RIGHT
+11160 release RIGHT
+11170 tap SQUARE 4
+11400 press RIGHT
+11460 release RIGHT
+11470 tap SQUARE 4
+11700 press RIGHT
+11760 release RIGHT
+11770 tap SQUARE 4
+12000 press RIGHT
+12060 release RIGHT
+12070 tap SQUARE 4
+12300 press RIGHT
+12360 release RIGHT
+12370 tap SQUARE 4
+12600 press RIGHT
+12660 release RIGHT
+12670 tap SQUARE 4
+12900 press RIGHT
+12960 release RIGHT
+12970 tap SQUARE 4
+13200 press RIGHT
+13260 release RIGHT
+13270 tap SQUARE 4
+13500 press RIGHT
+13560 release RIGHT
+13570 tap SQUARE 4
+13800 press RIGHT
+13860 release RIGHT
+13870 tap SQUARE 4
+14100 press RIGHT
+14160 release RIGHT
+14170 tap SQUARE 4
+14400 press RIGHT
+14460 release RIGHT
+14470 tap SQUARE 4
+14700 press RIGHT
+14760 release RIGHT
+14770 tap SQUARE 4
+15000 press RIGHT
+15060 release RIGHT
+15070 tap SQUARE 4
+15300 press RIGHT
+15360 release RIGHT
+15370 tap SQUARE 4
+15600 press RIGHT
+15660 release RIGHT
+15670 tap SQUARE 4
+15900 press RIGHT
+15960 release RIGHT
+15970 tap SQUARE 4
+16200 press RIGHT
+16260 release RIGHT
+16270 tap SQUARE 4
+16500 press RIGHT
+16560 release RIGHT
+16570 tap SQUARE 4
+16800 press RIGHT
+16860 release RIGHT
+16870 tap SQUARE 4
+17600 shot match_end_a
+18100 shot match_end_b
+18400 quit

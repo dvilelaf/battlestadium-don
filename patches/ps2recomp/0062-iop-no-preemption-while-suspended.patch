@@ -1,0 +1,75 @@
+# 0062-iop-no-preemption-while-suspended: a thread that has suspended interrupts is not preempted at a slice end
+#
+# What it fixes: IopKernel::beginNextReady picked the best ready thread at the end of every slice of at most 256 cycles,
+# without looking at the preempted thread's interrupt-suspend state. The CRI sound driver's queue code runs inside a
+# CpuSuspendIntr lock (the nested lock at IOP 0x7337C/0x733C8) and was preempted in the middle of a list append: the
+# append had found the tail node, a higher-priority thread then popped and freed that node, and the append went on and
+# merged 0x400 bytes into the freed node. That chunk was never returned to the main processor (journal 011, fifteenth
+# piece: blank 3318 of the route, 128c40:400 lost; the left pool stays at 0x3C00 and the music never starts).
+# What it does: when a thread's slice ends while it is still runnable (not yielded, not blocked) with its interrupt-enable
+# state suspended (patch 0059 keeps that state per thread), IopKernel remembers it (m_uninterruptibleThread) and
+# beginNextReady runs it again before any other thread, until it enables interrupts, blocks or ends. Delay wake-ups still
+# happen on time (the woken thread becomes Ready and waits). A thread that yields on its own (RotateThreadReadyQueue-type
+# calls) is not held.
+# Verified: tests/runtime/iop_no_preempt_test fails 2 checks without this patch and passes with it; iop_intr_suspend_test and
+# iop_host_spu2_test pass with it. Route proof in docs/journal/011-first-sound.md.
+#
+diff --git a/ps2xIOP/src/emulator/core/iop_kernel.cpp b/ps2xIOP/src/emulator/core/iop_kernel.cpp
+index e675ace..a4b5b74 100644
+--- a/ps2xIOP/src/emulator/core/iop_kernel.cpp
++++ b/ps2xIOP/src/emulator/core/iop_kernel.cpp
+@@ -32,6 +32,7 @@ namespace ps2x::iop::detail
+         m_nextSemaphoreId = 1;
+         m_nextEventFlagId = 1;
+         m_currentThread = nullptr;
++        m_uninterruptibleThread = 0;
+     }
+ 
+     bool IopKernel::dispatchThreadImport(uint16_t ordinal, IopCpuState &cpu, uint64_t currentCycle)
+@@ -678,8 +679,19 @@ namespace ps2x::iop::detail
+         }
+ 
+         IopThread *next = nullptr;
++        IopThread *held_next = nullptr;
++        // A thread that suspended interrupts (CpuSuspendIntr) is not preempted: on the console the scheduler runs from
++        // interrupts and system calls, and a thread switch at a slice end is the emulator's, not the console's.
++        if (m_uninterruptibleThread != 0)
++        {
++            const auto held = m_threads.find(m_uninterruptibleThread);
++            if (held != m_threads.end() && held->second.state == IopThreadState::Ready && !held->second.interruptsEnabled)
++                held_next = next = &held->second;
++        }
+         for (auto &[id, thread] : m_threads)
+         {
++            if (held_next != nullptr)
++                break;
+             if (thread.state != IopThreadState::Ready)
+                 continue;
+             if (next == nullptr || thread.priority < next->priority ||
+@@ -711,10 +723,13 @@ namespace ps2x::iop::detail
+     void IopKernel::endTimeslice(IopThread &thread, uint32_t returnSentinel)
+     {
+         thread.interruptsEnabled = m_memory.interruptControl();
++        m_uninterruptibleThread = 0;
+         if (thread.cpu.pc == returnSentinel || thread.cpu.stopped)
+             thread.state = IopThreadState::Dormant;
+         else if (thread.state == IopThreadState::Running)
+             thread.state = IopThreadState::Ready;
++        if (thread.state == IopThreadState::Ready && !thread.cpu.yielded && !thread.interruptsEnabled)
++            m_uninterruptibleThread = thread.id;
+         // A thread that is still runnable was preempted: the processor keeps its state, and an interrupt between
+         // two slices interrupts it. One that blocked or ended leaves the processor idle, interrupts enabled.
+         if (thread.state != IopThreadState::Ready)
+diff --git a/ps2xIOP/src/emulator/core/iop_kernel.h b/ps2xIOP/src/emulator/core/iop_kernel.h
+index 709b177..9b9c269 100644
+--- a/ps2xIOP/src/emulator/core/iop_kernel.h
++++ b/ps2xIOP/src/emulator/core/iop_kernel.h
+@@ -102,5 +102,8 @@ namespace ps2x::iop::detail
+         uint32_t m_nextSemaphoreId = 1;
+         uint32_t m_nextEventFlagId = 1;
+         IopThread *m_currentThread = nullptr;
++        // Id of a thread whose slice ran out while it had interrupts suspended: nothing can take the processor from it
++        // until it enables them again, blocks or ends (0 = none).
++        int m_uninterruptibleThread = 0;
+     };
+ }

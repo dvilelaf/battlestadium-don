@@ -1,0 +1,1 @@
+// T-601: generated files start with #include <stdexcept> and use nothing from it (deps.md: no throw/try/catch).

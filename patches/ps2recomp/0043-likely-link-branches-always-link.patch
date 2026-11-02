@@ -1,0 +1,36 @@
+Recompiler: bltzall and bgezall write the link register whether or not the branch is taken.
+
+What it fixes: ControlFlowEmitter::emitConditionalBranch wrote $ra only inside the taken path for the
+"branch likely and link" forms (BLTZALL, BGEZALL). The reference emulator's interpreter
+(third_party/pcsx2/pcsx2/Interpreter.cpp, Interpreter::OpcodeImpl::BLTZALL / BGEZALL) executes
+_SetLink(31) first, as for BLTZAL / BGEZAL, so $ra = branch address + 8 in both outcomes. Found by
+tests/conformance (family "branches"): bltzall failed 18 of 26 cases and bgezall 8 of 26, always the
+not-taken ones ($ra kept its old value). The census (docs/knowledge/data/instruction_conformance.tsv)
+gives the number of bltzall / bgezall sites in the game.
+
+How it was verified: the conformance tests of branches pass with a recompiler relinked with this change
+and fail without it (the pytest command of tests/conformance, see journal 025).
+
+Original work for this repository (no code from another project).
+
+diff --git a/ps2xRecomp/src/lib/control_flow_emitter.cpp b/ps2xRecomp/src/lib/control_flow_emitter.cpp
+index 95f69d7..56b5904 100644
+--- a/ps2xRecomp/src/lib/control_flow_emitter.cpp
++++ b/ps2xRecomp/src/lib/control_flow_emitter.cpp
+@@ -468,14 +468,11 @@ namespace ps2recomp
+ 
+         if (m_branchInst.opcode == OPCODE_REGIMM)
+         {
+-            if (m_branchInst.rt == REGIMM_BLTZAL || m_branchInst.rt == REGIMM_BGEZAL)
++            if (m_branchInst.rt == REGIMM_BLTZAL || m_branchInst.rt == REGIMM_BGEZAL ||
++                m_branchInst.rt == REGIMM_BLTZALL || m_branchInst.rt == REGIMM_BGEZALL)
+             {
+                 unconditionalLinkCode = fmt::format("SET_GPR_U32(ctx, 31, 0x{:X}u);", fallthroughPc());
+             }
+-            else if (m_branchInst.rt == REGIMM_BLTZALL || m_branchInst.rt == REGIMM_BGEZALL)
+-            {
+-                conditionalLinkCode = fmt::format("SET_GPR_U32(ctx, 31, 0x{:X}u);", fallthroughPc());
+-            }
+         }
+ 
+         m_ss << "    {\n";

@@ -1,0 +1,155 @@
+# third client (player 4) of a four-player online session (T-510): one player of the four-player route of
+# journal 026 (T-306, work/t306/full.txt), split by the P1..P4 prefixes. In net mode the host uses the
+# script's player-1 pad for its local player on every copy, so on a client these unprefixed commands drive
+# the local player, which is the session's player 2, 3 or 4. Player 1's lines (and the menu) are in
+# net_host_4p.txt; every pad's Select plugs it into the ENTRY EDITING screen and every pad's Circle at the
+# character select is needed, so a client that only fights does not reach the fight.
+#
+#   build/linux-dev/don --headless --sound on --mute --net-players 4 --input-script <this file> \
+#       ~/.local/share/don/variants/en-jpvoice/SLPS_256.75
+#
+# It quits at 18400 (about 5 minutes) so a loopback test sees all four instances exit 0.
+
+2640 tap SELECT 4
+4900 tap CIRCLE 6
+6700 press DOWN
+6740 release DOWN
+6780 tap TRIANGLE 6
+6800 tap SQUARE 4
+7000 press DOWN
+7040 release DOWN
+7080 tap TRIANGLE 6
+7100 tap SQUARE 4
+7300 press DOWN
+7340 release DOWN
+7380 tap TRIANGLE 6
+7400 tap SQUARE 4
+7600 press DOWN
+7640 release DOWN
+7680 tap TRIANGLE 6
+7700 tap SQUARE 4
+7900 press DOWN
+7940 release DOWN
+7980 tap TRIANGLE 6
+8000 tap SQUARE 4
+8200 press DOWN
+8240 release DOWN
+8280 tap TRIANGLE 6
+8300 tap SQUARE 4
+8500 press DOWN
+8540 release DOWN
+8580 tap TRIANGLE 6
+8600 tap SQUARE 4
+8800 press DOWN
+8840 release DOWN
+8880 tap TRIANGLE 6
+8900 tap SQUARE 4
+9100 press DOWN
+9140 release DOWN
+9180 tap TRIANGLE 6
+9200 tap SQUARE 4
+9400 press DOWN
+9440 release DOWN
+9480 tap TRIANGLE 6
+9500 tap SQUARE 4
+9700 press DOWN
+9740 release DOWN
+9780 tap TRIANGLE 6
+9800 tap SQUARE 4
+10000 press DOWN
+10040 release DOWN
+10080 tap TRIANGLE 6
+10100 tap SQUARE 4
+10300 press DOWN
+10340 release DOWN
+10380 tap TRIANGLE 6
+10400 tap SQUARE 4
+10600 press DOWN
+10640 release DOWN
+10680 tap TRIANGLE 6
+10700 tap SQUARE 4
+10900 press DOWN
+10940 release DOWN
+10980 tap TRIANGLE 6
+11000 tap SQUARE 4
+11200 press DOWN
+11240 release DOWN
+11280 tap TRIANGLE 6
+11300 tap SQUARE 4
+11500 press DOWN
+11540 release DOWN
+11580 tap TRIANGLE 6
+11600 tap SQUARE 4
+11800 press DOWN
+11840 release DOWN
+11880 tap TRIANGLE 6
+11900 tap SQUARE 4
+12100 press DOWN
+12140 release DOWN
+12180 tap TRIANGLE 6
+12200 tap SQUARE 4
+12400 press DOWN
+12440 release DOWN
+12480 tap TRIANGLE 6
+12500 tap SQUARE 4
+12700 press DOWN
+12740 release DOWN
+12780 tap TRIANGLE 6
+12800 tap SQUARE 4
+13000 press DOWN
+13040 release DOWN
+13080 tap TRIANGLE 6
+13100 tap SQUARE 4
+13300 press DOWN
+13340 release DOWN
+13380 tap TRIANGLE 6
+13400 tap SQUARE 4
+13600 press DOWN
+13640 release DOWN
+13680 tap TRIANGLE 6
+13700 tap SQUARE 4
+13900 press DOWN
+13940 release DOWN
+13980 tap TRIANGLE 6
+14000 tap SQUARE 4
+14200 press DOWN
+14240 release DOWN
+14280 tap TRIANGLE 6
+14300 tap SQUARE 4
+14500 press DOWN
+14540 release DOWN
+14580 tap TRIANGLE 6
+14600 tap SQUARE 4
+14800 press DOWN
+14840 release DOWN
+14880 tap TRIANGLE 6
+14900 tap SQUARE 4
+15100 press DOWN
+15140 release DOWN
+15180 tap TRIANGLE 6
+15200 tap SQUARE 4
+15400 press DOWN
+15440 release DOWN
+15480 tap TRIANGLE 6
+15500 tap SQUARE 4
+15700 press DOWN
+15740 release DOWN
+15780 tap TRIANGLE 6
+15800 tap SQUARE 4
+16000 press DOWN
+16040 release DOWN
+16080 tap TRIANGLE 6
+16100 tap SQUARE 4
+16300 press DOWN
+16340 release DOWN
+16380 tap TRIANGLE 6
+16400 tap SQUARE 4
+16600 press DOWN
+16640 release DOWN
+16680 tap TRIANGLE 6
+16700 tap SQUARE 4
+16900 press DOWN
+16940 release DOWN
+16980 tap TRIANGLE 6
+17000 tap SQUARE 4
+18400 quit

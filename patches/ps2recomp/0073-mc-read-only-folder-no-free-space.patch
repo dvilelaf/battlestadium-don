@@ -1,0 +1,78 @@
+# 0073-mc-read-only-folder-no-free-space: a card folder the host cannot write to reports no free space
+#
+# What it fixes: saving to a read-only card folder (journal 033 follow-up 2026-10-14, item 4b) failed silently: the save
+# question came back, nothing was written, no message. The game's save script (mcard/2000.seq) treats every failure of
+# its Mkdir, Chdir, Open and Write steps the same way whatever the libmc code (-2..-5, -11 all set one flag; the script
+# then skips the rest and asks again), so no result code of those calls makes it show a message. What it does show is
+# the dialog for too little room, from the free blocks of sceMcGetInfo: "There is not enough space on the memory card
+# (PS2) in MEMORY CARD slot 1 (you need 65KB or more of free space)". The stub reported 8192 blocks whatever the folder
+# allowed. Now sceMcGetInfo creates and removes a small file in the card's folder (kept for one second, so the
+# once-a-frame polling costs nothing) and reports 0 free blocks, result 0, when it cannot: what a full card says.
+# The Mkdir/Open/Write handlers keep their codes (-5 denied, -4 no entry).
+# Limit: a card that became read-only after a save also refuses an overwrite (a console card with a save can overwrite).
+# Verified: tests/runtime/mc_read_only_test.cpp fails without (8192 blocks on a read-only folder) and passes with;
+# mc_file_numbers_test still passes; save_and_load (slow) passes on a writable folder; on a read-only mc0 (mode r-x)
+# the boot dialog and the OPTIONS > SAVE dialog are the "not enough space" text above, nothing is written.
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/MemoryCard.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/MemoryCard.cpp
+index 26f3528..9446448 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/MemoryCard.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/MemoryCard.cpp
+@@ -1,6 +1,8 @@
+ #include "Common.h"
+ #include "MemoryCard.h"
+ 
++#include <chrono>
++
+ namespace ps2_stubs
+ {
+     namespace
+@@ -80,6 +82,10 @@ namespace ps2_stubs
+         {
+             std::string currentDir = "/";
+             bool formatted = true;
++            // Whether the card's host folder accepts a new file; GetInfo probes it (at most once a second) and
++            // reports no free space when it does not, which is what a full card says on the console.
++            bool writable = true;
++            std::chrono::steady_clock::time_point writableChecked{};
+         };
+ 
+         std::mutex g_mcStateMutex;
+@@ -157,6 +163,29 @@ namespace ps2_stubs
+             std::filesystem::create_directories(getMcRootPath(port), ec);
+         }
+ 
++        // Creates and removes a small file in the card's folder. Caller holds g_mcStateMutex.
++        bool probeMcRootWritableLocked(int32_t port, McPortState &state)
++        {
++            const auto now = std::chrono::steady_clock::now();
++            if (state.writableChecked != std::chrono::steady_clock::time_point{} &&
++                now - state.writableChecked < std::chrono::seconds(1))
++            {
++                return state.writable;
++            }
++            state.writableChecked = now;
++            const std::filesystem::path probe = getMcRootPath(port) / ".don_write_probe";
++            bool ok = false;
++            if (FILE *file = std::fopen(probe.string().c_str(), "wb"))
++            {
++                ok = true;
++                std::fclose(file);
++                std::error_code ec;
++                std::filesystem::remove(probe, ec);
++            }
++            state.writable = ok;
++            return ok;
++        }
++
+         std::vector<std::string> splitMcPathComponents(const std::string &value)
+         {
+             std::vector<std::string> parts;
+@@ -886,7 +915,7 @@ namespace ps2_stubs
+             {
+                 McPortState &state = g_mcPorts[static_cast<size_t>(port)];
+                 cardType = kMcTypePs2;
+-                freeBlocks = state.formatted ? kMcFreeClusters : 0;
++                freeBlocks = (state.formatted && probeMcRootWritableLocked(port, state)) ? kMcFreeClusters : 0;
+                 format = state.formatted ? kMcFormatted : kMcUnformatted;
+                 result = state.formatted ? kMcResultSucceed : kMcResultNoFormat;
+             }

@@ -1,0 +1,69 @@
+InitThread: the main thread's priority after the call (journal 004)
+
+What it fixes: ps2_syscalls::InitThread (ps2xRuntime/src/lib/Kernel/Syscalls/Thread.cpp) replaces the
+game's own InitThread (0x10D078, libkernel's) as a whole, but it only returned the main thread's id.
+The function it replaces also ends with ChangeThreadPriority(GetThreadId(), 1) (its decompilation
+shows GetThreadId() followed by ChangeThreadPriority(..., 1) after StartThread; the same function
+also creates 'SceKerneltopThread' and a semaphore, which this patch does not add). With the main
+thread left at the priority 0 the scheduler initialises it with, the game's CRI middleware (0x314FF0)
+copies that priority with ReferThreadStatus into the four threads it creates (0x314BE0, 0x314D40,
+0x314DC8, 0x314E50), and EeScheduler::createThread rejects priority 0 with KE_ILLEGAL_PRIORITY
+(EeScheduler.cpp:426): the four threads were never created and the ADXF file read they drive never
+completed, so the boot stayed in the poll loop at 0x331C60 (journal 004). The handler now calls
+EeScheduler::changePriority(currentThreadId(), 1, false, old), exactly as the runtime's own
+ChangeThreadPriority handler does, and keeps returning EeScheduler::kMainThreadId.
+
+How it was verified: tests/runtime/init_thread_priority_test.cpp (new) runs a host function as the
+guest on a real PS2Runtime, on the runtime's own game thread: the guest calls InitThread, reads its
+own status the way the game does (GetThreadId + ReferThreadStatus), builds the parameter block the
+game builds for its CRI threads with the priority it read, and calls CreateThread and StartThread.
+It checks that the priority read is 1, that the thread is created with a positive id and that its
+entry function runs after StartThread. Against the tree without this patch the test fails (priority
+read 0, CreateThread -403, the entry never runs); with it all checks pass, and the other executables
+of tests/runtime (host_gs_hook, host_loop, host_pad_source, host_vu1_hook, iop_host_spu2,
+module_buffer_load) pass, built with PS2X_WITH_RAYLIB=OFF and DISPLAY unset. In the game itself
+(bash tools/run/smoke.sh 60, headless, the port's host program) a gdb trace shows
+ps2_syscalls::InitThread called once from 0x116618 (the game's _InitSys) and the four CreateThread
+calls now carrying initial_priority 1, StartThread returning ids 2 to 5. The game no longer stalls
+for this reason; the wait at 0x331C60 continues for a later, independent cause (journal 005).
+
+Origin: original work for this project (T-016). The console behaviour is taken from the game's own
+code (0x10D078, tools/re/decompile.sh) and from ps2_syscalls::ChangeThreadPriority in the same file.
+
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/Thread.cpp b/ps2xRuntime/src/lib/Kernel/Syscalls/Thread.cpp
+index 5110ee2..d1f4dd6 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/Thread.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/Thread.cpp
+@@ -13,6 +13,10 @@ namespace ps2_syscalls
+             return result;
+         }
+ 
++        // The main thread's priority after the console's InitThread: its own code (0x10D078) ends with
++        // ChangeThreadPriority(GetThreadId(), 1). See the handler below and journal 004.
++        constexpr int kInitThreadMainPriority = 1;
++
+         int rawThreadStatus(EeThreadStatus status)
+         {
+             switch (status)
+@@ -180,9 +184,20 @@ namespace ps2_syscalls
+         setReturnS32(ctx, KE_OK);
+     }
+ 
+-    void InitThread(uint8_t *, R5900Context *ctx, PS2Runtime *)
++    void InitThread(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
++        // This handler replaces the game's own InitThread (0x10D078) as a whole. That function ends
++        // with ChangeThreadPriority(GetThreadId(), 1), so the call has to be made here, the same way
++        // ChangeThreadPriority below does it. The game's CRI middleware (0x314FF0) reads this
++        // thread's priority with ReferThreadStatus and copies it into the four threads it creates
++        // (0x314BE0, 0x314D40, 0x314DC8, 0x314E50). With the main thread left at the priority 0 the
++        // scheduler initialises it with, CreateThread rejects them with KE_ILLEGAL_PRIORITY and the
++        // ADXF read they drive never completes (journal 004).
++        EeScheduler &ee = scheduler(rdram, ctx, runtime);
++        int oldPriority = 0;
++        ee.changePriority(ee.currentThreadId(), kInitThreadMainPriority, false, oldPriority);
+         setReturnS32(ctx, EeScheduler::kMainThreadId);
++        ee.transferIfRequested(false);
+     }
+ 
+     void CreateThread(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)

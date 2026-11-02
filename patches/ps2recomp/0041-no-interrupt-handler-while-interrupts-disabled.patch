@@ -1,0 +1,172 @@
+# 0041-no-interrupt-handler-while-interrupts-disabled: the scheduler starts no interrupt handler (and ends
+# no time slice) while the running context has interrupts disabled
+#
+# What it fixes: the game stops in several places (an idle title, the title with sound, a fight with
+# inputs; docs/journal/011, 026) with its GS packet queue holding one entry that nothing sends. The game
+# sends a packet inside DI ... EI (FUN_002D46B8: DI, wait for Status bit 16 to read clear, call
+# FUN_002D3A60(-1), EI): the call stores the DMA channel's control register, which here finishes the
+# transfer at once and queues the end-of-transfer interrupt, and only AFTER the store sets the "busy"
+# counter. On the console the interrupt cannot arrive inside the section. Here the scheduler never read
+# the status register, so the handler (FUN_002D3A60 with argument 1 or 2) could start at a checkpoint
+# inside the section, find the counter still zero, return, and the game then marked the queue busy for an
+# interrupt that never comes: the main thread spins in FUN_002D46B8 for ever.
+#
+# The change (EeScheduler): the head of the pending-invocation queue is not started while it is an
+# interrupt (INTC/DMAC handler, alarm, GS callback) and the context it would interrupt has Status.EIE
+# (bit 16, what the recompiled DI/EI clear and set), Status.IE (bit 0), or Status.EXL/ERL (bits 1, 2)
+# not in the "enabled" state. It stays queued, in order (only the head is looked at, nothing is reordered,
+# nothing is dropped or duplicated), and m_interruptsDeferred makes the slow path look at it again every
+# kInterruptRecheckCycles (64 EE cycles, 8 dispatches) until the context enables interrupts: after an EI
+# nothing calls the scheduler, so the fast path alone would wait for the next IOP batch (256 dispatches).
+# The end of the time slice (the console's timer interrupt) is postponed the same way. RPC, SIF command,
+# syscall-override, exit-handler and HLE invocations are the runtime's own calls and are not gated. The
+# idle path (no thread running) has no context to be disabled and is not gated.
+#
+# Not changed (one topic per patch): a cause that arrives while its mask or handler is not enabled is
+# still dropped instead of staying pending (journal 011).
+#
+# Verified: tests/runtime/irq_di_section_test.cpp (300 rounds of DI; raise the DMAC channel-1 interrupt;
+# 40 small calls; mark busy; EI): unpatched the handler starts inside the section in 300 of 300 rounds and
+# busy is never cleared; patched 0 of 300, every interrupt delivered once. pacing_neutral_test and
+# scheduler_fast_path_test pass.
+#
+diff --git a/ps2xRuntime/include/runtime/ee_scheduler.h b/ps2xRuntime/include/runtime/ee_scheduler.h
+index 13a5776..9a8ba4b 100644
+--- a/ps2xRuntime/include/runtime/ee_scheduler.h
++++ b/ps2xRuntime/include/runtime/ee_scheduler.h
+@@ -295,6 +295,9 @@ public:
+     static constexpr uint64_t kEeClockHz = 294912000ull;
+     static constexpr uint32_t kGeneratedCheckpointCycles = 32u;
+     static constexpr uint32_t kGuestDispatchCycles = 8u;
++    // Patch 0041: how soon (EE cycles, 8 dispatches) the slow path looks again at a deferred handler or at a
++    // slice that ended inside a DI ... EI section.
++    static constexpr uint64_t kInterruptRecheckCycles = 64u;
+     static constexpr uint64_t kDefaultTimeSliceCycles = 65536ull;
+ 
+     explicit EeScheduler(PS2Runtime &runtime);
+@@ -438,6 +441,10 @@ private:
+     void updateFastPathCycle() noexcept;
+     [[nodiscard]] bool hasReadyAtOrAbovePriority(int priority) const;
+     void renewTimeSlice();
++    // Patch 0041: an interrupt handler does not start, and the time slice does not expire, while the context
++    // that would be interrupted has interrupts disabled (see EeScheduler.cpp, interruptsEnabled).
++    [[nodiscard]] static bool interruptsEnabled(const R5900Context &context) noexcept;
++    [[nodiscard]] static bool isInterruptInvocation(const GuestInvocation &invocation) noexcept;
+     void copyMainContextToRuntime();
+     void publishDebugContext(const R5900Context &context);
+     void publishIdleDebugContext();
+@@ -487,6 +494,8 @@ private:
+     // and the next IOP batch) and its counters. m_snapshotRequested is set by snapshot() (any thread) and
+     // consumed by the slow path on the executor thread.
+     uint64_t m_nextFastPathCycle = 0;
++    // Patch 0041: a queued interrupt handler is waiting for the running context to enable interrupts.
++    bool m_interruptsDeferred = false;
+     uint64_t m_dispatchCount = 0;
+     uint64_t m_fastPathCount = 0;
+     uint64_t m_slowPathCount = 0;
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index 8df424c..d9aa8b3 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -141,6 +141,7 @@ void EeScheduler::reset(uint8_t *rdram, const R5900Context &mainContext)
+     m_dispatchCount = 0;
+     m_fastPathCount = 0;
+     m_slowPathCount = 0;
++    m_interruptsDeferred = false;
+     m_snapshotRequested.store(false, std::memory_order_release);
+     {
+         std::lock_guard lock(m_eventMutex);
+@@ -275,8 +276,21 @@ void EeScheduler::run()
+             continue;
+         }
+ 
+-        if (!m_pendingInvocations.empty() && running->invocations.empty())
++        // Patch 0041: the head of the queue is an interrupt and the context it would interrupt has
++        // interrupts disabled (the game's DI ... EI): it stays queued, in order, and is looked at again
++        // by the slow path (m_interruptsDeferred) until the context enables them.
++        if (!m_pendingInvocations.empty() && running->invocations.empty() &&
++            isInterruptInvocation(m_pendingInvocations.front()) && !interruptsEnabled(context))
+         {
++            if (!m_interruptsDeferred)
++            {
++                m_interruptsDeferred = true;
++                updateFastPathCycle();
++            }
++        }
++        else if (!m_pendingInvocations.empty() && running->invocations.empty())
++        {
++            m_interruptsDeferred = false;
+             GuestInvocation invocation = std::move(m_pendingInvocations.front());
+             m_pendingInvocations.pop_front();
+             if (getRegU32(&invocation.context, 29) == 0u)
+@@ -405,6 +419,19 @@ bool EeScheduler::slowPathCheckpoint() noexcept
+         publishSnapshot();
+     }
+ 
++    // Patch 0041: a handler waits for interrupts to be enabled; if this context has enabled them, the
++    // run loop starts it now.
++    if (m_interruptsDeferred)
++    {
++        const GuestThread *deferredFor = currentThread();
++        if (deferredFor == nullptr || m_pendingInvocations.empty() ||
++            interruptsEnabled(deferredFor->activeContext()))
++        {
++            m_interruptsDeferred = false;
++            m_checkpointPending.store(true, std::memory_order_release);
++        }
++    }
++
+     if (m_checkpointPending.load(std::memory_order_acquire) ||
+         m_stopRequested.load(std::memory_order_acquire))
+     {
+@@ -427,6 +454,14 @@ bool EeScheduler::slowPathCheckpoint() noexcept
+     }
+ 
+     const GuestThread *running = currentThread();
++    // Patch 0041: the slice ends with the console's timer interrupt, which cannot arrive inside a DI ...
++    // EI section: look again a few dispatches later instead of switching threads in the middle of it.
++    if (running != nullptr && !interruptsEnabled(running->activeContext()))
++    {
++        m_sliceEndCycle = m_eeCycle + kInterruptRecheckCycles;
++        updateFastPathCycle();
++        return false;
++    }
+     if (running != nullptr && hasReadyAtOrAbovePriority(running->currentPriority))
+     {
+         m_rescheduleRequested = true;
+@@ -450,6 +485,10 @@ void EeScheduler::updateFastPathCycle() noexcept
+     // slow path. The EE timers are advanced on every dispatch (see checkpointDue), so they need no
+     // boundary of their own.
+     uint64_t next = m_sliceEndCycle;
++    if (m_interruptsDeferred && m_eeCycle + kInterruptRecheckCycles < next)
++    {
++        next = m_eeCycle + kInterruptRecheckCycles; // patch 0041: a deferred handler is looked at again soon
++    }
+     const uint64_t deadline = m_nextDeadlineCycle.load(std::memory_order_acquire);
+     if (deadline != 0u && deadline < next)
+     {
+@@ -480,6 +519,24 @@ EeDispatchStats EeScheduler::dispatchStats() const noexcept
+     return stats;
+ }
+ 
++bool EeScheduler::interruptsEnabled(const R5900Context &context) noexcept
++{
++    // Patch 0041: the three things that keep the console from taking an interrupt: the DI/EI bit
++    // (EIE, bit 16, which the recompiled DI and EI clear and set), the master enable (IE, bit 0), and
++    // being inside an exception (EXL, bit 1, or ERL, bit 2).
++    const uint32_t status = context.cop0_status;
++    return (status & 0x10000u) != 0u && (status & 0x1u) != 0u && (status & 0x6u) == 0u;
++}
++
++bool EeScheduler::isInterruptInvocation(const GuestInvocation &invocation) noexcept
++{
++    // The invocations that stand for a hardware interrupt: the INTC/DMAC handlers, the alarm (timer)
++    // and the GS vertical-blank callback. The RPC, SIF command, syscall-override, exit-handler and HLE
++    // invocations are the runtime's own calls, not interrupts.
++    return invocation.kind == GuestInvocationKind::Interrupt || invocation.kind == GuestInvocationKind::Alarm ||
++           invocation.kind == GuestInvocationKind::GsCallback;
++}
++
+ void EeScheduler::accountCycles(uint32_t cycles) noexcept
+ {
+     const uint64_t elapsed = std::max<uint64_t>(1u, cycles);

@@ -1,0 +1,93 @@
+# 0060-current-thread-cache: the run loop stops hashing for the current thread at every iteration
+#
+# What it does: EeScheduler::currentThread() keeps the pointer of its last answer (dropped where a thread is
+# erased or the map is cleared; executor thread only), and the two processPendingEvents() calls of run() are
+# made only when the checkpoint flag is set (the function returned at once otherwise). Neither changes what
+# the guest computes. Found by the sampling profiler (T-203): the unordered_map lookup was the largest
+# single cost of EeScheduler::run().
+# Verified: DON_TRACE_STATE lines of work/det/quit70.txt (every 60 blanks) and of a route into the fight
+# (every 600), sound off and sound on, identical before and after; fight mean work 13.3 -> 11.5 ms per blank.
+#
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -108,6 +108,7 @@
+     m_rdram = rdram;
+     m_readyQueues = {};
+     m_threads.clear();
++    m_currentThreadCachePtr = nullptr;
+     m_semaphores.clear();
+     m_eventFlags.clear();
+     m_alarms.clear();
+@@ -186,7 +187,10 @@
+ 
+     while (!m_stopRequested.load(std::memory_order_acquire))
+     {
+-        processPendingEvents();
++        if (m_checkpointPending.load(std::memory_order_acquire))
++        {
++            processPendingEvents();
++        }
+         if (m_stopRequested.load(std::memory_order_acquire))
+         {
+             break;
+@@ -360,7 +364,10 @@
+             throw;
+         }
+ 
+-        processPendingEvents();
++        if (m_checkpointPending.load(std::memory_order_acquire))
++        {
++            processPendingEvents();
++        }
+         if (m_rescheduleRequested && m_currentThreadId != 0)
+         {
+             GuestThread *preempted = currentThread();
+@@ -667,6 +674,7 @@
+     {
+         ownedStack = it->second.stack;
+     }
++    m_currentThreadCachePtr = nullptr;
+     m_threads.erase(it);
+     publishSnapshot();
+     return KE_OK;
+@@ -715,6 +723,7 @@
+     m_currentThreadId = 0;
+     if (deleteThreadRecord && id != kMainThreadId)
+     {
++        m_currentThreadCachePtr = nullptr;
+         m_threads.erase(id);
+     }
+     if (ownedStack != 0u)
+@@ -1625,7 +1634,14 @@
+ 
+ GuestThread *EeScheduler::currentThread()
+ {
+-    return thread(m_currentThreadId);
++    if (m_currentThreadCachePtr != nullptr && m_currentThreadCacheId == m_currentThreadId)
++    {
++        return m_currentThreadCachePtr;
++    }
++    GuestThread *found = thread(m_currentThreadId);
++    m_currentThreadCachePtr = found;
++    m_currentThreadCacheId = m_currentThreadId;
++    return found;
+ }
+ 
+ const GuestThread *EeScheduler::currentThread() const
+diff --git a/ps2xRuntime/include/runtime/ee_scheduler.h b/ps2xRuntime/include/runtime/ee_scheduler.h
+--- a/ps2xRuntime/include/runtime/ee_scheduler.h
++++ b/ps2xRuntime/include/runtime/ee_scheduler.h
+@@ -514,6 +514,12 @@
+     // Patch 0041: a queued interrupt handler is waiting for the running context to enable interrupts.
+     bool m_interruptsDeferred = false;
+     bool m_unwinding = false;
++    // Patch 0060: the run loop asks for the current thread at every iteration; the map lookup (a hash and a
++    // division) was the largest single cost of run(). The pointer of the last answer is kept: elements of an
++    // unordered_map keep their address when others are added, so it is dropped only where a thread is erased
++    // or the map is cleared. Executor thread only (currentThread() is not const).
++    GuestThread *m_currentThreadCachePtr = nullptr;
++    int m_currentThreadCacheId = 0;
+     std::atomic<uint64_t> m_pacingWaitNs{0};
+     uint64_t m_dispatchCount = 0;
+     uint64_t m_fastPathCount = 0;

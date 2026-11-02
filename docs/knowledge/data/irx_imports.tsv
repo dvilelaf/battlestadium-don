@@ -1,0 +1,710 @@
+module	module_name	module_version	imported_library	version	ordinal	supported	provider	package
+libsd	Sound_Device_Library	3.03	intrman	1.02	4	yes		0000.FPK
+libsd	Sound_Device_Library	3.03	intrman	1.02	5	yes		0000.FPK
+libsd	Sound_Device_Library	3.03	intrman	1.02	6	yes		0000.FPK
+libsd	Sound_Device_Library	3.03	intrman	1.02	7	yes		0000.FPK
+libsd	Sound_Device_Library	3.03	intrman	1.02	17	yes		0000.FPK
+libsd	Sound_Device_Library	3.03	intrman	1.02	18	yes		0000.FPK
+libsd	Sound_Device_Library	3.03	intrman	1.02	23	yes		0000.FPK
+libsd	Sound_Device_Library	3.03	loadcore	1.03	5	yes		0000.FPK
+libsd	Sound_Device_Library	3.03	loadcore	1.03	6	yes		0000.FPK
+libsd	Sound_Device_Library	3.03	sifman	1.01	7	yes		0000.FPK
+libsd	Sound_Device_Library	3.03	sifman	1.01	8	yes		0000.FPK
+libsd	Sound_Device_Library	3.03	sysclib	1.04	17	yes		0000.FPK
+libsd	Sound_Device_Library	3.03	thevent	1.01	4	yes		0000.FPK
+libsd	Sound_Device_Library	3.03	thevent	1.01	5	yes		0000.FPK
+libsd	Sound_Device_Library	3.03	thevent	1.01	6	yes		0000.FPK
+libsd	Sound_Device_Library	3.03	thevent	1.01	7	yes		0000.FPK
+libsd	Sound_Device_Library	3.03	thevent	1.01	8	yes		0000.FPK
+libsd	Sound_Device_Library	3.03	thevent	1.01	9	yes		0000.FPK
+libsd	Sound_Device_Library	3.03	thevent	1.01	10	yes		0000.FPK
+sio2man	sio2man	3.01	loadcore	1.03	6	yes		0000.FPK
+sio2man	sio2man	3.01	intrman	1.02	4	yes		0000.FPK
+sio2man	sio2man	3.01	intrman	1.02	5	yes		0000.FPK
+sio2man	sio2man	3.01	intrman	1.02	6	yes		0000.FPK
+sio2man	sio2man	3.01	intrman	1.02	7	yes		0000.FPK
+sio2man	sio2man	3.01	intrman	1.02	17	yes		0000.FPK
+sio2man	sio2man	3.01	intrman	1.02	18	yes		0000.FPK
+sio2man	sio2man	3.01	stdio	1.03	4	yes		0000.FPK
+sio2man	sio2man	3.01	dmacman	1.02	28	yes		0000.FPK
+sio2man	sio2man	3.01	dmacman	1.02	32	yes		0000.FPK
+sio2man	sio2man	3.01	dmacman	1.02	33	yes		0000.FPK
+sio2man	sio2man	3.01	dmacman	1.02	34	yes		0000.FPK
+sio2man	sio2man	3.01	dmacman	1.02	35	yes		0000.FPK
+sio2man	sio2man	3.01	thbase	1.02	4	yes		0000.FPK
+sio2man	sio2man	3.01	thbase	1.02	6	yes		0000.FPK
+sio2man	sio2man	3.01	thbase	1.02	20	yes		0000.FPK
+sio2man	sio2man	3.01	thevent	1.01	4	yes		0000.FPK
+sio2man	sio2man	3.01	thevent	1.01	6	yes		0000.FPK
+sio2man	sio2man	3.01	thevent	1.01	7	yes		0000.FPK
+sio2man	sio2man	3.01	thevent	1.01	8	yes		0000.FPK
+sio2man	sio2man	3.01	thevent	1.01	10	yes		0000.FPK
+sio2man	sio2man	3.01	thsemap	1.01	4	yes		0000.FPK
+sio2man	sio2man	3.01	thsemap	1.01	6	yes		0000.FPK
+sio2man	sio2man	3.01	thsemap	1.01	8	yes		0000.FPK
+sio2man	sio2man	3.01	thsemap	1.01	11	yes		0000.FPK
+sio2man	sio2man	3.01	sysclib	1.04	8	yes		0000.FPK
+sio2man	sio2man	3.01	sysclib	1.04	29	yes		0000.FPK
+sio2man	sio2man	3.01	sysclib	1.04	36	yes		0000.FPK
+mtapman	multitap_manager	3.16	sysmem	1.02	14	yes		0000.FPK
+mtapman	multitap_manager	3.16	loadcore	1.03	6	yes		0000.FPK
+mtapman	multitap_manager	3.16	loadcore	1.03	27	yes		0000.FPK
+mtapman	multitap_manager	3.16	intrman	1.02	17	yes		0000.FPK
+mtapman	multitap_manager	3.16	intrman	1.02	18	yes		0000.FPK
+mtapman	multitap_manager	3.16	stdio	1.03	4	yes		0000.FPK
+mtapman	multitap_manager	3.16	thbase	1.02	4	yes		0000.FPK
+mtapman	multitap_manager	3.16	thbase	1.02	6	yes		0000.FPK
+mtapman	multitap_manager	3.16	thbase	1.02	8	yes		0000.FPK
+mtapman	multitap_manager	3.16	thbase	1.02	14	yes		0000.FPK
+mtapman	multitap_manager	3.16	thbase	1.02	20	yes		0000.FPK
+mtapman	multitap_manager	3.16	thbase	1.02	33	yes		0000.FPK
+mtapman	multitap_manager	3.16	thevent	1.01	4	yes		0000.FPK
+mtapman	multitap_manager	3.16	thevent	1.01	6	yes		0000.FPK
+mtapman	multitap_manager	3.16	thevent	1.01	10	yes		0000.FPK
+mtapman	multitap_manager	3.16	thsemap	1.01	4	yes		0000.FPK
+mtapman	multitap_manager	3.16	thsemap	1.01	5	yes		0000.FPK
+mtapman	multitap_manager	3.16	thsemap	1.01	6	yes		0000.FPK
+mtapman	multitap_manager	3.16	thsemap	1.01	8	yes		0000.FPK
+mtapman	multitap_manager	3.16	sifman	1.01	5	yes		0000.FPK
+mtapman	multitap_manager	3.16	sifman	1.01	7	yes		0000.FPK
+mtapman	multitap_manager	3.16	sifman	1.01	8	yes		0000.FPK
+mtapman	multitap_manager	3.16	sifman	1.01	29	yes		0000.FPK
+mtapman	multitap_manager	3.16	sysclib	1.04	8	yes		0000.FPK
+mtapman	multitap_manager	3.16	sysclib	1.04	29	yes		0000.FPK
+mtapman	multitap_manager	3.16	sysclib	1.04	36	yes		0000.FPK
+mtapman	multitap_manager	3.16	sifcmd	1.01	14	yes		0000.FPK
+mtapman	multitap_manager	3.16	sifcmd	1.01	17	yes		0000.FPK
+mtapman	multitap_manager	3.16	sifcmd	1.01	19	yes		0000.FPK
+mtapman	multitap_manager	3.16	sifcmd	1.01	22	yes		0000.FPK
+mtapman	multitap_manager	3.16	sio2man	2.04	48	module	sio2man	0000.FPK
+mtapman	multitap_manager	3.16	sio2man	2.04	51	module	sio2man	0000.FPK
+mtapman	multitap_manager	3.16	sio2man	2.04	52	module	sio2man	0000.FPK
+mtapman	multitap_manager	3.16	sio2man	2.04	53	module	sio2man	0000.FPK
+mtapman	multitap_manager	3.16	sio2man	2.04	54	module	sio2man	0000.FPK
+mtapman	multitap_manager	3.16	sio2man	2.04	55	module	sio2man	0000.FPK
+mtapman	multitap_manager	3.16	sio2man	2.04	56	module	sio2man	0000.FPK
+mcman	mcman	2.38	loadcore	1.03	6	yes		0000.FPK
+mcman	mcman	2.38	loadcore	1.03	7	yes		0000.FPK
+mcman	mcman	2.38	intrman	1.02	17	yes		0000.FPK
+mcman	mcman	2.38	intrman	1.02	18	yes		0000.FPK
+mcman	mcman	2.38	sio2man	2.04	24	module	sio2man	0000.FPK
+mcman	mcman	2.38	sio2man	2.04	25	module	sio2man	0000.FPK
+mcman	mcman	2.38	sio2man	2.04	26	module	sio2man	0000.FPK
+mcman	mcman	2.38	sio2man	2.04	57	module	sio2man	0000.FPK
+mcman	mcman	2.38	sio2man	2.04	59	module	sio2man	0000.FPK
+mcman	mcman	2.38	sysclib	1.04	12	yes		0000.FPK
+mcman	mcman	2.38	sysclib	1.04	14	yes		0000.FPK
+mcman	mcman	2.38	sysclib	1.04	20	yes		0000.FPK
+mcman	mcman	2.38	sysclib	1.04	21	yes		0000.FPK
+mcman	mcman	2.38	sysclib	1.04	22	yes		0000.FPK
+mcman	mcman	2.38	sysclib	1.04	23	yes		0000.FPK
+mcman	mcman	2.38	sysclib	1.04	27	yes		0000.FPK
+mcman	mcman	2.38	sysclib	1.04	29	yes		0000.FPK
+mcman	mcman	2.38	sysclib	1.04	30	yes		0000.FPK
+mcman	mcman	2.38	sysclib	1.04	32	yes		0000.FPK
+mcman	mcman	2.38	stdio	1.03	4	yes		0000.FPK
+mcman	mcman	2.38	thbase	1.02	33	yes		0000.FPK
+mcman	mcman	2.38	thbase	1.02	35	yes		0000.FPK
+mcman	mcman	2.38	thbase	1.02	39	yes		0000.FPK
+mcman	mcman	2.38	thsemap	1.01	4	yes		0000.FPK
+mcman	mcman	2.38	thsemap	1.01	5	yes		0000.FPK
+mcman	mcman	2.38	thsemap	1.01	6	yes		0000.FPK
+mcman	mcman	2.38	thsemap	1.01	7	yes		0000.FPK
+mcman	mcman	2.38	thsemap	1.01	8	yes		0000.FPK
+mcman	mcman	2.38	modload	1.07	13	yes		0000.FPK
+mcman	mcman	2.38	ioman	1.04	20	yes		0000.FPK
+mcman	mcman	2.38	ioman	1.04	21	yes		0000.FPK
+mcman	mcman	2.38	secrman	1.03	4	yes		0000.FPK
+mcman	mcman	2.38	secrman	1.03	5	yes		0000.FPK
+mcman	mcman	2.38	secrman	1.03	6	no		0000.FPK
+mcman	mcman	2.38	cdvdman	1.01	24	no		0000.FPK
+mcserv	mcserv	2.16	loadcore	1.03	6	yes		0000.FPK
+mcserv	mcserv	2.16	loadcore	1.03	7	yes		0000.FPK
+mcserv	mcserv	2.16	intrman	1.02	17	yes		0000.FPK
+mcserv	mcserv	2.16	intrman	1.02	18	yes		0000.FPK
+mcserv	mcserv	2.16	sysclib	1.04	12	yes		0000.FPK
+mcserv	mcserv	2.16	sysclib	1.04	14	yes		0000.FPK
+mcserv	mcserv	2.16	sysclib	1.04	29	yes		0000.FPK
+mcserv	mcserv	2.16	sysclib	1.04	36	yes		0000.FPK
+mcserv	mcserv	2.16	stdio	1.03	4	yes		0000.FPK
+mcserv	mcserv	2.16	sifman	1.01	5	yes		0000.FPK
+mcserv	mcserv	2.16	sifman	1.01	7	yes		0000.FPK
+mcserv	mcserv	2.16	sifman	1.01	8	yes		0000.FPK
+mcserv	mcserv	2.16	sifman	1.01	29	yes		0000.FPK
+mcserv	mcserv	2.16	sifcmd	1.01	14	yes		0000.FPK
+mcserv	mcserv	2.16	sifcmd	1.01	17	yes		0000.FPK
+mcserv	mcserv	2.16	sifcmd	1.01	19	yes		0000.FPK
+mcserv	mcserv	2.16	sifcmd	1.01	22	yes		0000.FPK
+mcserv	mcserv	2.16	sifcmd	1.01	23	yes		0000.FPK
+mcserv	mcserv	2.16	sifcmd	1.01	24	yes		0000.FPK
+mcserv	mcserv	2.16	sifcmd	1.01	25	yes		0000.FPK
+mcserv	mcserv	2.16	thbase	1.02	4	yes		0000.FPK
+mcserv	mcserv	2.16	thbase	1.02	5	yes		0000.FPK
+mcserv	mcserv	2.16	thbase	1.02	6	yes		0000.FPK
+mcserv	mcserv	2.16	thbase	1.02	10	yes		0000.FPK
+mcserv	mcserv	2.16	thbase	1.02	14	yes		0000.FPK
+mcserv	mcserv	2.16	thbase	1.02	20	yes		0000.FPK
+mcserv	mcserv	2.16	thbase	1.02	22	yes		0000.FPK
+mcserv	mcserv	2.16	thbase	1.02	33	yes		0000.FPK
+mcserv	mcserv	2.16	thsemap	1.01	6	yes		0000.FPK
+mcserv	mcserv	2.16	thsemap	1.01	8	yes		0000.FPK
+mcserv	mcserv	2.16	mcman	2.07	6	module	mcman	0000.FPK
+mcserv	mcserv	2.16	mcman	2.07	7	module	mcman	0000.FPK
+mcserv	mcserv	2.16	mcman	2.07	8	module	mcman	0000.FPK
+mcserv	mcserv	2.16	mcman	2.07	9	module	mcman	0000.FPK
+mcserv	mcserv	2.16	mcman	2.07	10	module	mcman	0000.FPK
+mcserv	mcserv	2.16	mcman	2.07	11	module	mcman	0000.FPK
+mcserv	mcserv	2.16	mcman	2.07	12	module	mcman	0000.FPK
+mcserv	mcserv	2.16	mcman	2.07	13	module	mcman	0000.FPK
+mcserv	mcserv	2.16	mcman	2.07	14	module	mcman	0000.FPK
+mcserv	mcserv	2.16	mcman	2.07	15	module	mcman	0000.FPK
+mcserv	mcserv	2.16	mcman	2.07	16	module	mcman	0000.FPK
+mcserv	mcserv	2.16	mcman	2.07	21	module	mcman	0000.FPK
+mcserv	mcserv	2.16	mcman	2.07	22	module	mcman	0000.FPK
+mcserv	mcserv	2.16	mcman	2.07	23	module	mcman	0000.FPK
+mcserv	mcserv	2.16	mcman	2.07	24	module	mcman	0000.FPK
+mcserv	mcserv	2.16	mcman	2.07	26	module	mcman	0000.FPK
+mcserv	mcserv	2.16	mcman	2.07	36	module	mcman	0000.FPK
+mcserv	mcserv	2.16	mcman	2.07	37	module	mcman	0000.FPK
+mcserv	mcserv	2.16	mcman	2.07	38	module	mcman	0000.FPK
+mcserv	mcserv	2.16	mcman	2.07	39	module	mcman	0000.FPK
+mcserv	mcserv	2.16	mcman	2.07	42	module	mcman	0000.FPK
+mcserv	mcserv	2.16	mcman	2.07	45	module	mcman	0000.FPK
+mcserv	mcserv	2.16	mcman	2.07	53	module	mcman	0000.FPK
+padman	padman	4.33	sysmem	1.02	14	yes		0000.FPK
+padman	padman	4.33	loadcore	1.03	6	yes		0000.FPK
+padman	padman	4.33	loadcore	1.03	27	yes		0000.FPK
+padman	padman	4.33	intrman	1.02	4	yes		0000.FPK
+padman	padman	4.33	intrman	1.02	5	yes		0000.FPK
+padman	padman	4.33	intrman	1.02	6	yes		0000.FPK
+padman	padman	4.33	intrman	1.02	17	yes		0000.FPK
+padman	padman	4.33	intrman	1.02	18	yes		0000.FPK
+padman	padman	4.33	stdio	1.03	4	yes		0000.FPK
+padman	padman	4.33	sio2man	2.04	11	module	sio2man	0000.FPK
+padman	padman	4.33	sio2man	2.04	46	module	sio2man	0000.FPK
+padman	padman	4.33	sio2man	2.04	51	module	sio2man	0000.FPK
+padman	padman	4.33	sio2man	2.04	52	module	sio2man	0000.FPK
+padman	padman	4.33	sio2man	2.04	57	module	sio2man	0000.FPK
+padman	padman	4.33	sio2man	2.04	58	module	sio2man	0000.FPK
+padman	padman	4.33	sio2man	2.04	60	module	sio2man	0000.FPK
+padman	padman	4.33	thbase	1.02	4	yes		0000.FPK
+padman	padman	4.33	thbase	1.02	5	yes		0000.FPK
+padman	padman	4.33	thbase	1.02	6	yes		0000.FPK
+padman	padman	4.33	thbase	1.02	8	yes		0000.FPK
+padman	padman	4.33	thbase	1.02	20	yes		0000.FPK
+padman	padman	4.33	thbase	1.02	22	yes		0000.FPK
+padman	padman	4.33	thbase	1.02	23	yes		0000.FPK
+padman	padman	4.33	thevent	1.01	4	yes		0000.FPK
+padman	padman	4.33	thevent	1.01	5	yes		0000.FPK
+padman	padman	4.33	thevent	1.01	6	yes		0000.FPK
+padman	padman	4.33	thevent	1.01	7	yes		0000.FPK
+padman	padman	4.33	thevent	1.01	8	yes		0000.FPK
+padman	padman	4.33	thevent	1.01	10	yes		0000.FPK
+padman	padman	4.33	thsemap	1.01	4	yes		0000.FPK
+padman	padman	4.33	thsemap	1.01	5	yes		0000.FPK
+padman	padman	4.33	thsemap	1.01	7	yes		0000.FPK
+padman	padman	4.33	thsemap	1.01	8	yes		0000.FPK
+padman	padman	4.33	timrman	1.03	4	yes		0000.FPK
+padman	padman	4.33	timrman	1.03	6	yes		0000.FPK
+padman	padman	4.33	timrman	1.03	7	yes		0000.FPK
+padman	padman	4.33	timrman	1.03	9	yes		0000.FPK
+padman	padman	4.33	timrman	1.03	11	yes		0000.FPK
+padman	padman	4.33	timrman	1.03	16	yes		0000.FPK
+padman	padman	4.33	sifman	1.01	5	yes		0000.FPK
+padman	padman	4.33	sifman	1.01	7	yes		0000.FPK
+padman	padman	4.33	sifman	1.01	8	yes		0000.FPK
+padman	padman	4.33	sifman	1.01	29	yes		0000.FPK
+padman	padman	4.33	sifman	1.01	32	no		0000.FPK
+padman	padman	4.33	sifcmd	1.01	14	yes		0000.FPK
+padman	padman	4.33	sifcmd	1.01	17	yes		0000.FPK
+padman	padman	4.33	sifcmd	1.01	19	yes		0000.FPK
+padman	padman	4.33	sifcmd	1.01	22	yes		0000.FPK
+padman	padman	4.33	sifcmd	1.01	28	yes		0000.FPK
+padman	padman	4.33	vblank	1.01	8	yes		0000.FPK
+padman	padman	4.33	vblank	1.01	9	yes		0000.FPK
+padman	padman	4.33	sysclib	1.04	8	yes		0000.FPK
+padman	padman	4.33	sysclib	1.04	12	yes		0000.FPK
+padman	padman	4.33	sysclib	1.04	29	yes		0000.FPK
+padman	padman	4.33	sysclib	1.04	36	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	sysmem	1.02	14	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	loadcore	1.03	6	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	loadcore	1.03	7	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	intrman	1.02	17	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	intrman	1.02	18	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	intrman	1.02	23	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	stdio	1.03	4	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	thbase	1.02	33	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	thbase	1.02	36	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	thbase	1.02	37	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	thbase	1.02	38	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	thevent	1.01	6	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	thevent	1.01	7	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	thevent	1.01	8	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	thevent	1.01	9	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	thevent	1.01	10	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	thsemap	1.01	4	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	thsemap	1.01	5	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	thsemap	1.01	6	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	thsemap	1.01	8	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	sifman	1.01	7	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	sifman	1.01	8	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	ioman	1.04	20	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	ioman	1.04	21	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	cdvdman	1.01	11	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	cdvdman	1.01	12	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	cdvdman	1.01	39	no		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	cdvdman	1.01	40	no		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	cdvdman	1.01	46	no		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	cdvdman	1.01	48	no		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	cdvdman	1.01	49	no		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	cdvdman	1.01	50	yes		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	cdvdman	1.01	61	no		0000.FPK
+cdvdstm	cdvd_st_driver	2.02	cdvdman	1.01	114	no		0000.FPK
+rtfssiop		0.00	sysmem	1.02	4	yes		0000.FPK
+rtfssiop		0.00	sysmem	1.02	5	yes		0000.FPK
+rtfssiop		0.00	sysmem	1.02	14	yes		0000.FPK
+rtfssiop		0.00	intrman	1.02	17	yes		0000.FPK
+rtfssiop		0.00	intrman	1.02	18	yes		0000.FPK
+rtfssiop		0.00	ioman	1.04	4	no		0000.FPK
+rtfssiop		0.00	ioman	1.04	5	no		0000.FPK
+rtfssiop		0.00	ioman	1.04	6	no		0000.FPK
+rtfssiop		0.00	ioman	1.04	8	no		0000.FPK
+rtfssiop		0.00	ioman	1.04	28	no		0000.FPK
+rtfssiop		0.00	loadcore	1.03	6	yes		0000.FPK
+rtfssiop		0.00	sifcmd	1.01	8	yes		0000.FPK
+rtfssiop		0.00	sifcmd	1.01	10	yes		0000.FPK
+rtfssiop		0.00	sifcmd	1.01	12	yes		0000.FPK
+rtfssiop		0.00	sifcmd	1.01	14	yes		0000.FPK
+rtfssiop		0.00	sifcmd	1.01	17	yes		0000.FPK
+rtfssiop		0.00	sifcmd	1.01	19	yes		0000.FPK
+rtfssiop		0.00	sifcmd	1.01	22	yes		0000.FPK
+rtfssiop		0.00	sifman	1.01	7	yes		0000.FPK
+rtfssiop		0.00	sifman	1.01	8	yes		0000.FPK
+rtfssiop		0.00	sysclib	1.04	6	yes		0000.FPK
+rtfssiop		0.00	sysclib	1.04	12	yes		0000.FPK
+rtfssiop		0.00	sysclib	1.04	20	yes		0000.FPK
+rtfssiop		0.00	sysclib	1.04	21	yes		0000.FPK
+rtfssiop		0.00	sysclib	1.04	22	yes		0000.FPK
+rtfssiop		0.00	sysclib	1.04	23	yes		0000.FPK
+rtfssiop		0.00	sysclib	1.04	27	yes		0000.FPK
+rtfssiop		0.00	sysclib	1.04	34	yes		0000.FPK
+rtfssiop		0.00	sysclib	1.04	38	yes		0000.FPK
+rtfssiop		0.00	thbase	1.02	4	yes		0000.FPK
+rtfssiop		0.00	thbase	1.02	5	yes		0000.FPK
+rtfssiop		0.00	thbase	1.02	6	yes		0000.FPK
+rtfssiop		0.00	thbase	1.02	8	yes		0000.FPK
+rtfssiop		0.00	thbase	1.02	10	yes		0000.FPK
+rtfssiop		0.00	thbase	1.02	20	yes		0000.FPK
+rtfssiop		0.00	thbase	1.02	24	yes		0000.FPK
+rtfssiop		0.00	thbase	1.02	25	yes		0000.FPK
+rtfssiop		0.00	thbase	1.02	26	yes		0000.FPK
+rtfssiop		0.00	thbase	1.02	33	yes		0000.FPK
+rtfssiop		0.00	thevent	1.01	4	yes		0000.FPK
+rtfssiop		0.00	thevent	1.01	6	yes		0000.FPK
+rtfssiop		0.00	thevent	1.01	8	yes		0000.FPK
+rtfssiop		0.00	thevent	1.01	10	yes		0000.FPK
+rtfssiop		0.00	thsemap	1.01	4	yes		0000.FPK
+rtfssiop		0.00	thsemap	1.01	5	yes		0000.FPK
+rtfssiop		0.00	thsemap	1.01	6	yes		0000.FPK
+rtfssiop		0.00	thsemap	1.01	8	yes		0000.FPK
+rtfssiop		0.00	cdvdman	1.01	6	yes		0000.FPK
+rtfssiop		0.00	cdvdman	1.01	8	yes		0000.FPK
+rtfssiop		0.00	cdvdman	1.01	11	yes		0000.FPK
+rtfssiop		0.00	cdvdman	1.01	12	yes		0000.FPK
+rtfssiop		0.00	cdvdman	1.01	13	yes		0000.FPK
+sdrdrv	sdr_driver	4.01	libsd	1.05	4	module	libsd	1000.FPK
+sdrdrv	sdr_driver	4.01	libsd	1.05	5	module	libsd	1000.FPK
+sdrdrv	sdr_driver	4.01	libsd	1.05	6	module	libsd	1000.FPK
+sdrdrv	sdr_driver	4.01	libsd	1.05	7	module	libsd	1000.FPK
+sdrdrv	sdr_driver	4.01	libsd	1.05	8	module	libsd	1000.FPK
+sdrdrv	sdr_driver	4.01	libsd	1.05	9	module	libsd	1000.FPK
+sdrdrv	sdr_driver	4.01	libsd	1.05	10	module	libsd	1000.FPK
+sdrdrv	sdr_driver	4.01	libsd	1.05	11	module	libsd	1000.FPK
+sdrdrv	sdr_driver	4.01	libsd	1.05	12	module	libsd	1000.FPK
+sdrdrv	sdr_driver	4.01	libsd	1.05	13	module	libsd	1000.FPK
+sdrdrv	sdr_driver	4.01	libsd	1.05	14	module	libsd	1000.FPK
+sdrdrv	sdr_driver	4.01	libsd	1.05	15	module	libsd	1000.FPK
+sdrdrv	sdr_driver	4.01	libsd	1.05	16	module	libsd	1000.FPK
+sdrdrv	sdr_driver	4.01	libsd	1.05	17	module	libsd	1000.FPK
+sdrdrv	sdr_driver	4.01	libsd	1.05	18	module	libsd	1000.FPK
+sdrdrv	sdr_driver	4.01	libsd	1.05	19	module	libsd	1000.FPK
+sdrdrv	sdr_driver	4.01	libsd	1.05	20	module	libsd	1000.FPK
+sdrdrv	sdr_driver	4.01	libsd	1.05	23	module	libsd	1000.FPK
+sdrdrv	sdr_driver	4.01	libsd	1.05	24	module	libsd	1000.FPK
+sdrdrv	sdr_driver	4.01	libsd	1.05	25	module	libsd	1000.FPK
+sdrdrv	sdr_driver	4.01	libsd	1.05	26	module	libsd	1000.FPK
+sdrdrv	sdr_driver	4.01	libsd	1.05	27	module	libsd	1000.FPK
+sdrdrv	sdr_driver	4.01	libsd	1.05	30	module	libsd	1000.FPK
+sdrdrv	sdr_driver	4.01	libsd	1.05	31	module	libsd	1000.FPK
+sdrdrv	sdr_driver	4.01	libsd	1.05	32	module	libsd	1000.FPK
+sdrdrv	sdr_driver	4.01	libsd	1.05	33	module	libsd	1000.FPK
+sdrdrv	sdr_driver	4.01	sysmem	1.01	14	yes		1000.FPK
+sdrdrv	sdr_driver	4.01	intrman	1.02	17	yes		1000.FPK
+sdrdrv	sdr_driver	4.01	intrman	1.02	18	yes		1000.FPK
+sdrdrv	sdr_driver	4.01	loadcore	1.03	6	yes		1000.FPK
+sdrdrv	sdr_driver	4.01	loadcore	1.03	7	yes		1000.FPK
+sdrdrv	sdr_driver	4.01	sifcmd	1.01	14	yes		1000.FPK
+sdrdrv	sdr_driver	4.01	sifcmd	1.01	15	yes		1000.FPK
+sdrdrv	sdr_driver	4.01	sifcmd	1.01	16	yes		1000.FPK
+sdrdrv	sdr_driver	4.01	sifcmd	1.01	17	yes		1000.FPK
+sdrdrv	sdr_driver	4.01	sifcmd	1.01	19	yes		1000.FPK
+sdrdrv	sdr_driver	4.01	sifcmd	1.01	22	yes		1000.FPK
+sdrdrv	sdr_driver	4.01	sifcmd	1.01	24	yes		1000.FPK
+sdrdrv	sdr_driver	4.01	sifcmd	1.01	25	yes		1000.FPK
+sdrdrv	sdr_driver	4.01	sysclib	1.03	8	yes		1000.FPK
+sdrdrv	sdr_driver	4.01	sysclib	1.03	29	yes		1000.FPK
+sdrdrv	sdr_driver	4.01	sysclib	1.03	36	yes		1000.FPK
+sdrdrv	sdr_driver	4.01	thbase	1.02	4	yes		1000.FPK
+sdrdrv	sdr_driver	4.01	thbase	1.02	5	yes		1000.FPK
+sdrdrv	sdr_driver	4.01	thbase	1.02	6	yes		1000.FPK
+sdrdrv	sdr_driver	4.01	thbase	1.02	10	yes		1000.FPK
+sdrdrv	sdr_driver	4.01	thbase	1.02	14	yes		1000.FPK
+sdrdrv	sdr_driver	4.01	thbase	1.02	20	yes		1000.FPK
+sdrdrv	sdr_driver	4.01	thbase	1.02	22	yes		1000.FPK
+sdrdrv	sdr_driver	4.01	thbase	1.02	24	yes		1000.FPK
+sdrdrv	sdr_driver	4.01	thbase	1.02	26	yes		1000.FPK
+sdrdrv	sdr_driver	4.01	thbase	1.02	28	yes		1000.FPK
+modhsyn	SPU2_Synthesizer_Module	1.05	libsd	1.05	4	module	libsd	1000.FPK
+modhsyn	SPU2_Synthesizer_Module	1.05	libsd	1.05	5	module	libsd	1000.FPK
+modhsyn	SPU2_Synthesizer_Module	1.05	libsd	1.05	6	module	libsd	1000.FPK
+modhsyn	SPU2_Synthesizer_Module	1.05	libsd	1.05	7	module	libsd	1000.FPK
+modhsyn	SPU2_Synthesizer_Module	1.05	libsd	1.05	8	module	libsd	1000.FPK
+modhsyn	SPU2_Synthesizer_Module	1.05	libsd	1.05	9	module	libsd	1000.FPK
+modhsyn	SPU2_Synthesizer_Module	1.05	libsd	1.05	10	module	libsd	1000.FPK
+modhsyn	SPU2_Synthesizer_Module	1.05	libsd	1.05	11	module	libsd	1000.FPK
+modhsyn	SPU2_Synthesizer_Module	1.05	libsd	1.05	13	module	libsd	1000.FPK
+modhsyn	SPU2_Synthesizer_Module	1.05	libsd	1.05	14	module	libsd	1000.FPK
+modhsyn	SPU2_Synthesizer_Module	1.05	libsd	1.05	15	module	libsd	1000.FPK
+modhsyn	SPU2_Synthesizer_Module	1.05	libsd	1.05	16	module	libsd	1000.FPK
+modhsyn	SPU2_Synthesizer_Module	1.05	libsd	1.05	17	module	libsd	1000.FPK
+modhsyn	SPU2_Synthesizer_Module	1.05	libsd	1.05	18	module	libsd	1000.FPK
+modhsyn	SPU2_Synthesizer_Module	1.05	libsd	1.05	19	module	libsd	1000.FPK
+modhsyn	SPU2_Synthesizer_Module	1.05	libsd	1.05	20	module	libsd	1000.FPK
+modhsyn	SPU2_Synthesizer_Module	1.05	libsd	1.05	23	module	libsd	1000.FPK
+modhsyn	SPU2_Synthesizer_Module	1.05	libsd	1.05	24	module	libsd	1000.FPK
+modhsyn	SPU2_Synthesizer_Module	1.05	libsd	1.05	25	module	libsd	1000.FPK
+modhsyn	SPU2_Synthesizer_Module	1.05	intrman	1.02	17	yes		1000.FPK
+modhsyn	SPU2_Synthesizer_Module	1.05	intrman	1.02	18	yes		1000.FPK
+modhsyn	SPU2_Synthesizer_Module	1.05	loadcore	1.03	6	yes		1000.FPK
+modhsyn	SPU2_Synthesizer_Module	1.05	thbase	1.02	34	yes		1000.FPK
+modhsyn	SPU2_Synthesizer_Module	1.05	thbase	1.02	40	yes		1000.FPK
+modmidi	Midi_Sequencer_Module	2.02	intrman	1.02	17	yes		1000.FPK
+modmidi	Midi_Sequencer_Module	2.02	intrman	1.02	18	yes		1000.FPK
+modmidi	Midi_Sequencer_Module	2.02	loadcore	1.03	6	yes		1000.FPK
+modmidi	Midi_Sequencer_Module	2.02	stdio	1.03	4	yes		1000.FPK
+modmidi	Midi_Sequencer_Module	2.02	sysclib	1.03	8	yes		1000.FPK
+modmidi	Midi_Sequencer_Module	2.02	sysclib	1.03	27	yes		1000.FPK
+modmidi	Midi_Sequencer_Module	2.02	sysclib	1.03	29	yes		1000.FPK
+modmidi	Midi_Sequencer_Module	2.02	sysclib	1.03	36	yes		1000.FPK
+modmsin	Midi_Message_Input_Module	1.01	intrman	1.02	17	yes		1000.FPK
+modmsin	Midi_Message_Input_Module	1.01	intrman	1.02	18	yes		1000.FPK
+modmsin	Midi_Message_Input_Module	1.01	loadcore	1.03	6	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	sysmem	1.01	4	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	sysmem	1.01	5	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	sysmem	1.01	6	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	sysmem	1.01	7	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	sysmem	1.01	8	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	intrman	1.02	6	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	intrman	1.02	17	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	intrman	1.02	18	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	ioman	1.04	4	no		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	ioman	1.04	5	no		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	ioman	1.04	6	no		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	ioman	1.04	7	no		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	ioman	1.04	8	no		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	loadcore	1.03	5	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	sifcmd	1.01	14	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	sifcmd	1.01	16	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	sifcmd	1.01	17	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	sifcmd	1.01	19	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	sifcmd	1.01	22	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	sifcmd	1.01	23	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	sifcmd	1.01	24	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	sifcmd	1.01	25	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	sifman	1.01	7	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	sifman	1.01	8	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	stdio	1.03	4	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	sysclib	1.03	11	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	sysclib	1.03	12	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	sysclib	1.03	14	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	sysclib	1.03	19	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	sysclib	1.03	21	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	sysclib	1.03	23	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	sysclib	1.03	27	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	sysclib	1.03	29	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	sysclib	1.03	30	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	thbase	1.02	4	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	thbase	1.02	5	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	thbase	1.02	6	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	thbase	1.02	8	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	thbase	1.02	10	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	thbase	1.02	14	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	thbase	1.02	20	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	thbase	1.02	24	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	thbase	1.02	26	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	thbase	1.02	33	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	thevent	1.01	4	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	thevent	1.01	5	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	thevent	1.01	6	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	thevent	1.01	8	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	thevent	1.01	10	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	thsemap	1.01	4	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	thsemap	1.01	5	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	thsemap	1.01	6	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	thsemap	1.01	7	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	thsemap	1.01	8	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	thsemap	1.01	11	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	thmsgbx	1.01	4	no		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	thmsgbx	1.01	5	no		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	thmsgbx	1.01	6	no		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	thmsgbx	1.01	8	no		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	thmsgbx	1.01	9	no		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	timrman	1.03	4	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	timrman	1.03	6	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	timrman	1.03	20	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	timrman	1.03	22	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	timrman	1.03	23	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	timrman	1.03	24	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	vblank	1.01	5	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	libsd	1.05	4	module	libsd	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	libsd	1.05	5	module	libsd	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	libsd	1.05	6	module	libsd	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	libsd	1.05	7	module	libsd	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	libsd	1.05	9	module	libsd	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	libsd	1.05	11	module	libsd	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	libsd	1.05	17	module	libsd	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	libsd	1.05	18	module	libsd	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	libsd	1.05	19	module	libsd	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	libsd	1.05	20	module	libsd	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	libsd	1.05	23	module	libsd	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	libsd	1.05	26	module	libsd	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	libsd	1.05	27	module	libsd	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	libsd	1.05	28	module	libsd	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	cdvdman	1.01	6	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	cdvdman	1.01	8	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	cdvdman	1.01	11	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	cdvdman	1.01	12	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	cdvdman	1.01	13	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	cdvdman	1.01	37	yes		1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	modhsyn	1.04	4	module	modhsyn	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	modhsyn	1.04	5	module	modhsyn	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	modhsyn	1.04	6	module	modhsyn	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	modhsyn	1.04	10	module	modhsyn	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	modhsyn	1.04	13	module	modhsyn	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	modhsyn	1.04	17	module	modhsyn	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	modhsyn	1.04	18	module	modhsyn	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	modmidi	1.05	4	module	modmidi	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	modmidi	1.05	5	module	modmidi	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	modmidi	1.05	6	module	modmidi	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	modmidi	1.05	14	module	modmidi	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	modmidi	1.05	15	module	modmidi	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	modmidi	1.05	16	module	modmidi	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	modmidi	1.05	17	module	modmidi	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	modmsin	1.01	4	module	modmsin	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	modmsin	1.01	7	module	modmsin	1000.FPK
+tsnddrv	CRI_ADX_Driver	9.31	modmsin	1.01	9	module	modmsin	1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	libsd	1.05	4	module	libsd	1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	libsd	1.05	5	module	libsd	1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	libsd	1.05	6	module	libsd	1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	libsd	1.05	11	module	libsd	1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	libsd	1.05	17	module	libsd	1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	libsd	1.05	18	module	libsd	1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	libsd	1.05	19	module	libsd	1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	libsd	1.05	20	module	libsd	1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	libsd	1.05	26	module	libsd	1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	libsd	1.05	28	module	libsd	1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	intrman	1.02	17	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	intrman	1.02	18	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	loadcore	1.03	5	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	sifcmd	1.01	14	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	sifcmd	1.01	16	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	sifcmd	1.01	17	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	sifcmd	1.01	19	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	sifcmd	1.01	22	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	sifcmd	1.01	24	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	sifcmd	1.01	25	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	sifman	1.01	5	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	sifman	1.01	7	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	sifman	1.01	29	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	stdio	1.03	4	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	sysclib	1.04	8	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	sysclib	1.04	11	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	sysclib	1.04	12	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	sysclib	1.04	14	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	sysclib	1.04	19	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	sysclib	1.04	29	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	sysclib	1.04	30	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	sysclib	1.04	36	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	thbase	1.02	4	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	thbase	1.02	5	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	thbase	1.02	6	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	thbase	1.02	10	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	thbase	1.02	20	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	thsemap	1.01	4	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	thsemap	1.01	5	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	thsemap	1.01	7	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	thsemap	1.01	8	yes		1000.FPK
+cri_adxi	CRI_ADX_Driver	9.31	vblank	1.01	5	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	sysmem	1.01	4	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	sysmem	1.01	5	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	intrman	1.02	6	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	intrman	1.02	17	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	intrman	1.02	18	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	ioman	1.04	4	no		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	ioman	1.04	5	no		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	ioman	1.04	7	no		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	loadcore	1.03	5	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	sifcmd	1.01	14	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	sifcmd	1.01	16	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	sifcmd	1.01	17	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	sifcmd	1.01	19	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	sifcmd	1.01	22	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	sifcmd	1.01	23	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	sifcmd	1.01	24	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	sifcmd	1.01	25	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	sifman	1.01	7	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	sifman	1.01	8	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	stdio	1.03	4	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	sysclib	1.03	11	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	sysclib	1.03	12	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	sysclib	1.03	14	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	sysclib	1.03	19	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	sysclib	1.03	21	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	sysclib	1.03	23	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	sysclib	1.03	27	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	sysclib	1.03	29	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	sysclib	1.03	30	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thbase	1.02	4	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thbase	1.02	5	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thbase	1.02	6	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thbase	1.02	8	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thbase	1.02	10	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thbase	1.02	14	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thbase	1.02	20	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thbase	1.02	24	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thbase	1.02	26	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thbase	1.02	33	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thevent	1.01	4	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thevent	1.01	5	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thevent	1.01	6	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thevent	1.01	8	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thevent	1.01	10	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thsemap	1.01	4	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thsemap	1.01	5	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thsemap	1.01	6	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thsemap	1.01	7	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thsemap	1.01	8	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thsemap	1.01	9	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thsemap	1.01	11	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thmsgbx	1.01	4	no		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thmsgbx	1.01	5	no		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thmsgbx	1.01	6	no		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thmsgbx	1.01	8	no		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	thmsgbx	1.01	9	no		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	timrman	1.03	4	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	timrman	1.03	6	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	timrman	1.03	20	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	timrman	1.03	22	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	timrman	1.03	23	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	timrman	1.03	24	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	vblank	1.01	5	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	libsd	1.05	4	module	libsd	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	libsd	1.05	5	module	libsd	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	libsd	1.05	6	module	libsd	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	libsd	1.05	7	module	libsd	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	libsd	1.05	9	module	libsd	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	libsd	1.05	11	module	libsd	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	libsd	1.05	17	module	libsd	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	libsd	1.05	18	module	libsd	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	libsd	1.05	19	module	libsd	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	libsd	1.05	20	module	libsd	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	libsd	1.05	23	module	libsd	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	libsd	1.05	26	module	libsd	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	libsd	1.05	27	module	libsd	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	libsd	1.05	28	module	libsd	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	cdvdman	1.01	5	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	cdvdman	1.01	6	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	cdvdman	1.01	8	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	cdvdman	1.01	11	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	cdvdman	1.01	12	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	cdvdman	1.01	13	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	cdvdman	1.01	37	yes		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	cdvdman	1.01	39	no		1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	modhsyn	1.04	4	module	modhsyn	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	modhsyn	1.04	5	module	modhsyn	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	modhsyn	1.04	6	module	modhsyn	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	modhsyn	1.04	10	module	modhsyn	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	modhsyn	1.04	13	module	modhsyn	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	modhsyn	1.04	17	module	modhsyn	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	modhsyn	1.04	18	module	modhsyn	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	modmidi	1.05	4	module	modmidi	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	modmidi	1.05	5	module	modmidi	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	modmidi	1.05	6	module	modmidi	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	modmidi	1.05	14	module	modmidi	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	modmidi	1.05	15	module	modmidi	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	modmidi	1.05	16	module	modmidi	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	modmidi	1.05	17	module	modmidi	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	modmsin	1.01	4	module	modmsin	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	modmsin	1.01	7	module	modmsin	1000.FPK
+tsnddrvc	CRI_ADX_Driver	9.31	modmsin	1.01	9	module	modmsin	1000.FPK
+sndfi	SNDF_Driver	2.13	sysmem	1.02	4	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	sysmem	1.02	5	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	intrman	1.02	17	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	intrman	1.02	18	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	loadcore	1.03	6	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	loadcore	1.03	7	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	sifcmd	1.01	14	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	sifcmd	1.01	17	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	sifcmd	1.01	19	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	sifcmd	1.01	22	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	sifcmd	1.01	24	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	sifcmd	1.01	25	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	sifman	1.01	7	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	sifman	1.01	8	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	stdio	1.03	4	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	sysclib	1.04	12	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	sysclib	1.04	14	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	thbase	1.02	4	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	thbase	1.02	5	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	thbase	1.02	6	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	thbase	1.02	10	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	thbase	1.02	20	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	thbase	1.02	24	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	thbase	1.02	26	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	thbase	1.02	33	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	thbase	1.02	34	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	thbase	1.02	40	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	timrman	1.03	4	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	timrman	1.03	6	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	timrman	1.03	20	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	timrman	1.03	22	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	timrman	1.03	23	yes		1000.FPK
+sndfi	SNDF_Driver	2.13	libsd	1.05	4	module	libsd	1000.FPK
+sndfi	SNDF_Driver	2.13	libsd	1.05	5	module	libsd	1000.FPK
+sndfi	SNDF_Driver	2.13	libsd	1.05	6	module	libsd	1000.FPK
+sndfi	SNDF_Driver	2.13	libsd	1.05	7	module	libsd	1000.FPK
+sndfi	SNDF_Driver	2.13	libsd	1.05	8	module	libsd	1000.FPK
+sndfi	SNDF_Driver	2.13	libsd	1.05	9	module	libsd	1000.FPK
+sndfi	SNDF_Driver	2.13	libsd	1.05	11	module	libsd	1000.FPK
+sndfi	SNDF_Driver	2.13	libsd	1.05	17	module	libsd	1000.FPK
+sndfi	SNDF_Driver	2.13	libsd	1.05	19	module	libsd	1000.FPK
+sndfi	SNDF_Driver	2.13	libsd	1.05	23	module	libsd	1000.FPK
+libsd	Sound_Device_Library	3.03	intrman	1.02	4	yes		1000.FPK
+libsd	Sound_Device_Library	3.03	intrman	1.02	5	yes		1000.FPK
+libsd	Sound_Device_Library	3.03	intrman	1.02	6	yes		1000.FPK
+libsd	Sound_Device_Library	3.03	intrman	1.02	7	yes		1000.FPK
+libsd	Sound_Device_Library	3.03	intrman	1.02	17	yes		1000.FPK
+libsd	Sound_Device_Library	3.03	intrman	1.02	18	yes		1000.FPK
+libsd	Sound_Device_Library	3.03	intrman	1.02	23	yes		1000.FPK
+libsd	Sound_Device_Library	3.03	loadcore	1.03	5	yes		1000.FPK
+libsd	Sound_Device_Library	3.03	loadcore	1.03	6	yes		1000.FPK
+libsd	Sound_Device_Library	3.03	sifman	1.01	7	yes		1000.FPK
+libsd	Sound_Device_Library	3.03	sifman	1.01	8	yes		1000.FPK
+libsd	Sound_Device_Library	3.03	sysclib	1.04	17	yes		1000.FPK
+libsd	Sound_Device_Library	3.03	thevent	1.01	4	yes		1000.FPK
+libsd	Sound_Device_Library	3.03	thevent	1.01	5	yes		1000.FPK
+libsd	Sound_Device_Library	3.03	thevent	1.01	6	yes		1000.FPK
+libsd	Sound_Device_Library	3.03	thevent	1.01	7	yes		1000.FPK
+libsd	Sound_Device_Library	3.03	thevent	1.01	8	yes		1000.FPK
+libsd	Sound_Device_Library	3.03	thevent	1.01	9	yes		1000.FPK
+libsd	Sound_Device_Library	3.03	thevent	1.01	10	yes		1000.FPK

@@ -1,0 +1,92 @@
+From 9a7ca5907b7f09ca1aa1cb98ce552ccaa96884ba Mon Sep 17 00:00:00 2001
+From: Yan Moura <emmetoellder@gmail.com>
+Date: Fri, 9 Oct 2026 13:06:32 -0300
+Subject: [PATCH] Fix SQRT.S and RSQRT.S operand selection in the FPU
+ translator
+
+On the R5900, SQRT.S fd, ft takes its source from the ft field (the fs
+field is 0), and RSQRT.S fd, fs, ft computes fs / sqrt(ft). The translator
+read fs for SQRT.S (so a real "sqrt.s $f2, $f2", word 0x46020084, became
+FPU_SQRT_S(f[0])) and emitted 1/sqrt(fs) for RSQRT.S, ignoring ft and the
+numerator.
+
+Use ft for SQRT.S and fs / sqrt(ft) for RSQRT.S. Like PCSX2, take the
+magnitude of ft so negative inputs do not produce NaN. Add a code
+generator test for both encodings.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ ps2xRecomp/src/lib/fpu_translator.cpp |  7 ++++--
+ ps2xTest/src/code_generator_tests.cpp | 34 +++++++++++++++++++++++++++
+ 2 files changed, 39 insertions(+), 2 deletions(-)
+
+diff --git a/ps2xRecomp/src/lib/fpu_translator.cpp b/ps2xRecomp/src/lib/fpu_translator.cpp
+index 944cee796..e8b9a0400 100644
+--- a/ps2xRecomp/src/lib/fpu_translator.cpp
++++ b/ps2xRecomp/src/lib/fpu_translator.cpp
+@@ -58,7 +58,9 @@ namespace ps2recomp
+                                    "else ctx->f[{}] = ctx->f[{}] / ctx->f[{}];",
+                                    ft, fd, fs, fd, fs, ft);
+             case COP1_S_SQRT:
+-                return fmt::format("ctx->f[{}] = FPU_SQRT_S(ctx->f[{}]);", fd, fs);
++                // R5900: SQRT.S fd, ft takes its source from ft (the fs field is 0).
++                // Negative inputs use the magnitude (PCSX2 FPU.cpp SQRT_S).
++                return fmt::format("ctx->f[{}] = FPU_SQRT_S(fabsf(ctx->f[{}]));", fd, ft);
+             case COP1_S_ABS:
+                 return fmt::format("ctx->f[{}] = FPU_ABS_S(ctx->f[{}]);", fd, fs);
+             case COP1_S_MOV:
+@@ -76,7 +78,8 @@ namespace ps2recomp
+             case COP1_S_CVT_W:
+                 return fmt::format("{{ int32_t tmp = FPU_CVT_W_S(ctx->f[{}]); std::memcpy(&ctx->f[{}], &tmp, sizeof(tmp)); }}", fs, fd);
+             case COP1_S_RSQRT:
+-                return fmt::format("ctx->f[{}] = 1.0f / sqrtf(ctx->f[{}]);", fd, fs);
++                // R5900: RSQRT.S fd, fs, ft computes fs / sqrt(|ft|).
++                return fmt::format("ctx->f[{}] = ctx->f[{}] / sqrtf(fabsf(ctx->f[{}]));", fd, fs, ft);
+             case COP1_S_ADDA:
+                 return fmt::format("FPU_SET_ACC(ctx, FPU_ADD_S(ctx->f[{}], ctx->f[{}]));", fs, ft);
+             case COP1_S_SUBA:
+diff --git a/ps2xTest/src/code_generator_tests.cpp b/ps2xTest/src/code_generator_tests.cpp
+index 463b6cff1..74ac58fd1 100644
+--- a/ps2xTest/src/code_generator_tests.cpp
++++ b/ps2xTest/src/code_generator_tests.cpp
+@@ -1020,6 +1020,40 @@ void register_code_generator_tests()
+             t.IsTrue(ctc1Code.find("ignored") == std::string::npos, "CTC1 FCR31 should not be ignored");
+         });
+ 
++        tc.Run("SQRT.S/RSQRT.S use the ft operand", [](TestCase &t) {
++            CodeGenerator gen({}, {});
++
++            // sqrt.s $f2, $f2 (0x46020084): fs field is 0, the source is ft
++            Instruction sqrtS{};
++            sqrtS.raw = 0x46020084;
++            sqrtS.opcode = OPCODE_COP1;
++            sqrtS.rs = COP1_S;
++            sqrtS.rt = 2;
++            sqrtS.rd = 0;
++            sqrtS.sa = 2;
++            sqrtS.function = COP1_S_SQRT;
++
++            std::string sqrtCode = gen.translateInstruction(sqrtS);
++            printGeneratedCode("SQRT.S/RSQRT.S use the ft operand (SQRT.S)", sqrtCode);
++            t.IsTrue(sqrtCode.find("ctx->f[2] = FPU_SQRT_S(fabsf(ctx->f[2]))") != std::string::npos,
++                     "SQRT.S should take the square root of ft");
++            t.IsTrue(sqrtCode.find("ctx->f[0]") == std::string::npos, "SQRT.S must not read fs");
++
++            // rsqrt.s $f1, $f3, $f4: fd = fs / sqrt(|ft|)
++            Instruction rsqrtS{};
++            rsqrtS.opcode = OPCODE_COP1;
++            rsqrtS.rs = COP1_S;
++            rsqrtS.rt = 4;
++            rsqrtS.rd = 3;
++            rsqrtS.sa = 1;
++            rsqrtS.function = COP1_S_RSQRT;
++
++            std::string rsqrtCode = gen.translateInstruction(rsqrtS);
++            printGeneratedCode("SQRT.S/RSQRT.S use the ft operand (RSQRT.S)", rsqrtCode);
++            t.IsTrue(rsqrtCode.find("ctx->f[1] = ctx->f[3] / sqrtf(fabsf(ctx->f[4]))") != std::string::npos,
++                     "RSQRT.S should compute fs / sqrt(|ft|)");
++        });
++
+         tc.Run("VU CFC2/CTC2 access VI registers directly", [](TestCase& t)
+             {
+                 CodeGenerator gen({}, {});

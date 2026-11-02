@@ -1,0 +1,74 @@
+Patch 0084: the EE scheduler's run loop does less per dispatch.
+
+What it fixes: measured (work/perf-review/report.md, section 1), EeScheduler::run and the lookup of the
+next function cost more than the game's own code. Three changes, none of which alters guest state:
+  1. publishDebugContext (four relaxed stores of pc, ra, sp, gp into PS2Runtime::m_debugPc/Ra/Sp/Gp) ran on
+     every iteration. Its readers are the debug panel (ps2EntryRunner only, not built by this port) and
+     aggressive-log lines; no guest-visible state reads it. It now runs only when DON_EE_DEBUG_CONTEXT=1
+     (read once). The idle and state-change publishes are untouched.
+  2. PS2Runtime::findFunction is an out-of-line call that did the same range check and load the dispatch
+     fast path does. The run loop now does it inline against the same dense table
+     (g_ps2RecompiledFunctionTable, already indexed by (pc - base) >> 2, which covers the code range), so
+     replaceFunction'd entries win exactly as before; same dispatch-history push when enabled.
+  3. ps2IsNativeFunction was already behind the cheap pc == entryPc && !m_unwinding tests; left as is
+     (it is a semantic guard of patch 0055, not a diagnostic).
+Same order of events and same cycle charges: no accounting call was moved or added.
+
+Verified: the file compiles with the project's flags; the integrator checks the 4-player state hash.
+Based on no other project.
+
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -180,6 +180,17 @@
+     publishSnapshot();
+ }
+ 
++namespace
++{
++    // Patch 0084: the debug context (pc/ra/sp/gp, read only by the debug panel, which this port does not build,
++    // and by aggressive logs) is published on every dispatch only when asked for.
++    const bool kPublishDebugContext = []
++    {
++        const char *value = std::getenv("DON_EE_DEBUG_CONTEXT");
++        return value != nullptr && value[0] != '\0' && value[0] != '0';
++    }();
++}
++
+ void EeScheduler::run()
+ {
+     assertExecutor();
+@@ -252,7 +263,10 @@
+         // snapshot() (the request is seen by the slow path in checkpointDue) and by the state changes
+         // that already published it. copyMainContextToRuntime() is still called where it was needed for
+         // the debugger outside this loop.
+-        publishDebugContext(context);
++        if (kPublishDebugContext)
++        {
++            publishDebugContext(context);
++        }
+ 
+         if (context.pc == 0u)
+         {
+@@ -305,7 +319,21 @@
+             continue;
+         }
+ 
+-        PS2Runtime::RecompiledFunction function = m_runtime.findFunction(context.pc);
++        // Same lookup as PS2Runtime::findFunction, inline: one range check and one load from the dense table.
++        PS2Runtime::RecompiledFunction function = nullptr;
++        {
++            const uint32_t pc = context.pc;
++            const uint32_t slot = (pc - g_ps2RecompiledFunctionTableBase) >> 2;
++            if ((pc & 3u) == 0u && pc >= g_ps2RecompiledFunctionTableBase && pc < g_ps2RecompiledFunctionTableEnd &&
++                slot < g_ps2RecompiledFunctionTableSlotCount)
++            {
++                function = g_ps2RecompiledFunctionTable[slot];
++                if (function != nullptr && g_ps2DispatchHistoryEnabled)
++                {
++                    ps2PushDispatchPc(pc);
++                }
++            }
++        }
+         if (function == nullptr)
+         {
+             if (!running->invocations.empty())

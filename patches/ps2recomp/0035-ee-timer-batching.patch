@@ -1,0 +1,168 @@
+# 0035-ee-timer-batching: the EE timers are credited per dispatch and advanced only when they can be
+# observed
+#
+# Why: with patch 0034 in place, the corrected profile of the port (T-207; the reader used to name every
+# sample in `don` by the symbol 4 KiB before it, because it looked a file offset up in a table of virtual
+# addresses - see the fix in tools/verify/profile_summary.py) shows the second largest cost of the game
+# thread is PS2Memory::advanceEeTimers at 10.3% of it, and the single hottest instruction of the whole
+# profile is the `div` inside it. advanceEeTimers() was called with 8 cycles on every dispatch and did its
+# work every time: an unordered_map lookup for GIF_STAT, a loop over the four EE timers and, for each
+# active one, two 64-bit divisions by the timer's clock. None of that is emulation the console does: the
+# guest only ever sees a timer through its registers.
+#
+# What it changes (ps2_memory.{h,cpp} only):
+#   * the cycles of each dispatch are added to a debt (m_eeTimerPendingCycles); the arithmetic above runs
+#     only when the cycle of the next timer event is reached (m_eeTimerCyclesToEvent, the same
+#     cyclesUntilNextEeTimerInterrupt() the scheduler already used for its wait deadlines), or when a
+#     timer register is read or written, which flushes the debt first;
+#   * a flush produces the interrupt mask as before, but it is now collected by the next
+#     advanceEeTimers() call, i.e. at the same dispatch the scheduler saw it before;
+#   * resetEeTimers() drops the debt (the timers start from nothing) and a timer register write refreshes
+#     the event boundary, because the mode or the compare it wrote decides it;
+#   * the GIF_STAT FQC clear moves with the flush. That is unobservable: readIORegister recomputes the FQC
+#     field from the GS's own counter on every read (ps2_memory.cpp, the 0x10003020 branch), so the sparse
+#     copies that read 0xC00 (Kernel/Stubs/GS.cpp) see the same value.
+#
+# What must not change, and how it was shown:
+#   * the value a guest reads from a timer register at any emulated cycle: it is flushed first, so it is
+#     the value the per-dispatch advance would have produced. tests/runtime/ee_timer_test.cpp programs TIM0
+#     with the 9.216 MHz clock (32 EE cycles per tick, so the expectation is arithmetic the test can do
+#     itself), reads the count and the mode at eight checkpoints of a 100,000-dispatch guest run and in a
+#     100,000-iteration direct loop, and asserts count == floor((i+1)*8/32) and that the compare flag
+#     appears at the first checkpoint past 64 ticks (2048 cycles). It passes in both trees and its printed
+#     trace (call, count, mode) is byte-identical between them, as is every other test's last line.
+#   * the interrupt timing: the flush happens at the same dispatch (the boundary is the exact
+#     cyclesUntilNextEeTimerInterrupt(), which rounds up, and the mask travels through the same
+#     m_pendingEeTimerInterrupts path);
+#   * the I/O processor feed and the vblank schedule: untouched (iop_batch_test, iop_batch_proxy_test,
+#     scheduler_fast_path_test and the rest pass unchanged).
+#
+# Measured (2026-10-13, this machine, shared with two other agents running the game; ~4 KiB before/after
+# from the same test binary in two trees, one process each):
+#   * advanceEeTimers(8), isolated: 3.55 ns per call before, 1.84 ns after;
+#   * the same 100,001-dispatch guest run: 23.91 ns per dispatch before, 18.76 ns after (the run includes
+#     the scheduler, the IOP feed and the timer, so this is the whole-path figure; the machine was noisy);
+#   * the profile of the port (patch 0034, before this change): PS2Memory::advanceEeTimers 7,258 samples
+#     of 70,327 = 10.3% of the game thread's processor time, the hottest single instruction a `div` in it.
+
+diff --git a/ps2xRuntime/include/runtime/ps2_memory.h b/ps2xRuntime/include/runtime/ps2_memory.h
+index 44413d1..6094067 100644
+--- a/ps2xRuntime/include/runtime/ps2_memory.h
++++ b/ps2xRuntime/include/runtime/ps2_memory.h
+@@ -480,6 +480,17 @@ public:
+     };
+ 
+     std::array<EeTimer, 4> m_eeTimers{};
++    // Patch 0035: the EE cycles owed to the timers but not applied yet, the cycles left until the next
++    // timer event, and the interrupt mask a flush produced but the scheduler has not collected. The
++    // arithmetic (and the GIF_STAT FQC clear, which only a read of GIF_STAT can observe, and that read
++    // recomputes the field) runs when the event is reached and when a timer register is touched.
++    uint64_t m_eeTimerPendingCycles = 0;
++    uint64_t m_eeTimerCyclesToEvent = std::numeric_limits<uint64_t>::max();
++    uint32_t m_pendingEeTimerInterruptMask = 0u;
++    void creditEeTimers(uint64_t eeCycles) noexcept;
++    uint32_t applyEeTimers() noexcept;
++    uint32_t flushEeTimers() noexcept;
++    void refreshEeTimerEventBoundary() noexcept;
+     bool tryProcessScratchpadDma(uint32_t channelBase, uint32_t chcr);
+     void completeDmacChannel(uint32_t channelBase, uint32_t cause);
+     void queueCompletedDmacCause(uint32_t cause);
+diff --git a/ps2xRuntime/src/lib/ps2_memory.cpp b/ps2xRuntime/src/lib/ps2_memory.cpp
+index f4bbfef..873825c 100644
+--- a/ps2xRuntime/src/lib/ps2_memory.cpp
++++ b/ps2xRuntime/src/lib/ps2_memory.cpp
+@@ -408,12 +408,62 @@ bool PS2Memory::initialize(size_t ramSize)
+ void PS2Memory::resetEeTimers() noexcept
+ {
+     m_eeTimers = {};
++    // Patch 0035: the timers start from nothing, so the cycles owed to them are dropped (the old
++    // code had applied all of them by the time the guest could reset them).
++    m_eeTimerPendingCycles = 0u;
++    m_eeTimerCyclesToEvent = std::numeric_limits<uint64_t>::max();
++    m_pendingEeTimerInterruptMask = 0u;
+ }
+ 
++// Patch 0035: the driver of the EE timers. The scheduler still calls advanceEeTimers() once per
++// dispatch, but the common case is now two additions and a comparison: the map lookup for GIF_STAT, the
++// loop over the four timers and the divisions in it (the hottest single instruction of the port's profile
++// was a `div` here) only run when the next timer event is reached, and when a timer register is read or
++// written, which flush first so the guest sees the same value the old per-dispatch advance produced.
+ uint32_t PS2Memory::advanceEeTimers(uint64_t eeCycles) noexcept
+ {
++    creditEeTimers(eeCycles);
++    const uint32_t pending = m_pendingEeTimerInterruptMask;
++    m_pendingEeTimerInterruptMask = 0u;
++    return pending;
++}
++
++void PS2Memory::creditEeTimers(uint64_t eeCycles) noexcept
++{
++    if (eeCycles == 0u)
++    {
++        return;
++    }
++    // The cycles of this dispatch belong to the timers too: queue them before deciding whether the
++    // boundary was reached (the first version of this patch dropped them when it flushed).
++    m_eeTimerPendingCycles += eeCycles;
++    if (m_eeTimerCyclesToEvent > eeCycles)
++    {
++        m_eeTimerCyclesToEvent -= eeCycles;
++        return;
++    }
++    m_eeTimerCyclesToEvent = 0u;
++    m_pendingEeTimerInterruptMask |= applyEeTimers();
++}
++
++uint32_t PS2Memory::flushEeTimers() noexcept
++{
++    return applyEeTimers();
++}
++
++void PS2Memory::refreshEeTimerEventBoundary() noexcept
++{
++    m_eeTimerCyclesToEvent = cyclesUntilNextEeTimerInterrupt();
++}
++
++uint32_t PS2Memory::applyEeTimers() noexcept
++{
++    const uint64_t eeCycles = m_eeTimerPendingCycles;
++    m_eeTimerPendingCycles = 0u;
++    m_eeTimerCyclesToEvent = std::numeric_limits<uint64_t>::max();
+     if (eeCycles == 0u)
+     {
++        refreshEeTimerEventBoundary();
+         return 0u;
+     }
+ 
+@@ -483,6 +533,7 @@ uint32_t PS2Memory::advanceEeTimers(uint64_t eeCycles) noexcept
+             interruptMask |= 1u << index;
+         }
+     }
++    refreshEeTimerEventBoundary();
+     return interruptMask;
+ }
+ 
+@@ -1138,6 +1189,7 @@ bool PS2Memory::writeIORegister(uint32_t address, uint32_t value)
+     uint32_t timerOffset = 0u;
+     if (decodeEeTimerRegister(address, timerIndex, timerOffset))
+     {
++        m_pendingEeTimerInterruptMask |= flushEeTimers(); // patch 0035: up to date first
+         EeTimer &timer = m_eeTimers[timerIndex];
+         switch (timerOffset)
+         {
+@@ -1165,6 +1217,7 @@ bool PS2Memory::writeIORegister(uint32_t address, uint32_t value)
+         default:
+             return false;
+         }
++        refreshEeTimerEventBoundary(); // patch 0035: the mode/compare just written decides it
+         return true;
+     }
+ 
+@@ -2296,6 +2349,7 @@ uint32_t PS2Memory::readIORegister(uint32_t address)
+     uint32_t timerOffset = 0u;
+     if (decodeEeTimerRegister(address, timerIndex, timerOffset))
+     {
++        m_pendingEeTimerInterruptMask |= flushEeTimers(); // patch 0035: read the value as of now
+         const EeTimer &timer = m_eeTimers[timerIndex];
+         switch (timerOffset)
+         {

@@ -1,0 +1,434 @@
+# Allow-list of the files a player's disc may contain: path, size and SHA-256 per variant.
+# Written by tools/disc/make_disc_manifest.py. Hashes and sizes only, no game data.
+
+[[variant]]
+id = "jp"
+serial = "SLPS-25675"
+
+[[variant.file]]
+path = "BGM.AFS"
+size = 98580480
+sha256 = "c5a2750acb7eb54211c99cffb7c48af5bc29b2776a2977313533c2eb17f18747"
+
+[[variant.file]]
+path = "DATA.AFS"
+size = 53217280
+sha256 = "79c371082f5806139c3ae5449a555cdff8376af46acb5a0d0350334b7fd0afa8"
+
+[[variant.file]]
+path = "DIR.DIR"
+size = 38
+sha256 = "30dec35de4a39c984dc18873128690cf9f80c2d73a3be702633509fb73f6d65b"
+
+[[variant.file]]
+path = "MODULES/0000.FPK"
+size = 115056
+sha256 = "819cfc6a4eee55c05f98a3f4e9dd30a84244332f7505f83b0c300d5cb2066e1c"
+
+[[variant.file]]
+path = "MODULES/1000.FPK"
+size = 262400
+sha256 = "e1e5d55c70bd39bd59e1ff22726c277dbd41f1386193ed66792dd5657d5d2c48"
+
+[[variant.file]]
+path = "MODULES/CDVDSTM.IRX"
+size = 33521
+sha256 = "276c175fe4a6d83d43baeb86b40cd5a7c3fc7b13b15df6da541040f926d5eb07"
+
+[[variant.file]]
+path = "MODULES/CRI_ADXI.IRX"
+size = 69237
+sha256 = "20c45d528fb196777362602f7d4cd7055fb013356c7a0bdb0c25427a01f473dd"
+
+[[variant.file]]
+path = "MODULES/IOPRP300.IMG"
+size = 275345
+sha256 = "02d314464c17c715d7e809297b0aba184173a98616b1fafeac27fe33fc480c82"
+
+[[variant.file]]
+path = "MODULES/LIBSD.IRX"
+size = 28661
+sha256 = "d26a8dcd121ff4ded9c819b72864ea7f4e723932cc2eab1b4f0f1c93faad43ef"
+
+[[variant.file]]
+path = "MODULES/MCMAN.IRX"
+size = 96181
+sha256 = "e4e2afe72c123faa7c5f86624185479cd800d94c065ce5d023c540aa0935830a"
+
+[[variant.file]]
+path = "MODULES/MCSERV.IRX"
+size = 7385
+sha256 = "dd33d243b91adb6fb5587ee77b212ca7fe6bb24bffa6cd128bc3d59e6cf6e6d2"
+
+[[variant.file]]
+path = "MODULES/MODHSYN.IRX"
+size = 63037
+sha256 = "804a40a38d620ecc88b81b90afb8aab262f0540187e8db25eed1ede69131fed1"
+
+[[variant.file]]
+path = "MODULES/MODMIDI.IRX"
+size = 21941
+sha256 = "c22df1c868d4baa4f51ab45e319e6b76fcab7fe0be7f0d5493a9f60285501489"
+
+[[variant.file]]
+path = "MODULES/MODMSIN.IRX"
+size = 1929
+sha256 = "b1a46d7ff1379222af01662b03a972b8e7d23cf2360cbe20c44569df788821ba"
+
+[[variant.file]]
+path = "MODULES/MTAPMAN.IRX"
+size = 10853
+sha256 = "9ab9bf95f82a0ca71aec04284aee601ce8c4f14cc6d79b5cc62095395d4a3570"
+
+[[variant.file]]
+path = "MODULES/PADMAN.IRX"
+size = 45797
+sha256 = "7362ff796dced5c94a99d04fd50a774d92aa23d5605eb04d84997dd7cb5508c0"
+
+[[variant.file]]
+path = "MODULES/RTFSSIOP.IRX"
+size = 31872
+sha256 = "61fc252479b8c03dfd585516c280c6c5b4a5dcd77c9b61a0dc34c03849092def"
+
+[[variant.file]]
+path = "MODULES/SDRDRV.IRX"
+size = 9161
+sha256 = "85a465ab251bde0c3d33151b3a67ec2780d57cc40ebb7df9d5ecb7bad3396b16"
+
+[[variant.file]]
+path = "MODULES/SIO2MAN.IRX"
+size = 6641
+sha256 = "565ec77e75f174cfddf72c41ccc446c1c07a3d5fb0a2ccfefad337cb8a7d0728"
+
+[[variant.file]]
+path = "MODULES/SNDFI.IRX"
+size = 101040
+sha256 = "55cf9d2e47d1dcb9d71932073880d5241a7440a23a7b5de6f1268901a033df6d"
+
+[[variant.file]]
+path = "MODULES/TSNDDRV.IRX"
+size = 185036
+sha256 = "1d2eda6bb072fa419b85294ba102f378ba67c1db0c9edd17171e50bf07f878ea"
+
+[[variant.file]]
+path = "MODULES/TSNDDRVC.IRX"
+size = 171580
+sha256 = "3fd20dc6ce11d2e3b4e29bd157ade01efaffab5c85d7b301fe7bd35a70c27fbc"
+
+[[variant.file]]
+path = "MODULES/TSNDDRVM.IRX"
+size = 109084
+sha256 = "de175834ca660b07dbdfb797973fd8c6aaec224237b6684b38e3304feba1615e"
+
+[[variant.file]]
+path = "MODULES/TSNDDRVT.IRX"
+size = 168868
+sha256 = "d3c871485953a3cb802356f31ab21576458fe98aa1bef6934ae407b8483c59e9"
+
+[[variant.file]]
+path = "MOVIE.AFS"
+size = 111028224
+sha256 = "fd84a3e4415aabf540248154f7e8adb7933af8065edd92a429b436f96cd55f66"
+
+[[variant.file]]
+path = "SE.AFS"
+size = 6844416
+sha256 = "0e94b46cdd1b74b288b21ff8cce12e0e1e63233b0b87a539e1d64f041fc2594e"
+
+[[variant.file]]
+path = "SLPS_256.75"
+size = 3973040
+sha256 = "994e840123eb5a4cd5d13170a52fdca275dabb0a9f4585665b5d0fc67f9180c1"
+
+[[variant.file]]
+path = "SYSTEM.CNF"
+size = 57
+sha256 = "c27d62029ce021416f7461a0629ebf900ac12a75a529ddfad25985c2d282b1bf"
+
+[[variant]]
+id = "en-jpvoice"
+serial = "SLPS-25675"
+
+[[variant.file]]
+path = "BGM.AFS"
+size = 98580480
+sha256 = "a52afa381053b6f89f8e30f95df0009e3ba0348b528f98213b45ba8623356e5d"
+
+[[variant.file]]
+path = "DATA.AFS"
+size = 53284864
+sha256 = "2993fbab34a8c03960ec1161162691d86ccbc102f913d7239b4424e1067b5580"
+
+[[variant.file]]
+path = "DIR.DIR"
+size = 38
+sha256 = "30dec35de4a39c984dc18873128690cf9f80c2d73a3be702633509fb73f6d65b"
+
+[[variant.file]]
+path = "MODULES/0000.FPK"
+size = 115056
+sha256 = "819cfc6a4eee55c05f98a3f4e9dd30a84244332f7505f83b0c300d5cb2066e1c"
+
+[[variant.file]]
+path = "MODULES/1000.FPK"
+size = 262400
+sha256 = "e1e5d55c70bd39bd59e1ff22726c277dbd41f1386193ed66792dd5657d5d2c48"
+
+[[variant.file]]
+path = "MODULES/CDVDSTM.IRX"
+size = 33521
+sha256 = "276c175fe4a6d83d43baeb86b40cd5a7c3fc7b13b15df6da541040f926d5eb07"
+
+[[variant.file]]
+path = "MODULES/CRI_ADXI.IRX"
+size = 69237
+sha256 = "20c45d528fb196777362602f7d4cd7055fb013356c7a0bdb0c25427a01f473dd"
+
+[[variant.file]]
+path = "MODULES/IOPRP300.IMG"
+size = 275345
+sha256 = "02d314464c17c715d7e809297b0aba184173a98616b1fafeac27fe33fc480c82"
+
+[[variant.file]]
+path = "MODULES/LIBSD.IRX"
+size = 28661
+sha256 = "d26a8dcd121ff4ded9c819b72864ea7f4e723932cc2eab1b4f0f1c93faad43ef"
+
+[[variant.file]]
+path = "MODULES/MCMAN.IRX"
+size = 96181
+sha256 = "e4e2afe72c123faa7c5f86624185479cd800d94c065ce5d023c540aa0935830a"
+
+[[variant.file]]
+path = "MODULES/MCSERV.IRX"
+size = 7385
+sha256 = "dd33d243b91adb6fb5587ee77b212ca7fe6bb24bffa6cd128bc3d59e6cf6e6d2"
+
+[[variant.file]]
+path = "MODULES/MODHSYN.IRX"
+size = 63037
+sha256 = "804a40a38d620ecc88b81b90afb8aab262f0540187e8db25eed1ede69131fed1"
+
+[[variant.file]]
+path = "MODULES/MODMIDI.IRX"
+size = 21941
+sha256 = "c22df1c868d4baa4f51ab45e319e6b76fcab7fe0be7f0d5493a9f60285501489"
+
+[[variant.file]]
+path = "MODULES/MODMSIN.IRX"
+size = 1929
+sha256 = "b1a46d7ff1379222af01662b03a972b8e7d23cf2360cbe20c44569df788821ba"
+
+[[variant.file]]
+path = "MODULES/MTAPMAN.IRX"
+size = 10853
+sha256 = "9ab9bf95f82a0ca71aec04284aee601ce8c4f14cc6d79b5cc62095395d4a3570"
+
+[[variant.file]]
+path = "MODULES/PADMAN.IRX"
+size = 45797
+sha256 = "7362ff796dced5c94a99d04fd50a774d92aa23d5605eb04d84997dd7cb5508c0"
+
+[[variant.file]]
+path = "MODULES/RTFSSIOP.IRX"
+size = 31872
+sha256 = "61fc252479b8c03dfd585516c280c6c5b4a5dcd77c9b61a0dc34c03849092def"
+
+[[variant.file]]
+path = "MODULES/SDRDRV.IRX"
+size = 9161
+sha256 = "85a465ab251bde0c3d33151b3a67ec2780d57cc40ebb7df9d5ecb7bad3396b16"
+
+[[variant.file]]
+path = "MODULES/SIO2MAN.IRX"
+size = 6641
+sha256 = "565ec77e75f174cfddf72c41ccc446c1c07a3d5fb0a2ccfefad337cb8a7d0728"
+
+[[variant.file]]
+path = "MODULES/SNDFI.IRX"
+size = 101040
+sha256 = "55cf9d2e47d1dcb9d71932073880d5241a7440a23a7b5de6f1268901a033df6d"
+
+[[variant.file]]
+path = "MODULES/TSNDDRV.IRX"
+size = 185036
+sha256 = "1d2eda6bb072fa419b85294ba102f378ba67c1db0c9edd17171e50bf07f878ea"
+
+[[variant.file]]
+path = "MODULES/TSNDDRVC.IRX"
+size = 171580
+sha256 = "3fd20dc6ce11d2e3b4e29bd157ade01efaffab5c85d7b301fe7bd35a70c27fbc"
+
+[[variant.file]]
+path = "MODULES/TSNDDRVM.IRX"
+size = 109084
+sha256 = "de175834ca660b07dbdfb797973fd8c6aaec224237b6684b38e3304feba1615e"
+
+[[variant.file]]
+path = "MODULES/TSNDDRVT.IRX"
+size = 168868
+sha256 = "d3c871485953a3cb802356f31ab21576458fe98aa1bef6934ae407b8483c59e9"
+
+[[variant.file]]
+path = "MOVIE.AFS"
+size = 111028224
+sha256 = "fd84a3e4415aabf540248154f7e8adb7933af8065edd92a429b436f96cd55f66"
+
+[[variant.file]]
+path = "SE.AFS"
+size = 6844416
+sha256 = "0e94b46cdd1b74b288b21ff8cce12e0e1e63233b0b87a539e1d64f041fc2594e"
+
+[[variant.file]]
+path = "SLPS_256.75"
+size = 3973040
+sha256 = "994e840123eb5a4cd5d13170a52fdca275dabb0a9f4585665b5d0fc67f9180c1"
+
+[[variant.file]]
+path = "SYSTEM.CNF"
+size = 57
+sha256 = "c27d62029ce021416f7461a0629ebf900ac12a75a529ddfad25985c2d282b1bf"
+
+[[variant]]
+id = "en-envoice"
+serial = "SLPS-25675"
+
+[[variant.file]]
+path = "BGM.AFS"
+size = 98594816
+sha256 = "917d380152d6cabca0f9eca4bad587be28d85e95a7df4b3fd99ee1e351e3c22f"
+
+[[variant.file]]
+path = "DATA.AFS"
+size = 53284864
+sha256 = "06c41f177be502b648c190a949466812ab1e081c0d9457ac58425ff6aa50aeba"
+
+[[variant.file]]
+path = "DIR.DIR"
+size = 38
+sha256 = "30dec35de4a39c984dc18873128690cf9f80c2d73a3be702633509fb73f6d65b"
+
+[[variant.file]]
+path = "MODULES/0000.FPK"
+size = 115056
+sha256 = "819cfc6a4eee55c05f98a3f4e9dd30a84244332f7505f83b0c300d5cb2066e1c"
+
+[[variant.file]]
+path = "MODULES/1000.FPK"
+size = 262400
+sha256 = "e1e5d55c70bd39bd59e1ff22726c277dbd41f1386193ed66792dd5657d5d2c48"
+
+[[variant.file]]
+path = "MODULES/CDVDSTM.IRX"
+size = 33521
+sha256 = "276c175fe4a6d83d43baeb86b40cd5a7c3fc7b13b15df6da541040f926d5eb07"
+
+[[variant.file]]
+path = "MODULES/CRI_ADXI.IRX"
+size = 69237
+sha256 = "20c45d528fb196777362602f7d4cd7055fb013356c7a0bdb0c25427a01f473dd"
+
+[[variant.file]]
+path = "MODULES/IOPRP300.IMG"
+size = 275345
+sha256 = "02d314464c17c715d7e809297b0aba184173a98616b1fafeac27fe33fc480c82"
+
+[[variant.file]]
+path = "MODULES/LIBSD.IRX"
+size = 28661
+sha256 = "d26a8dcd121ff4ded9c819b72864ea7f4e723932cc2eab1b4f0f1c93faad43ef"
+
+[[variant.file]]
+path = "MODULES/MCMAN.IRX"
+size = 96181
+sha256 = "e4e2afe72c123faa7c5f86624185479cd800d94c065ce5d023c540aa0935830a"
+
+[[variant.file]]
+path = "MODULES/MCSERV.IRX"
+size = 7385
+sha256 = "dd33d243b91adb6fb5587ee77b212ca7fe6bb24bffa6cd128bc3d59e6cf6e6d2"
+
+[[variant.file]]
+path = "MODULES/MODHSYN.IRX"
+size = 63037
+sha256 = "804a40a38d620ecc88b81b90afb8aab262f0540187e8db25eed1ede69131fed1"
+
+[[variant.file]]
+path = "MODULES/MODMIDI.IRX"
+size = 21941
+sha256 = "c22df1c868d4baa4f51ab45e319e6b76fcab7fe0be7f0d5493a9f60285501489"
+
+[[variant.file]]
+path = "MODULES/MODMSIN.IRX"
+size = 1929
+sha256 = "b1a46d7ff1379222af01662b03a972b8e7d23cf2360cbe20c44569df788821ba"
+
+[[variant.file]]
+path = "MODULES/MTAPMAN.IRX"
+size = 10853
+sha256 = "9ab9bf95f82a0ca71aec04284aee601ce8c4f14cc6d79b5cc62095395d4a3570"
+
+[[variant.file]]
+path = "MODULES/PADMAN.IRX"
+size = 45797
+sha256 = "7362ff796dced5c94a99d04fd50a774d92aa23d5605eb04d84997dd7cb5508c0"
+
+[[variant.file]]
+path = "MODULES/RTFSSIOP.IRX"
+size = 31872
+sha256 = "61fc252479b8c03dfd585516c280c6c5b4a5dcd77c9b61a0dc34c03849092def"
+
+[[variant.file]]
+path = "MODULES/SDRDRV.IRX"
+size = 9161
+sha256 = "85a465ab251bde0c3d33151b3a67ec2780d57cc40ebb7df9d5ecb7bad3396b16"
+
+[[variant.file]]
+path = "MODULES/SIO2MAN.IRX"
+size = 6641
+sha256 = "565ec77e75f174cfddf72c41ccc446c1c07a3d5fb0a2ccfefad337cb8a7d0728"
+
+[[variant.file]]
+path = "MODULES/SNDFI.IRX"
+size = 101040
+sha256 = "55cf9d2e47d1dcb9d71932073880d5241a7440a23a7b5de6f1268901a033df6d"
+
+[[variant.file]]
+path = "MODULES/TSNDDRV.IRX"
+size = 185036
+sha256 = "1d2eda6bb072fa419b85294ba102f378ba67c1db0c9edd17171e50bf07f878ea"
+
+[[variant.file]]
+path = "MODULES/TSNDDRVC.IRX"
+size = 171580
+sha256 = "3fd20dc6ce11d2e3b4e29bd157ade01efaffab5c85d7b301fe7bd35a70c27fbc"
+
+[[variant.file]]
+path = "MODULES/TSNDDRVM.IRX"
+size = 109084
+sha256 = "de175834ca660b07dbdfb797973fd8c6aaec224237b6684b38e3304feba1615e"
+
+[[variant.file]]
+path = "MODULES/TSNDDRVT.IRX"
+size = 168868
+sha256 = "d3c871485953a3cb802356f31ab21576458fe98aa1bef6934ae407b8483c59e9"
+
+[[variant.file]]
+path = "MOVIE.AFS"
+size = 111028224
+sha256 = "fd84a3e4415aabf540248154f7e8adb7933af8065edd92a429b436f96cd55f66"
+
+[[variant.file]]
+path = "SE.AFS"
+size = 7862272
+sha256 = "2366fa7d3ed9c4c39c378268b0c0f74de4858b57c1e4b98498ab20c9212fe56e"
+
+[[variant.file]]
+path = "SLPS_256.75"
+size = 3973040
+sha256 = "994e840123eb5a4cd5d13170a52fdca275dabb0a9f4585665b5d0fc67f9180c1"
+
+[[variant.file]]
+path = "SYSTEM.CNF"
+size = 57
+sha256 = "c27d62029ce021416f7461a0629ebf900ac12a75a529ddfad25985c2d282b1bf"

@@ -1,0 +1,83 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "linux-release",
+      "displayName": "Linux Release (clang + lld, inside the build container)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/linux-release",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_EXE_LINKER_FLAGS": "-fuse-ld=lld",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fuse-ld=lld",
+        "FETCHCONTENT_FULLY_DISCONNECTED": "ON",
+        "DON_ENABLE_FFMPEG": "ON",
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "windows-release",
+      "displayName": "Windows Release (clang-cl + lld-link, cross-built inside the Windows build container)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/windows-release",
+      "toolchainFile": "${sourceDir}/cmake/toolchain-windows-clangcl.cmake",
+      "cacheVariables": {
+        "FETCHCONTENT_FULLY_DISCONNECTED": "ON",
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_PREFIX_PATH": "${sourceDir}/third_party/win-deps/clangcl"
+      }
+    },
+    {
+      "name": "linux-dev",
+      "displayName": "Linux development loop (clang + lld, inside the build container)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/linux-dev",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_EXE_LINKER_FLAGS": "-fuse-ld=lld",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fuse-ld=lld",
+        "FETCHCONTENT_FULLY_DISCONNECTED": "ON",
+        "DON_ENABLE_FFMPEG": "ON",
+        "CMAKE_BUILD_TYPE": "Dev",
+        "CMAKE_C_FLAGS_DEV": "-O2 -DNDEBUG",
+        "CMAKE_CXX_FLAGS_DEV": "-O2 -DNDEBUG",
+        "DON_GENERATED_OPT": "1",
+        "DON_PCH": "ON"
+      }
+    },
+    {
+      "name": "linux-asan",
+      "displayName": "Linux development loop with AddressSanitizer (T-304, inside the build container)",
+      "inherits": "linux-dev",
+      "binaryDir": "${sourceDir}/build/linux-asan",
+      "cacheVariables": {
+        "DON_SANITIZE": "address"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "linux-release",
+      "configurePreset": "linux-release"
+    },
+    {
+      "name": "windows-release",
+      "configurePreset": "windows-release"
+    },
+    {
+      "name": "linux-dev",
+      "configurePreset": "linux-dev"
+    },
+    {
+      "name": "linux-asan",
+      "configurePreset": "linux-asan"
+    }
+  ]
+}

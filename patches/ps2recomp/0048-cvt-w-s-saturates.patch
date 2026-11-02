@@ -1,0 +1,36 @@
+Runtime: cvt.w.s saturates a value of 2^31 and beyond to the largest 32-bit number (by sign).
+
+What it fixes: FPU_CVT_W_S was `(int32_t)nearbyintf(a)`: for a positive value that does not fit, x86's conversion returns
+0x80000000, where the reference emulator's interpreter (third_party/pcsx2/pcsx2/FPU.cpp, CVT_W) returns 0x7FFFFFFF for a
+positive value whose exponent field is above 157 (2^31 and beyond, infinity and NaN patterns included) and 0x80000000 for a
+negative one. The value inside the range is truncated (the cast truncates whatever the rounding mode is).
+
+How it was verified: tests/conformance family "fpu", cvt.w.s: 14 of 61 cases differed before (2147483648.0, 3.4e38 and the
+exponent-all-ones patterns, positive) and none after. 911 cvt.w.s sites in the game; a position or a timer that grows past 2^31
+before the conversion is the plausible way to meet it. Applies to the macro, so no regeneration of the generated code is
+needed, only a rebuild.
+
+Original work for this repository (no code from another project).
+
+diff --git a/ps2xRuntime/include/ps2_runtime_macros.h b/ps2xRuntime/include/ps2_runtime_macros.h
+--- a/ps2xRuntime/include/ps2_runtime_macros.h
++++ b/ps2xRuntime/include/ps2_runtime_macros.h
+@@ -623,7 +623,17 @@
+ #define FPU_FLOOR_W_S(a) ((int32_t)floorf((float)(a)))
+ #define FPU_CVT_S_W(a) ((float)(int32_t)(a))
+ #define FPU_CVT_S_L(a) ((float)(int64_t)(a))
+-#define FPU_CVT_W_S(a) ((int32_t)nearbyintf((float)(a)))
++// cvt.w.s: truncation; a value whose exponent is above 157 (2^31 and beyond, infinities and NaN patterns included) saturates
++// by sign (FPU.cpp: CVT_W). The plain C cast gives 0x80000000 for the positive ones.
++static inline int32_t ps2_fpu_cvt_w_s(float f)
++{
++    uint32_t u;
++    std::memcpy(&u, &f, sizeof(u));
++    if ((u & 0x7F800000u) <= 0x4E800000u)
++        return (int32_t)f;
++    return (u & 0x80000000u) ? INT32_MIN : INT32_MAX;
++}
++#define FPU_CVT_W_S(a) ps2_fpu_cvt_w_s((float)(a))
+ #define FPU_CVT_L_S(a) ((int64_t)(float)(a))
+ #define FPU_C_F_S(a, b) (0)
+ #define FPU_C_UN_S(a, b) (isnan((float)(a)) || isnan((float)(b)))

@@ -1,0 +1,61 @@
+Patch 0090: link ps2_recomp statically against libstdc++, libgcc, zlib and zstd.
+What: the player's PC runs ps2_recomp itself, so it must not need that PC's libstdc++, zlib or zstd. New option
+PS2X_STATIC_RECOMP (default ON for CMAKE_BUILD_TYPE=Release only) links ps2_recomp with -static-libstdc++ -static-libgcc,
+makes find_package(ZLIB) pick the distribution's libz.a, and builds zstd 1.5.6 from its release tarball (the build image
+has libz.a but no libzstd.a) so libdwarf links libzstd_static. Pinned source:
+  https://github.com/facebook/zstd/releases/download/v1.5.6/zstd-1.5.6.tar.gz
+  SHA-256 8c29e06cf42aacc1eafc4077ae2ec6c6fcb96a626157e0593d5e82a34fd403c1 (BSD-3-Clause/GPL-2.0 dual, Meta).
+Verified (T-672): built in don-build:1 (clang 17, Release); `ldd` lists only libm, libc and the loader; run inside
+debian:12 with the frozen config rendered by freeze_recomp_config.py, the output tree has no differences from generated/
+(diff -rq excluding iop_native, sources.txt, sources_big.txt prints nothing). Binary sha256
+feaf0edbd33fb4eba1bdceff69619dba6618928813bf22ac64973b6761f4fa17.
+Not based on another project's code.
+
+diff --git a/ps2xRecomp/CMakeLists.txt b/ps2xRecomp/CMakeLists.txt
+index 857102a..77eb67b 100644
+--- a/ps2xRecomp/CMakeLists.txt
++++ b/ps2xRecomp/CMakeLists.txt
+@@ -31,6 +31,32 @@ FetchContent_Declare(
+ )
+ FetchContent_MakeAvailable(fmt)
+  
++# A recompiler that the player's PC runs must not depend on the PC's libstdc++, zlib or zstd: link them statically.
++# Default ON for Release builds of the recompiler only.
++if(CMAKE_BUILD_TYPE STREQUAL "Release")
++    set(_ps2x_static_default ON)
++else()
++    set(_ps2x_static_default OFF)
++endif()
++option(PS2X_STATIC_RECOMP "Link ps2_recomp with static libstdc++, libgcc, zlib and zstd" ${_ps2x_static_default})
++
++if(PS2X_STATIC_RECOMP)
++    # zlib: the distribution's libz.a. zstd: the distribution has no libzstd.a, so build the pinned release.
++    set(CMAKE_FIND_LIBRARY_SUFFIXES .a)
++    FetchContent_Declare(
++        zstd
++        URL https://github.com/facebook/zstd/releases/download/v1.5.6/zstd-1.5.6.tar.gz
++        URL_HASH SHA256=8c29e06cf42aacc1eafc4077ae2ec6c6fcb96a626157e0593d5e82a34fd403c1
++        SOURCE_SUBDIR build/cmake
++    )
++    set(ZSTD_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
++    set(ZSTD_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
++    set(ZSTD_BUILD_CONTRIB  OFF CACHE BOOL "" FORCE)
++    set(ZSTD_BUILD_SHARED   OFF CACHE BOOL "" FORCE)
++    set(ZSTD_BUILD_STATIC   ON  CACHE BOOL "" FORCE)
++    FetchContent_MakeAvailable(zstd)
++endif()
++
+ FetchContent_Declare(
+     libdwarf
+     GIT_REPOSITORY https://github.com/davea42/libdwarf-code.git
+@@ -120,6 +146,10 @@ PRIVATE
+     ps2_recomp_lib
+ )
+ 
++if(PS2X_STATIC_RECOMP)
++    target_link_options(ps2_recomp PRIVATE -static-libstdc++ -static-libgcc)
++endif()
++
+ install(TARGETS ps2_recomp ps2_recomp_lib
+     RUNTIME DESTINATION bin
+     LIBRARY DESTINATION lib

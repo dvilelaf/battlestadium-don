@@ -1,0 +1,472 @@
+IOP emulator: host SPU2 hook (T-302)
+
+What it adds: an interface, ps2xIOP/include/ps2x/iop/iop_host_spu2.h (iopSetHostSpu2), with which the host
+program installs an SPU2 on the IOP emulator. With one installed:
+- every access to the SPU2 registers (IOP 0x1F900000-0x1F9007FF) goes to the host's read16/write16 (a 32-bit access
+  as two 16-bit ones, low half first; an 8-bit write as read-modify-write of the 16-bit register);
+- a start of IOP DMA channel 4 (SPU2 core 0) or 7 (core 1) hands the bytes (address, block size and block count
+  from MADR/BCR; direction from CHCR bit 0) to the host's dma_write/dma_read, and CHCR.TR stays set until the host
+  reports the end of that core's DMA; then TR is cleared, MADR is moved to the end and the channel's interrupt
+  (0x24 / 0x28) is delivered. The SPU2 interrupt event delivers IOP interrupt line 9;
+- every execution slice of runEeCycles first advances the host SPU2 by the IOP cycles elapsed and drains its events.
+  One emulator cycle is one cycle of the 36.864 MHz IOP clock (1 instruction or kernel call = 1 cycle, EE cycles / 8),
+  the unit the host SPU2 counts, so no conversion is needed. While every thread sleeps the idle skip is limited to
+  768 * 32 cycles so that SPU2 events are not delivered late;
+- the heuristic HLE libsd service (the one that decodes VAG samples itself) is inactive, so the samples are not
+  played twice. The registers' old storage and the faked "DMA complete" flag are bypassed for the SPU2 window.
+Without a host SPU2 installed nothing changes (the old storage, the faked DMA-complete flag and interrupt, the HLE
+service).
+
+How it was verified: tests/runtime/iop_host_spu2_test.cpp (build with tests/runtime/CMakeLists.txt): a fake SPU2
+records every call, a small IOP program built in memory touches the registers in every width and starts a DMA on
+channel 4 and on channel 7; the test checks the calls and bytes, that each channel stays busy until its own
+event, the interrupts, the MADR, the cycle total, and the unchanged behaviour with no host installed.
+
+Based on: the Killzone recompilation's patches/ps2recomp/0006-spu2-host-audio.patch, repository
+https://github.com/drakolordx7/KillzoneRecomp, commit 5f0700079f9ac4e14799d66d01747dbcdcec55f6 (GPL-3.0). The
+shape of the hook (register routing in IopMemory, DMA start in the CHCR write, completion by an event, advancing the
+SPU2 in runCycles, the idle cap) follows it; the interface (a user pointer and the callbacks of don_spu2.h, events
+polled instead of pushed), the cycle bookkeeping, the byte accesses and the HLE service switch are new. Its other
+changes (sceSifGetOtherData, WaitEventFlag outside a thread, the time-ahead callback nextEvent) are not part of
+this patch.
+
+diff --git a/ps2xIOP/include/ps2x/iop/iop_host_spu2.h b/ps2xIOP/include/ps2x/iop/iop_host_spu2.h
+new file mode 100644
+index 0000000..9d58326
+--- /dev/null
++++ b/ps2xIOP/include/ps2x/iop/iop_host_spu2.h
+@@ -0,0 +1,73 @@
++#pragma once
++
++#include <cstdint>
++
++// Optional host SPU2. The host installs it once, before the IOP runs, and from then on the IOP emulator routes
++// to it (a "host SPU2"; without one nothing below applies and the built-in stand-ins behave exactly as before):
++//
++//  - Registers. Every access of IOP code to IOP physical 0x1F900000-0x1F9007FF (any mirror of it: the top three
++//    address bits are ignored) goes to read16/write16 with the address of the 16-bit register. A 32-bit access
++//    becomes two 16-bit ones, low halfword first (the order the bus delivers them). An 8-bit read returns the
++//    chosen byte of read16; an 8-bit write is a read16, a byte merge and a write16 of that register. Addresses
++//    that are not 2-byte aligned for a 16-bit access, or 4-byte aligned for a 32-bit one, are split into bytes.
++//    The rest of the 0x1F900800-0x1F9FFFFF window keeps the old storage.
++//  - DMA. A write of CHCR with the TR bit (bit 24) set on IOP DMA channel 4 (SPU2 core 0: MADR 0x1F8010C0,
++//    BCR 0x1F8010C4, CHCR 0x1F8010C8) or channel 7 (core 1: 0x1F801500, 0x1F801504, 0x1F801508) starts a
++//    transfer of block size (BCR bits 0-15, in words) times block count (BCR bits 16-31) words, 4 bytes each,
++//    from/to the IOP RAM at MADR. CHCR bit 0 set = IOP RAM to SPU2 (dma_write, the bytes are handed over before
++//    the call returns); clear = SPU2 to IOP RAM (dma_read fills a buffer that is then copied to IOP RAM). TR
++//    stays set, the channel is busy, until poll_event reports the end of that core's DMA. Then TR is cleared,
++//    MADR is left at the end address and the channel's interrupt (0x24 for channel 4, 0x28 for channel 7) is
++//    delivered. If the guest cleared TR itself in the meantime the end event is dropped (no interrupt).
++//  - Interrupt. The SPU2 interrupt event delivers IOP interrupt line 9 (the handler registered with intrman
++//    RegisterIntrHandler(9, ...) and enabled with EnableIntr(9)).
++//  - Time. IOP time is counted in cycles of the 36,864,000 Hz IOP clock: one executed instruction (or one
++//    imported kernel call) is one cycle, idle time skipped while every thread sleeps counts as it passes, and the
++//    EE cycles given to runEeCycles convert at 8 EE cycles = 1 IOP cycle (294,912,000 Hz / 8). So the emulator's
++//    cycle counter already is the unit don_spu2_advance wants and nothing is converted. Before each execution
++//    slice and after the last one of runEeCycles, advance(delta) passes the cycles elapsed since the previous
++//    call (their sum equals the emulator's cycle counter since the last reset), then poll_event is called until
++//    it returns 0 and the events are delivered. A register access therefore sees the SPU2 up to one slice (256
++//    cycles) behind the IOP. While every thread sleeps, the emulator skips ahead at most max_idle_cycles at a
++//    time so that SPU2 events are not delivered late by a long idle jump.
++//
++// Units and meanings match src/spu2bridge/don_spu2.h of this repository, so the glue is one line per callback
++// (type: 1 = SPU2 interrupt, 4 = end of the core 0 DMA, 7 = end of the core 1 DMA).
++//
++// Threading: all callbacks are called from the thread that runs the IOP. Install and remove from that thread
++// while the IOP is not running. One host SPU2 per process.
++namespace ps2x::iop
++{
++    inline constexpr int kHostSpu2EventIrq = 1;
++    inline constexpr int kHostSpu2EventDmaEnd0 = 4;
++    inline constexpr int kHostSpu2EventDmaEnd1 = 7;
++
++    struct IopHostSpu2
++    {
++        void *user = nullptr; // passed as the first argument of every callback
++
++        // Required. A host SPU2 is installed only if all six are set.
++        void (*write16)(void *user, uint32_t addr, uint16_t value) = nullptr;
++        uint16_t (*read16)(void *user, uint32_t addr) = nullptr;
++        // data points into IOP RAM (valid only during the call); bytes is the transfer size (a multiple of 4,
++        // clamped to the end of IOP RAM). Returns are ignored.
++        void (*dma_write)(void *user, int core, const uint8_t *data, uint32_t bytes) = nullptr;
++        // dst is a scratch buffer of `bytes` bytes that the callee fills.
++        void (*dma_read)(void *user, int core, uint8_t *dst, uint32_t bytes) = nullptr;
++        void (*advance)(void *user, uint64_t iop_cycles) = nullptr;
++        // Returns 1 and fills *type and *iop_cycle (either may be ignored) if an event is queued, else 0.
++        int (*poll_event)(void *user, int *type, uint64_t *iop_cycle) = nullptr;
++
++        // Optional. Called when the IOP emulator is reset (module state, RAM and cycle counter go back to 0).
++        void (*reset)(void *user) = nullptr;
++
++        // Longest idle skip, in IOP cycles, while the host SPU2 is installed. 0 = the default (768 * 32, 32
++        // audio frames, about 0.67 ms).
++        uint64_t max_idle_cycles = 0;
++    };
++
++    // Installs a copy of *hooks, or removes the host SPU2 if hooks is null or incomplete (see above).
++    void iopSetHostSpu2(const IopHostSpu2 *hooks);
++    // The installed host SPU2, or null.
++    const IopHostSpu2 *iopHostSpu2();
++}
+diff --git a/ps2xIOP/src/emulator/core/iop_memory.cpp b/ps2xIOP/src/emulator/core/iop_memory.cpp
+index 25e9b36..7fb36d9 100644
+--- a/ps2xIOP/src/emulator/core/iop_memory.cpp
++++ b/ps2xIOP/src/emulator/core/iop_memory.cpp
+@@ -1,5 +1,7 @@
+ #include "iop_memory.h"
+ 
++#include "ps2x/iop/iop_host_spu2.h"
++
+ #include <algorithm>
+ #include <cstring>
+ 
+@@ -7,6 +9,8 @@ namespace ps2x::iop::detail
+ {
+     namespace
+     {
++        constexpr uint32_t kSpu2RegBase = 0x1F900000u;
++        constexpr uint32_t kSpu2RegEnd = 0x1F900800u;
+         constexpr uint32_t kDmaSpu0Chcr = 0x1F8010C8u;
+         constexpr uint32_t kDmaSpu1Chcr = 0x1F801508u;
+         constexpr uint32_t kDmaStart = 1u << 24u;
+@@ -19,6 +23,18 @@ namespace ps2x::iop::detail
+         }
+     }
+ 
++    namespace
++    {
++        // Process-wide host SPU2: a copy of what the host installed, valid while g_hostSpu2Installed.
++        IopHostSpu2 g_hostSpu2;
++        bool g_hostSpu2Installed = false;
++    }
++
++    bool IopMemory::isHostSpu2Register(uint32_t phys) noexcept
++    {
++        return g_hostSpu2Installed && phys >= kSpu2RegBase && phys < kSpu2RegEnd;
++    }
++
+     IopMemory::IopMemory()
+         : m_ram(RamSize), m_owned(RamSize), m_scratch(ScratchSize)
+     {
+@@ -51,6 +67,8 @@ namespace ps2x::iop::detail
+             return m_ram[phys];
+         if (phys >= ScratchBase && phys < ScratchBase + ScratchSize)
+             return m_scratch[phys - ScratchBase];
++        if (isHostSpu2Register(phys))
++            return static_cast<uint8_t>(g_hostSpu2.read16(g_hostSpu2.user, phys & ~1u) >> ((phys & 1u) * 8u));
+         const uint32_t value = readHardware32(phys & ~3u);
+         return static_cast<uint8_t>(value >> ((phys & 3u) * 8u));
+     }
+@@ -64,6 +82,8 @@ namespace ps2x::iop::detail
+             std::memcpy(&value, m_ram.data() + phys, sizeof(value));
+             return value;
+         }
++        if ((phys & 1u) == 0u && isHostSpu2Register(phys))
++            return g_hostSpu2.read16(g_hostSpu2.user, phys);
+         return static_cast<uint16_t>(read8(address) | (static_cast<uint16_t>(read8(address + 1u)) << 8u));
+     }
+ 
+@@ -82,6 +102,11 @@ namespace ps2x::iop::detail
+             std::memcpy(&value, m_scratch.data() + (phys - ScratchBase), sizeof(value));
+             return value;
+         }
++        if ((phys & 3u) == 0u && isHostSpu2Register(phys))
++        {
++            const uint32_t low = g_hostSpu2.read16(g_hostSpu2.user, phys);
++            return low | (static_cast<uint32_t>(g_hostSpu2.read16(g_hostSpu2.user, phys + 2u)) << 16u);
++        }
+         if ((phys & 3u) == 0u && isHardwareAddress(phys))
+             return readHardware32(phys);
+ 
+@@ -105,6 +130,15 @@ namespace ps2x::iop::detail
+             m_scratch[phys - ScratchBase] = value;
+             return;
+         }
++        if (isHostSpu2Register(phys))
++        {
++            const uint32_t reg = phys & ~1u;
++            const uint32_t shift = (phys & 1u) * 8u;
++            const uint32_t current = g_hostSpu2.read16(g_hostSpu2.user, reg);
++            const uint32_t merged = (current & ~(0xFFu << shift)) | (static_cast<uint32_t>(value) << shift);
++            g_hostSpu2.write16(g_hostSpu2.user, reg, static_cast<uint16_t>(merged));
++            return;
++        }
+         const uint32_t aligned = phys & ~3u;
+         uint32_t current = readHardware32(aligned);
+         const uint32_t shift = (phys & 3u) * 8u;
+@@ -121,6 +155,11 @@ namespace ps2x::iop::detail
+             markOwned(phys, sizeof(value));
+             return;
+         }
++        if ((phys & 1u) == 0u && isHostSpu2Register(phys))
++        {
++            g_hostSpu2.write16(g_hostSpu2.user, phys, value);
++            return;
++        }
+         write8(address, static_cast<uint8_t>(value));
+         write8(address + 1u, static_cast<uint8_t>(value >> 8u));
+     }
+@@ -139,6 +178,12 @@ namespace ps2x::iop::detail
+             std::memcpy(m_scratch.data() + (phys - ScratchBase), &value, sizeof(value));
+             return;
+         }
++        if ((phys & 3u) == 0u && isHostSpu2Register(phys))
++        {
++            g_hostSpu2.write16(g_hostSpu2.user, phys, static_cast<uint16_t>(value));
++            g_hostSpu2.write16(g_hostSpu2.user, phys + 2u, static_cast<uint16_t>(value >> 16u));
++            return;
++        }
+         if ((phys & 3u) == 0u)
+         {
+             writeHardware32(phys, value);
+@@ -249,6 +294,11 @@ namespace ps2x::iop::detail
+         m_hardware[address] = value;
+         if ((address != kDmaSpu0Chcr && address != kDmaSpu1Chcr) || (value & kDmaStart) == 0u)
+             return;
++        if (g_hostSpu2Installed)
++        {
++            startSpu2Dma(address, value); // CHCR.TR stays set until the host SPU2 reports the end
++            return;
++        }
+ 
+         const bool secondCore = address == kDmaSpu1Chcr;
+         m_hardware[address] = value & ~kDmaStart;
+@@ -275,6 +325,45 @@ namespace ps2x::iop::detail
+         };
+     }
+ 
++    void IopMemory::startSpu2Dma(uint32_t chcrAddress, uint32_t chcr)
++    {
++        const int core = chcrAddress == kDmaSpu1Chcr ? 1 : 0;
++        const auto registerValue = [&](uint32_t address)
++        {
++            const auto found = m_hardware.find(address);
++            return found != m_hardware.end() ? found->second : 0u;
++        };
++        const uint32_t madr = registerValue(chcrAddress - 8u) & 0x00FFFFFFu;
++        const uint32_t blockControl = registerValue(chcrAddress - 4u);
++        const uint64_t words = static_cast<uint64_t>(blockControl >> 16u) * (blockControl & 0xFFFFu);
++        const uint32_t start = madr & ~3u;
++        const uint32_t bytes = static_cast<uint32_t>(std::min<uint64_t>(words * 4u, start < RamSize ? RamSize - start : 0u));
++        m_spu2DmaEnd[core] = start + bytes;
++        if ((chcr & 1u) != 0u)
++        {
++            g_hostSpu2.dma_write(g_hostSpu2.user, core, m_ram.data() + start, bytes);
++            return;
++        }
++        std::vector<uint8_t> buffer(bytes, uint8_t{0});
++        g_hostSpu2.dma_read(g_hostSpu2.user, core, buffer.data(), bytes);
++        if (bytes != 0u)
++        {
++            std::memcpy(m_ram.data() + start, buffer.data(), bytes);
++            markOwned(start, bytes);
++        }
++    }
++
++    bool IopMemory::completeSpu2Dma(int core)
++    {
++        const uint32_t chcrAddress = core ? kDmaSpu1Chcr : kDmaSpu0Chcr;
++        const auto chcr = m_hardware.find(chcrAddress);
++        if (chcr == m_hardware.end() || (chcr->second & kDmaStart) == 0u)
++            return false;
++        chcr->second &= ~kDmaStart;
++        m_hardware[chcrAddress - 8u] = m_spu2DmaEnd[core & 1];
++        return true;
++    }
++
+     std::optional<IopMemory::DmaStart> IopMemory::takeDmaStart() noexcept
+     {
+         std::optional<DmaStart> result = m_dmaStart;
+@@ -369,3 +458,19 @@ namespace ps2x::iop::detail
+         return result;
+     }
+ }
++
++namespace ps2x::iop
++{
++    void iopSetHostSpu2(const IopHostSpu2 *hooks)
++    {
++        const bool complete = hooks && hooks->write16 && hooks->read16 && hooks->dma_write &&
++                              hooks->dma_read && hooks->advance && hooks->poll_event;
++        detail::g_hostSpu2 = complete ? *hooks : IopHostSpu2{};
++        detail::g_hostSpu2Installed = complete;
++    }
++
++    const IopHostSpu2 *iopHostSpu2()
++    {
++        return detail::g_hostSpu2Installed ? &detail::g_hostSpu2 : nullptr;
++    }
++}
+diff --git a/ps2xIOP/src/emulator/core/iop_memory.h b/ps2xIOP/src/emulator/core/iop_memory.h
+index a932a5d..537faa7 100644
+--- a/ps2xIOP/src/emulator/core/iop_memory.h
++++ b/ps2xIOP/src/emulator/core/iop_memory.h
+@@ -70,12 +70,18 @@ namespace ps2x::iop::detail
+         [[nodiscard]] std::optional<DmaStart> takeDmaStart() noexcept;
+         [[nodiscard]] std::span<const uint8_t> ram() const noexcept { return m_ram; }
+ 
++        // Host SPU2 (ps2x/iop/iop_host_spu2.h): DMA channel 4 (core 0) or 7 (core 1) finished. Clears CHCR.TR and
++        // moves MADR to the end of the transfer. Returns false if the guest had already cleared TR (no interrupt).
++        [[nodiscard]] bool completeSpu2Dma(int core);
++
+         [[nodiscard]] static uint32_t physicalAddress(uint32_t address) noexcept;
+ 
+     private:
+         [[nodiscard]] uint32_t readHardware32(uint32_t address) const;
+         void writeHardware32(uint32_t address, uint32_t value);
+         void markOwned(uint32_t address, size_t size);
++        [[nodiscard]] static bool isHostSpu2Register(uint32_t phys) noexcept;
++        void startSpu2Dma(uint32_t chcrAddress, uint32_t chcr);
+ 
+         std::vector<uint8_t> m_ram;
+         std::vector<uint8_t> m_owned;
+@@ -87,5 +93,6 @@ namespace ps2x::iop::detail
+         uint32_t m_interruptMask = 0;
+         uint32_t m_interruptControl = 1;
+         std::optional<DmaStart> m_dmaStart;
++        uint32_t m_spu2DmaEnd[2] = {};
+     };
+ }
+diff --git a/ps2xIOP/src/emulator/iop_emulator.cpp b/ps2xIOP/src/emulator/iop_emulator.cpp
+index e5f63a9..97030cb 100644
+--- a/ps2xIOP/src/emulator/iop_emulator.cpp
++++ b/ps2xIOP/src/emulator/iop_emulator.cpp
+@@ -16,6 +16,7 @@
+ #include "imports/iop_timrman.h"
+ #include "imports/iop_vblank.h"
+ #include "iop_emulator_const.h"
++#include "ps2x/iop/iop_host_spu2.h"
+ 
+ #include <algorithm>
+ #include <cctype>
+@@ -34,6 +35,10 @@ namespace ps2x::iop::detail
+         constexpr uint32_t kKernelHeapLimit = IopMemory::HeapLimit;
+         constexpr uint32_t kCallStackBase = kKernelHeapLimit;
+         constexpr uint32_t kCallStackLimit = 0x001FFF00u;
++        constexpr int kIrqSpu2 = 9;            // SPU2 interrupt (INTC line 9)
++        constexpr int kIrqDmaSpu2Core0 = 0x24; // IOP DMA channel 4 end
++        constexpr int kIrqDmaSpu2Core1 = 0x28; // IOP DMA channel 7 end
++        constexpr uint64_t kHostSpu2DefaultMaxIdle = 768u * 32u;
+         constexpr uint32_t kCallStackSize = 0x2000u;
+         constexpr uint32_t kCallStackCapacity = (kCallStackLimit - kCallStackBase) / kCallStackSize;
+         constexpr uint64_t kCdvdCompletionCycles = 128u;
+@@ -115,6 +120,10 @@ namespace ps2x::iop::detail
+ 
+         void reset()
+         {
++            if (const IopHostSpu2 *spu2 = iopHostSpu2(); spu2 && spu2->reset)
++                spu2->reset(spu2->user);
++            hostSpu2Cycle = 0;
++            hostSpu2Attached = iopHostSpu2() != nullptr;
+             memory.reset();
+             kernel.reset();
+             modules.clear();
+@@ -180,6 +189,50 @@ namespace ps2x::iop::detail
+                 pendingDmaInterrupts[dma->irq] = totalCycles + dma->delayCycles;
+         }
+ 
++        // Host SPU2 (ps2x/iop/iop_host_spu2.h): advances it to the current cycle and turns the events it queued
++        // into IOP interrupts, delivered by the pending-interrupt queue. A cycle here is a cycle of the
++        // 36.864 MHz IOP clock, which is what the host SPU2 counts too.
++        void syncHostSpu2()
++        {
++            const IopHostSpu2 *spu2 = iopHostSpu2();
++            if (!spu2)
++            {
++                hostSpu2Attached = false;
++                return;
++            }
++            if (!hostSpu2Attached)
++            {
++                hostSpu2Attached = true;
++                hostSpu2Cycle = totalCycles;
++            }
++            if (totalCycles > hostSpu2Cycle)
++            {
++                spu2->advance(spu2->user, totalCycles - hostSpu2Cycle);
++                hostSpu2Cycle = totalCycles;
++            }
++            int type = 0;
++            uint64_t eventCycle = 0;
++            while (spu2->poll_event(spu2->user, &type, &eventCycle))
++            {
++                switch (type)
++                {
++                case kHostSpu2EventIrq:
++                    pendingDmaInterrupts[kIrqSpu2] = totalCycles;
++                    break;
++                case kHostSpu2EventDmaEnd0:
++                case kHostSpu2EventDmaEnd1:
++                {
++                    const int core = type == kHostSpu2EventDmaEnd1 ? 1 : 0;
++                    if (memory.completeSpu2Dma(core))
++                        pendingDmaInterrupts[core ? kIrqDmaSpu2Core1 : kIrqDmaSpu2Core0] = totalCycles;
++                    break;
++                }
++                default:
++                    break;
++                }
++            }
++        }
++
+         bool readRam(uint32_t address, void *destination, size_t size) const
+         {
+             return memory.readRam(address, destination, size);
+@@ -560,6 +613,7 @@ namespace ps2x::iop::detail
+                 const uint64_t target = totalCycles + cycles;
+                 while (totalCycles < target)
+                 {
++                    syncHostSpu2();
+                     servicePendingDmaInterrupts();
+                     servicePendingGuestCallbacks();
+                     timrman.serviceDue(totalCycles, *this);
+@@ -572,6 +626,8 @@ namespace ps2x::iop::detail
+                         if (!pendingGuestCallbacks.empty())
+                             nextWake = std::min(nextWake, pendingGuestCallbacks.begin()->first);
+                         nextWake = timrman.nextEventCycle(nextWake);
++                        if (const IopHostSpu2 *spu2 = iopHostSpu2())
++                            nextWake = std::min(nextWake, totalCycles + (spu2->max_idle_cycles ? spu2->max_idle_cycles : kHostSpu2DefaultMaxIdle));
+                         totalCycles = std::max(totalCycles + 1u, std::min(target, nextWake));
+                         continue;
+                     }
+@@ -581,6 +637,7 @@ namespace ps2x::iop::detail
+                     if (totalCycles == before)
+                         ++totalCycles;
+                 }
++                syncHostSpu2();
+             }
+             catch (...)
+             {
+@@ -702,6 +759,8 @@ namespace ps2x::iop::detail
+         uint64_t totalCycles = 0;
+         uint64_t totalInstructions = 0;
+         uint64_t eeCycleCarry = 0;
++        uint64_t hostSpu2Cycle = 0;
++        bool hostSpu2Attached = false;
+         CpuState *activeCpu = nullptr;
+         std::string lastError;
+         bool servicingDmaInterrupts = false;
+diff --git a/ps2xIOP/src/iop_subsystem.cpp b/ps2xIOP/src/iop_subsystem.cpp
+index b498155..5f871d3 100644
+--- a/ps2xIOP/src/iop_subsystem.cpp
++++ b/ps2xIOP/src/iop_subsystem.cpp
+@@ -1,6 +1,7 @@
+ #include "ps2x/iop/iop_subsystem.h"
+ 
+ #include "iop_service.h"
++#include "ps2x/iop/iop_host_spu2.h"
+ #include "iop_module_manager.h"
+ #include "emulator/iop_emulator.h"
+ #include "module_factories.h"
+@@ -29,6 +30,10 @@ namespace ps2x::iop
+ 
+         bool serviceActive(const detail::IopService &service) const
+         {
++            // A host SPU2 plays what the physical sound modules program; the heuristic HLE sound service must not
++            // play the same samples a second time.
++            if (iopHostSpu2() && service.name() == "libsd")
++                return false;
+             return moduleManager.isLoaded(service.moduleAliases());
+         }
+ 

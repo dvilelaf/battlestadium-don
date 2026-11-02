@@ -1,0 +1,292 @@
+# Host of a two-player online session (T-509/T-510): the player-0 half of
+# tools/run/scripts/multiplayer_match.txt, whose P2 lines live in net_client_2p.txt. Player 1 (this script, the
+# local player) drives the whole menu to the two-human-plus-two-COM fight and then fights; the guest's player 2
+# is the net client. Runs with --headless --sound on --mute, DON_PLAY_MOVIES=1, the en-jpvoice variant.
+#
+# The blank numbers are the route's (sound on shifts them a little; only the fight is kept, ~4900 on) and the
+# input delay D of the session shifts every applied pad by D frames, far below the route's margins. Frames are
+# presented frames. It quits at 18100 (about 5 minutes) so a loopback test sees both instances exit 0.
+#
+#   build/linux-dev/don --headless --sound on --mute --net-host 7877 --net-players 2 \
+#       --input-script tools/run/scripts/net_host_2p.txt ~/.local/share/don/variants/en-jpvoice/SLPS_256.75
+270 tap LEFT 6
+330 tap CIRCLE 6
+2640 tap START 6
+2960 tap DOWN 4
+3020 tap DOWN 4
+3080 tap DOWN 4
+3200 tap CIRCLE 6
+3420 tap START 6
+3620 tap CIRCLE 6
+4020 tap CIRCLE 6
+4420 tap CIRCLE 6
+4620 tap CIRCLE 6
+4900 press RIGHT
+4960 release RIGHT
+4970 tap SQUARE 4
+4984 tap SQUARE 4
+4998 tap SQUARE 4
+5030 tap CROSS 6
+5200 press RIGHT
+5260 release RIGHT
+5270 tap SQUARE 4
+5284 tap SQUARE 4
+5298 tap SQUARE 4
+5330 tap CROSS 6
+5500 press RIGHT
+5560 release RIGHT
+5570 tap SQUARE 4
+5584 tap SQUARE 4
+5598 tap SQUARE 4
+5630 tap CROSS 6
+5800 press RIGHT
+5860 release RIGHT
+5870 tap SQUARE 4
+5884 tap SQUARE 4
+5898 tap SQUARE 4
+5930 tap CROSS 6
+6100 press RIGHT
+6160 release RIGHT
+6170 tap SQUARE 4
+6184 tap SQUARE 4
+6198 tap SQUARE 4
+6230 tap CROSS 6
+6400 press RIGHT
+6460 release RIGHT
+6470 tap SQUARE 4
+6484 tap SQUARE 4
+6498 tap SQUARE 4
+6530 tap CROSS 6
+6700 press RIGHT
+6760 release RIGHT
+6770 tap SQUARE 4
+6784 tap SQUARE 4
+6798 tap SQUARE 4
+6830 tap CROSS 6
+7000 press RIGHT
+7060 release RIGHT
+7070 tap SQUARE 4
+7084 tap SQUARE 4
+7098 tap SQUARE 4
+7130 tap CROSS 6
+7300 press RIGHT
+7360 release RIGHT
+7370 tap SQUARE 4
+7384 tap SQUARE 4
+7398 tap SQUARE 4
+7430 tap CROSS 6
+7600 press RIGHT
+7660 release RIGHT
+7670 tap SQUARE 4
+7684 tap SQUARE 4
+7698 tap SQUARE 4
+7730 tap CROSS 6
+7900 press RIGHT
+7960 release RIGHT
+7970 tap SQUARE 4
+7984 tap SQUARE 4
+7998 tap SQUARE 4
+8030 tap CROSS 6
+8200 press RIGHT
+8260 release RIGHT
+8270 tap SQUARE 4
+8284 tap SQUARE 4
+8298 tap SQUARE 4
+8330 tap CROSS 6
+8500 press RIGHT
+8560 release RIGHT
+8570 tap SQUARE 4
+8584 tap SQUARE 4
+8598 tap SQUARE 4
+8630 tap CROSS 6
+8800 press RIGHT
+8860 release RIGHT
+8870 tap SQUARE 4
+8884 tap SQUARE 4
+8898 tap SQUARE 4
+8930 tap CROSS 6
+9100 press RIGHT
+9160 release RIGHT
+9170 tap SQUARE 4
+9184 tap SQUARE 4
+9198 tap SQUARE 4
+9230 tap CROSS 6
+9400 press RIGHT
+9460 release RIGHT
+9470 tap SQUARE 4
+9484 tap SQUARE 4
+9498 tap SQUARE 4
+9530 tap CROSS 6
+9700 press RIGHT
+9760 release RIGHT
+9770 tap SQUARE 4
+9784 tap SQUARE 4
+9798 tap SQUARE 4
+9830 tap CROSS 6
+10000 press RIGHT
+10060 release RIGHT
+10070 tap SQUARE 4
+10084 tap SQUARE 4
+10098 tap SQUARE 4
+10130 tap CROSS 6
+10300 press RIGHT
+10360 release RIGHT
+10370 tap SQUARE 4
+10384 tap SQUARE 4
+10398 tap SQUARE 4
+10430 tap CROSS 6
+10600 press RIGHT
+10660 release RIGHT
+10670 tap SQUARE 4
+10684 tap SQUARE 4
+10698 tap SQUARE 4
+10730 tap CROSS 6
+10900 press RIGHT
+10960 release RIGHT
+10970 tap SQUARE 4
+10984 tap SQUARE 4
+10998 tap SQUARE 4
+11030 tap CROSS 6
+11200 press RIGHT
+11260 release RIGHT
+11270 tap SQUARE 4
+11284 tap SQUARE 4
+11298 tap SQUARE 4
+11330 tap CROSS 6
+11500 press RIGHT
+11560 release RIGHT
+11570 tap SQUARE 4
+11584 tap SQUARE 4
+11598 tap SQUARE 4
+11630 tap CROSS 6
+11800 press RIGHT
+11860 release RIGHT
+11870 tap SQUARE 4
+11884 tap SQUARE 4
+11898 tap SQUARE 4
+11930 tap CROSS 6
+12100 press RIGHT
+12160 release RIGHT
+12170 tap SQUARE 4
+12184 tap SQUARE 4
+12198 tap SQUARE 4
+12230 tap CROSS 6
+12400 press RIGHT
+12460 release RIGHT
+12470 tap SQUARE 4
+12484 tap SQUARE 4
+12498 tap SQUARE 4
+12530 tap CROSS 6
+12700 press RIGHT
+12760 release RIGHT
+12770 tap SQUARE 4
+12784 tap SQUARE 4
+12798 tap SQUARE 4
+12830 tap CROSS 6
+13000 press RIGHT
+13060 release RIGHT
+13070 tap SQUARE 4
+13084 tap SQUARE 4
+13098 tap SQUARE 4
+13130 tap CROSS 6
+13300 press RIGHT
+13360 release RIGHT
+13370 tap SQUARE 4
+13384 tap SQUARE 4
+13398 tap SQUARE 4
+13430 tap CROSS 6
+13600 press RIGHT
+13660 release RIGHT
+13670 tap SQUARE 4
+13684 tap SQUARE 4
+13698 tap SQUARE 4
+13730 tap CROSS 6
+13900 press RIGHT
+13960 release RIGHT
+13970 tap SQUARE 4
+13984 tap SQUARE 4
+13998 tap SQUARE 4
+14030 tap CROSS 6
+14200 press RIGHT
+14260 release RIGHT
+14270 tap SQUARE 4
+14284 tap SQUARE 4
+14298 tap SQUARE 4
+14330 tap CROSS 6
+14500 press RIGHT
+14560 release RIGHT
+14570 tap SQUARE 4
+14584 tap SQUARE 4
+14598 tap SQUARE 4
+14630 tap CROSS 6
+14800 press RIGHT
+14860 release RIGHT
+14870 tap SQUARE 4
+14884 tap SQUARE 4
+14898 tap SQUARE 4
+14930 tap CROSS 6
+15100 press RIGHT
+15160 release RIGHT
+15170 tap SQUARE 4
+15184 tap SQUARE 4
+15198 tap SQUARE 4
+15230 tap CROSS 6
+15400 press RIGHT
+15460 release RIGHT
+15470 tap SQUARE 4
+15484 tap SQUARE 4
+15498 tap SQUARE 4
+15530 tap CROSS 6
+15700 press RIGHT
+15760 release RIGHT
+15770 tap SQUARE 4
+15784 tap SQUARE 4
+15798 tap SQUARE 4
+15830 tap CROSS 6
+16000 press RIGHT
+16060 release RIGHT
+16070 tap SQUARE 4
+16084 tap SQUARE 4
+16098 tap SQUARE 4
+16130 tap CROSS 6
+16300 press RIGHT
+16360 release RIGHT
+16370 tap SQUARE 4
+16384 tap SQUARE 4
+16398 tap SQUARE 4
+16430 tap CROSS 6
+16600 press RIGHT
+16660 release RIGHT
+16670 tap SQUARE 4
+16684 tap SQUARE 4
+16698 tap SQUARE 4
+16730 tap CROSS 6
+16900 press RIGHT
+16960 release RIGHT
+16970 tap SQUARE 4
+16984 tap SQUARE 4
+16998 tap SQUARE 4
+17030 tap CROSS 6
+17200 press RIGHT
+17260 release RIGHT
+17270 tap SQUARE 4
+17284 tap SQUARE 4
+17298 tap SQUARE 4
+17330 tap CROSS 6
+17500 press RIGHT
+17560 release RIGHT
+17570 tap SQUARE 4
+17584 tap SQUARE 4
+17598 tap SQUARE 4
+17630 tap CROSS 6
+17800 press RIGHT
+17860 release RIGHT
+17870 tap SQUARE 4
+17884 tap SQUARE 4
+17898 tap SQUARE 4
+17930 tap CROSS 6
+5000  shot net_fight_a
+8000  shot net_fight_b
+12000  shot net_fight_c
+16000  shot net_fight_d
+18100 quit

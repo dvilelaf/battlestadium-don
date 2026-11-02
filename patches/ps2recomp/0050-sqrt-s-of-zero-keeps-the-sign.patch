@@ -1,0 +1,27 @@
+Recompiler: sqrt.s of a zero or a denormal gives a zero with the operand's sign.
+
+What it fixes: the emitted text took the host's square root of the magnitude, which turns -0 into +0. The reference emulator's
+interpreter (third_party/pcsx2/pcsx2/FPU.cpp, SQRT_S, :359) gives `Ft & 0x80000000` when the operand's exponent field is zero.
+
+How it was verified: tests/conformance family "fpu", sqrt.s: 9 of 61 cases differed before; after, 6 remain, all with an operand
+whose exponent field is all ones (not clamped, see journal 025 piece 5). 96 sites in the game (rabbitizer names the word "c1"; the
+census counts it as sqrt.s). A sign of zero seldom reaches anything but a later division or compare.
+
+Original work for this repository (no code from another project).
+
+diff --git a/ps2xRecomp/src/lib/fpu_translator.cpp b/ps2xRecomp/src/lib/fpu_translator.cpp
+--- a/ps2xRecomp/src/lib/fpu_translator.cpp
++++ b/ps2xRecomp/src/lib/fpu_translator.cpp
+@@ -65,7 +65,11 @@
+             case COP1_S_SQRT:
+                 // R5900: SQRT.S fd, ft takes its source from ft (the fs field is 0).
+                 // Negative inputs use the magnitude (PCSX2 FPU.cpp SQRT_S).
+-                return fmt::format("ctx->f[{}] = FPU_SQRT_S(fabsf(ctx->f[{}]));", fd, ft);
++                // A zero or denormal operand gives a zero with the operand's sign (FPU.cpp: SQRT_S), where the host's square root
++                // of the magnitude would drop the sign of -0.
++                return fmt::format("{{ uint32_t b_; std::memcpy(&b_, &ctx->f[{}], sizeof(b_)); "
++                                   "if ((b_ & 0x7F800000u) == 0) {{ b_ &= 0x80000000u; std::memcpy(&ctx->f[{}], &b_, sizeof(b_)); }} "
++                                   "else ctx->f[{}] = FPU_SQRT_S(fabsf(ctx->f[{}])); }}", ft, fd, fd, ft);
+             case COP1_S_ABS:
+                 return fmt::format("ctx->f[{}] = FPU_ABS_S(ctx->f[{}]);", fd, fs);
+             case COP1_S_MOV:

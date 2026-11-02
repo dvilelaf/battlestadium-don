@@ -1,0 +1,86 @@
+# 0036-mpeg-stubs-do-not-write-the-games-code: the replaced sceMpeg stubs overwrote the game's own code
+#
+# Why: three writes in the MPEG stubs went to absolute guest addresses that are inside the game's own
+# function FUN_00171710 (0x171710-0x17197B; tools/re/decompile.sh 0x1717BC):
+#   * sceMpegCreate stored its first argument at 0x1717BC and nine "reference" pointers (0x171A50, ...)
+#     at 0x171800..0x171823;
+#   * sceMpegClearRefBuff read those same words as pointers and wrote 0 at `value + 0x28`;
+#   * sceMpegReset wrote 0 at 0x171904.
+# The console's memory holds that function's instructions there (work/ref/x/02/ee_ram.bin; and
+# tools/verify/ram_diff.py against a run of the port reports exactly those ten words differing from the
+# console and nothing else in the code range). Journal 009 read the 0x1717BC write as faithful ("the
+# buffer the game itself passed"); that reading is wrong: the address is a literal in the stub.
+#
+# What it changes: the two writes in sceMpegCreate, the one in sceMpegReset and the pointer chase in
+# sceMpegClearRefBuff are removed; the stubs keep their other effects (the structure fields they fill,
+# the return values). Nothing else in the file is touched. The code left after removing the comments is
+# identical to the one before this rewrite of the patch's comments.
+#
+# What it does NOT explain: the crash at rip 0x66F80 that was seen in the same runs. That was a build
+# script rewriting a mapped library in place (journal 018); journal 015 records the correction.
+#
+# How it was found: journal 015 (a comparison of the port's memory with the console's after a run).
+# How it was verified: tests/runtime/mpeg_stub_code_test.cpp (a real PS2Runtime; sentinels in the ten
+# words; the three stubs called) fails with 31 checks before this patch and passes with it.
+#
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+index 44eaef4..ef3450b 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+@@ -1951,21 +1951,12 @@ namespace ps2_stubs
+     {
+         (void)ctx;
+         (void)runtime;
+-        static const uint32_t kRefGlobalAddrs[] = {
+-            0x171800u, 0x17180Cu, 0x171818u, 0x171804u, 0x171810u, 0x17181Cu};
+-        for (uint32_t addr : kRefGlobalAddrs)
+-        {
+-            uint8_t *p = getMemPtr(rdram, addr);
+-            if (!p)
+-                continue;
+-            uint32_t ptr = *reinterpret_cast<uint32_t *>(p);
+-            if (ptr != 0u)
+-            {
+-                uint8_t *q = getMemPtr(rdram, ptr + 0x28u);
+-                if (q)
+-                    *reinterpret_cast<uint32_t *>(q) = 0u;
+-            }
+-        }
++        // This used to read the words at 0x171800/0x17180C/0x171818/0x171804/0x171810/0x17181C as pointers
++        // and write 0 at `value + 0x28`. Those addresses are inside FUN_00171710, the game's own function
++        // (see the note in sceMpegCreate), so the "pointers" were values this stub had written there (or
++        // instruction words) and the zeroing went to other places of the game's code or data. There is
++        // nothing of the stub's own to clear; the call still answers success (journal 015).
++        (void)rdram;
+         setReturnU32(ctx, 1u);
+     }
+ 
+@@ -2046,13 +2037,12 @@ namespace ps2_stubs
+         mpegGuestWrite32(rdram, uVar3 + 0x94, 0xFFFFFFFFu);
+         mpegGuestWrite32(rdram, uVar3 + 0x98, 0xFFFFFFFFu);
+ 
+-        mpegGuestWrite32(rdram, 0x1717BCu, param_1);
+-
+-        static const uint32_t s_refValues[] = {
+-            0x171A50u, 0x171C58u, 0x171CC0u, 0x171D28u, 0x171D90u,
+-            0x171AB8u, 0x171B20u, 0x171B88u, 0x171BF0u};
+-        for (unsigned i = 0; i < 9u; ++i)
+-            mpegGuestWrite32(rdram, 0x171800u + i * 4u, s_refValues[i]);
++        // This used to store `param_1` at 0x1717BC and nine "reference" pointers (0x171A50 ... 0x171BF0)
++        // at 0x171800..0x171823. Those addresses are not a buffer of the SDK's: they are inside
++        // FUN_00171710 (0x171710-0x17197B), a function of the game itself, and the console's memory there
++        // holds that function's instructions (a comparison of the port's memory with the console's showed
++        // exactly these ten words differing). The writes replaced ten instructions of the game's code
++        // (journal 015).
+ 
+         uint32_t setDynamicRet = a1_init;
+         if (uint8_t *p = getMemPtr(rdram, puVar4 + 8))
+@@ -2532,7 +2522,7 @@ namespace ps2_stubs
+         mpegGuestWrite32(rdram, param_1 + 0x08, 0u);
+         mpegGuestWrite32(rdram, inner + 0x80, 0xFFFFFFFFu);
+         mpegGuestWrite32(rdram, inner + 0xAC, 0u);
+-        mpegGuestWrite32(rdram, 0x171904u, 0u);
++        // A further write of 0 at 0x171904, inside FUN_00171710 (see sceMpegCreate), is not done.
+     }
+ 
+     void sceMpegResetDefaultPtsGap(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)

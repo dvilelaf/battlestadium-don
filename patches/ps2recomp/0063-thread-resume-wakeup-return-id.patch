@@ -1,0 +1,70 @@
+# 0063-thread-resume-wakeup-return-id: the EE thread calls as on the console (ids as answers; suspends do not nest)
+#
+# What it fixes, two things in EeScheduler (the i-variants share the handlers):
+# 1. resumeThread() and wakeupThread() answered KE_OK (0) on success. The EE kernel answers the thread's id, and the
+#    game's CRI library compares it: `if (ResumeThread(t) == t) WakeupThread(t)` (0x315940, every frame from the
+#    vertical-blank wait 0x315A70) and `if (WakeupThread(t) == t) flag = 0` (0x3159C8). With 0 the CRI server thread
+#    (body 0x314850) was never woken: its loop counter (0x3D2360) stayed 0 on the port and is in the thousands in the
+#    console's memory during the opening movie (reference dump 07, T-305). Errors unchanged (-406, -407, -415, -413).
+# 2. suspendThread() stacked: a second SuspendThread of a suspended thread incremented suspendCount, so one resume
+#    left it suspended. The game suspends that thread from two vertical-blank threads per loop (0x314658, 0x314760)
+#    and resumes it once; on the console it runs once per blank, so suspends do not nest. A suspend of an already
+#    suspended thread now changes nothing and answers 0 (the answer is chosen: no caller reads it).
+# Not changed, no evidence: Terminate, Delete, Start, Sleep, ReleaseWait, CancelWakeup. See journal 034.
+# Verified: tests/runtime/thread_wake_return_test.cpp fails on the unpatched tree (4 checks) and passes with the patch;
+# the whole tests/runtime suite passes (27).
+#
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index 2dbd15e..0a2ed9d 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -779,6 +779,13 @@ int EeScheduler::suspendThread(int id, bool interruptSafe)
+         return KE_DORMANT;
+     }
+ 
++    // Suspends do not nest on the console: a second SuspendThread of a suspended thread changes nothing, so one
++    // ResumeThread makes it ready (the CRI server thread is suspended by two vertical-blank threads and resumed
++    // once per loop, and runs once per blank: journal 034). Patch 0063.
++    if (target->status == EeThreadStatus::Suspended || target->status == EeThreadStatus::WaitingSuspended)
++    {
++        return KE_OK;
++    }
+     ++target->suspendCount;
+     switch (target->status)
+     {
+@@ -808,6 +815,8 @@ int EeScheduler::suspendThread(int id, bool interruptSafe)
+     return KE_OK;
+ }
+ 
++// Like WakeupThread below, answers the thread id on success (the EE kernel's answer): the game's CRI library
++// wakes its server thread with `if (ResumeThread(t) == t) WakeupThread(t)` (0x315940). Patch 0063.
+ int EeScheduler::resumeThread(int id, bool interruptSafe)
+ {
+     assertExecutor();
+@@ -827,7 +836,7 @@ int EeScheduler::resumeThread(int id, bool interruptSafe)
+     --target->suspendCount;
+     if (target->suspendCount != 0)
+     {
+-        return KE_OK;
++        return target->id;
+     }
+     if (target->status == EeThreadStatus::WaitingSuspended)
+     {
+@@ -839,7 +848,7 @@ int EeScheduler::resumeThread(int id, bool interruptSafe)
+         requestPreemptionIfHigher(*target, interruptSafe);
+     }
+     publishSnapshot();
+-    return KE_OK;
++    return target->id;
+ }
+ 
+ void EeScheduler::sleepCurrent()
+@@ -882,7 +891,7 @@ int EeScheduler::wakeupThread(int id, bool interruptSafe)
+         ++target->wakeupCount;
+     }
+     publishSnapshot();
+-    return KE_OK;
++    return target->id;
+ }
+ 
+ int EeScheduler::cancelWakeup(int id)

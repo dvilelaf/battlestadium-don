@@ -1,0 +1,26 @@
+code_generator.h: include types.h so that Symbol is a complete type
+
+What it fixes: code_generator.h only forward-declares `Symbol` and then holds a member
+`std::unordered_map<uint32_t, Symbol> m_symbols`. With GCC 11 and its libstdc++ the build of
+ps2_recomp stops with "'std::pair<_T1, _T2>::second' has incomplete type", because that
+library needs the complete type where the container is declared. Including the header that
+defines `Symbol` (ps2recomp/types.h) is enough.
+
+Verification: `bash tools/pipeline/build_tools.sh` builds ps2_analyzer and ps2_recomp with
+GCC 11.4 (Ubuntu 22.04); without the patch the build fails at code_generator.cpp.
+
+Original work for this project, written against PS2Recomp commit
+2c5fbb9389e11dd95693385969490c9e8e6f57b4 (same license as that repository).
+
+diff --git a/ps2xRecomp/include/ps2recomp/code_generator.h b/ps2xRecomp/include/ps2recomp/code_generator.h
+index 1bdf0f6..0359e6b 100644
+--- a/ps2xRecomp/include/ps2recomp/code_generator.h
++++ b/ps2xRecomp/include/ps2recomp/code_generator.h
+@@ -8,6 +8,7 @@
+ #include <unordered_map>
+ #include <unordered_set>
+ #include "ps2recomp/control_flow_analyzer.h"
++#include "ps2recomp/types.h"
+ 
+ namespace ps2recomp
+ {

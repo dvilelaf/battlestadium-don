@@ -1,0 +1,24 @@
+# 0071-iop-spu2-dma-end-time: without a host SPU2 the end of an SPU2 DMA comes after the console's time
+#
+# What it fixes: the stall of the save_and_load route (journal 034 follow-ups 15-20). CRI_ADXI's SPU2 transfer thread
+# (IOP thread 10) starts the next 2048-byte transfer from the transfer-end interrupt. The fake path raised that interrupt
+# 2 cycles per 32-bit word (at least 64) after the start: 1,024 cycles for 2,048 bytes, about 1,130 cycles per round, 32,600
+# rounds per IOP second and never a block. PCSX2 (SPU2/Dma.cpp CYCLES_PER_WORD = 24) takes 24 IOP cycles per halfword:
+# 24,576 cycles for those bytes (about 1,500 rounds per IOP second), and 24 cycles for a transfer of less than two halfwords.
+# With the faster rounds the thread was in the middle of its walk over six stream objects when the ADX RPC thread
+# destroyed one of them ("Specified handle is invalid", the sound driver stops).
+# Verified: save_and_load (slow) fails before (frame loop stops, 1,080-vblank gap) and passes after; the transfers measured
+# 24,576 cycles, 24,700 cycles apart (before: 1,024 and 1,130). Test: tests/runtime/iop_spu2_dma_time_test.cpp.
+# The host SPU2 path (don_spu2 bridge) already uses PCSX2's own timing and is not touched.
+#
+diff --git a/ps2xIOP/src/emulator/core/iop_memory.cpp b/ps2xIOP/src/emulator/core/iop_memory.cpp
+--- a/ps2xIOP/src/emulator/core/iop_memory.cpp
++++ b/ps2xIOP/src/emulator/core/iop_memory.cpp
+@@ -271,5 +271,6 @@
+         const uint64_t transferWords = static_cast<uint64_t>(wordsPerBlock) * blockCount;
+         m_dmaStart = DmaStart{
+             secondCore ? kDmaSpu1Irq : kDmaSpu0Irq,
+-            std::max<uint64_t>(transferWords * 2u, 64u),
++            // SPU2 DMA: 24 IOP cycles per halfword (PCSX2 SPU2 Dma.cpp CYCLES_PER_WORD), at least one unit.
++            std::max<uint64_t>(transferWords * 2u * 24u, 24u),
+         };

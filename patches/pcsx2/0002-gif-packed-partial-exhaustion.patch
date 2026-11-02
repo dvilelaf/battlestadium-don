@@ -1,0 +1,31 @@
+# T-105: GSState::Transfer, split GIF PACKED data.
+#
+# What it fixes: a path-3 PACKED payload split across two transfers can finish the current
+# loop with a residual QWC for the next GIFtag. Without this check Transfer() falls into the
+# PACKED fallback path with size == 0 or nloop == 0.
+# Still needed at v2.8.2 (fd9d310c): the pinned tree does not contain the check.
+# Verified: applies with `git apply --check` on the pinned tree; builds in T-105
+# (tools/pipeline/build_gs.sh). Behaviour not yet exercised: it needs a GS replay (T-106).
+#
+# Taken from: Fukami (https://github.com/danisandoval/fukami), commit
+# e8818121566cfaf3d361e38745860b0a9438e27b,
+# tools/patches/pcsx2/0004-gif-packed-partial-exhaustion.patch, unchanged. License GPL-3.0-or-later.
+diff --git a/pcsx2/GS/GSState.cpp b/pcsx2/GS/GSState.cpp
+index e8b9f37..2257659 100644
+--- a/pcsx2/GS/GSState.cpp
++++ b/pcsx2/GS/GSState.cpp
+@@ -3392,6 +3392,14 @@ void GSState::Transfer(const u8* mem, u32 size)
+ 						} while (path.StepReg() && size > 0 && path.reg != 0);
+ 					}
+ 
++					// A split path-3 PACKED payload can finish the current loop while retaining
++					// a residual QWC for the next GIFtag. Do not enter PACKED fallback here.
++					if constexpr (index == 3)
++					{
++						if (size == 0 || path.nloop == 0)
++							break;
++					}
++
+ 					// all data available? usually is
+ 
+ 					total = path.nloop * path.nreg;

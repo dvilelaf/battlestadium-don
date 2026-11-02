@@ -1,0 +1,13 @@
+# Reference of the front half of prepare (T-691, T-694). The player's PC must reproduce this value exactly.
+#
+# module_abi_sha256: tree_hash (src/setup/tree_hash.h) of the folder ps2_recomp writes when run on the program file of
+# the supported disc (SLPS_256.75, variant of config/discs.toml) with config/recomp.toml rendered by
+# src/setup/recomp_config.cpp and general.emit_module_abi = true (patch 0091), PLUS iop_native/adxi_native.cpp, which
+# iop_native_stage (src/setup/iop_emit.cpp, T-694) writes into that folder before the hash. Measured with the scratch
+# ps2_recomp built from the pinned PS2Recomp plus patches/ps2recomp/series, by tests/setup/test_setup_module_front_real.cpp.
+# T-691 measured fccd7269d0625a954748387eba021b8e99416d98f79c62af7ee7d51e7f010115 for the recompiler output alone (twice,
+# in two fresh user folders); T-694 re-measured the tree without the IOP file (same value) and with it (the value below),
+# and the IOP file is byte-identical (cmp, SHA-256) to tools/iop_recomp/make_native.py's output on the same disc.
+# Change it only when config/recomp.toml, the recompiler patches or the IOP emitter change on purpose.
+[generated]
+module_abi_sha256 = "98e04443a6c3d361f2831ba08067673cdb8aa76e62c05aad217d5141a0f942be"

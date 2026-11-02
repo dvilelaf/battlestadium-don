@@ -1,0 +1,27 @@
+# Save step: set BGM 1 and SE 2 in the options, SAVE to an empty card, quit. Landmarks: nocard_dialog 240, options_default 3400, options_set 3620, save_yes 3860, save_done 4000.
+# Variant: the English one. DON_PLAY_MOVIES=1, --sound off, the card folder is given by the harness (--mc-dir, a folder
+# of the run's own: tests/regression/harness.py). Belongs to the route save_and_load of tests/regression/routes.json.
+# The options screen: Up from the first entry of the main menu, Circle; rows Audio mode, BGM, SE, Auto save, Save, Load; the
+# selected value is the white one, BGM and SE start at 3 (journal 033).
+240 shot nocard_dialog
+270 tap LEFT 6
+330 tap CIRCLE 6
+2400 tap START 6
+2760 tap START 6
+3120 tap UP 6
+3200 tap CIRCLE 6
+3400 shot options_default
+3420 tap DOWN 6
+3460 tap LEFT 6
+3500 tap LEFT 6
+3540 tap DOWN 6
+3580 tap LEFT 6
+3620 shot options_set
+3640 tap DOWN 6
+3680 tap DOWN 6
+3720 tap CIRCLE 6
+3820 tap LEFT 6
+3860 shot save_yes
+3880 tap CIRCLE 6
+4000 shot save_done
+4040 quit

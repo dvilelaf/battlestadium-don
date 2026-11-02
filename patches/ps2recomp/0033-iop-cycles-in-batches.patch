@@ -1,0 +1,455 @@
+The EE scheduler hands the IOP its cycles in batches of one emulator slice
+
+What it fixes: the scheduler fed the IOP emulator `eeCycles / 8` at every generated-code checkpoint
+(EeScheduler::accountCycles), and the generated code checkpoints every 8 EE cycles
+(EeScheduler::kGuestDispatchCycles = 8). IopEmulator::runEeCycles therefore called Impl::runCycles with a
+budget of ONE cycle, and every such call pays fixed work: syncHostSpu2 (and the host SPU2's advance),
+servicePendingDmaInterrupts, servicePendingGuestCallbacks, timrman.serviceDue and IopKernel::beginNextReady
+(a scan of the IOP thread map), plus at most one interpreted instruction. That fixed work was paid tens of
+millions of times per emulated second whenever any IOP thread was ready, and it dominated the frame: at the
+game's memory-card dialog - where the game polls the card about once per frame through its own recompiled
+SDK RPC - a 60 s run produced only 5 to 7 frames and 7 to 9 vertical blanks per second instead of the
+console's 60, and every end-of-run backtrace had the game thread in IopKernel::beginNextReady (measured in
+T-108).
+
+What it does:
+  * `IopSubsystem::sliceEeCycles()` (new, public) says how many EE cycles one full emulator slice is worth:
+    the emulator's own kDefaultSlice (256 IOP instructions) times the console's clock ratio, now a named
+    constant `kEeCyclesPerIopCycle = 8` that runEeCycles uses as well. One slice is 2048 EE cycles.
+  * The scheduler keeps the IOP's pending cycles as a debt in EE cycles (m_iopPendingEeCycles) and hands
+    them over only when the debt reaches one slice (`EeScheduler::flushIopDebt`). The totals are exactly
+    what they were: the debt is handed over in full and `IopSubsystem::runEeCycles` still divides by 8 and
+    keeps the remainder, so a given number of EE cycles gives exactly the same number of IOP cycles as
+    before - nothing lost, nothing added (checked with the host SPU2's cycle counter, identical before and
+    after).
+  * `EeScheduler::iopBatchStats()` (new, EeIopBatchStats) exposes batchEeCycles, pendingEeCycles, runs and
+    eeCycles: how often the IOP was run, with how many EE cycles in total, and what is still owed.
+  * A diagnostic, `DON_IOP_BATCH_EE_CYCLES=<n>` (read once in the scheduler's constructor), forces the
+    batch size in EE cycles. The default is one slice; `8` restores the pre-0033 feed exactly (one run per
+    checkpoint, measured: 640081 runs for 640000 checkpoints, the same number the unpatched tree gives),
+    which is how the before/after frame and CPU figures of T-108 were taken with one binary.
+
+Flush points - the debt is handed over in full at the moments the EE side may depend on the IOP's state
+being current:
+  1. before a vertical-blank event is processed (EeScheduler::processEvent, the VBlankStart case);
+  2. before the scheduler goes idle (EeScheduler::waitForEvent, at its top) and again after the idle time
+     has been accounted there, so the IOP runs for the idle EE cycles exactly as it did when it was fed
+     every checkpoint;
+  3. before the EE side reaches the IOP subsystem synchronously: PS2Runtime::loadIopModule,
+     loadIopModuleBuffer, stopIopModule, selectIopRpcAbi, canBindIopRpc, handleIopRpc, notifyIopSifTransfer,
+     allocateIopMemory, freeIopMemory, readIopMemory, writeIopMemory, zeroIopMemory and isIopMemoryRange.
+     One helper, PS2Runtime::flushIopDebtBeforeEeIopAccess, is called at the top of each of them; it does
+     nothing while the IOP is running (m_inIopCycles, set around the runEeCycles call), because the IOP's
+     own host callbacks (those same memory accessors) come back through this object and must not re-enter
+     the emulator.
+  Not flushed: resetIop, iopDebugSnapshot (the debug panel is not the guest) and, of course, runEeCycles
+  itself. Nothing else changes: the 8-cycle checkpoint of the generated code, the emulator's own slice
+  logic and the order of events inside a slice are untouched.
+
+Measured (tests):
+  * tests/runtime/iop_batch_proxy_test.cpp (new) measures the IOP from OUTSIDE, through the host SPU2 hook
+    (one advance per emulator slice), with a guest that runs 640000 checkpoints (5.12M EE cycles) and
+    crosses a vertical blank: before this patch `iop advances=640081` for 640000 checkpoints (one run per
+    checkpoint); with it `advances=2579` for 9672 slices (one run per slice plus the flush points crossed).
+    The cycles the host SPU2 sees are identical in both (2476081 = EE cycles / 8), so the ratio is
+    preserved exactly.
+  * tests/runtime/iop_batch_test.cpp (new) runs the same guest and reads EeScheduler::iopBatchStats:
+    batchEeCycles 2048, 2508 runs for 19808652 EE cycles handed over, handed over + pending = the accounted
+    EE cycles, pending 0 when the run ends, and at most one checkpoint owed right after the vertical blank
+    (the flush point works).
+  * The rest of tests/runtime still passes (11 tests), in particular iop_host_spu2_test.cpp, which checks
+    the cycle totals a host SPU2 receives.
+
+Measured (game, at the memory-card dialog, software renderer):
+  * three 60 s runs: RESULT: OK_VSYNC_LOOP 840 960 each (840 frames, 960 vertical blanks); before this
+    patch the same runs gave 300-420 frames and 420-540 vertical blanks. The console's 60 per second is
+    still not reached (16 vertical blanks per second), and where the time goes now - 8 end-of-run
+    backtraces: 5 in the interpreted IOP (IopCpuCore::executeInstruction and the IOP's DMA/interrupt
+    service), 2 in the EE scheduler's per-dispatch bookkeeping (EeScheduler::processDueDeadlines reading
+    the clock, EeScheduler::processPendingEvents taking its event mutex), 1 in the VU1 interpreter - is a
+    different topic and is not touched here.
+  * the picture is byte-identical to the one taken before this patch (image_parity: SSIM=1.0000, MAD=0.00),
+    the RAM dump comparison still shows the same three differing words in 0x4D69B0-0x4D6A10, and the boot
+    is the same (14 module loads, the binds, the dialog).
+  * CPU of the process during a 60 s run: after 58.06 s user + 0.29 s system, 96% of a core (60.26 s wall);
+    before (DON_IOP_BATCH_EE_CYCLES=8) 59.77 s user + 0.24 s system, 99% (60.15 s wall). The port is
+    compute-bound in both cases: the patch does more frames per second with the same core, it does not wait.
+
+How it was verified: both new tests fail against the tree without this patch - the proxy one on two checks
+(the IOP run 640081 times for 640000 checkpoints), the counter one because its accessor does not exist
+there - and pass with it; the rest of tests/runtime still passes. The separate fix of
+tools/run/classify_log.py's progress pattern (a `[don-ram]`/`[don-gs]` diagnostic is not progress) is not
+part of this patch.
+diff --git a/ps2xIOP/include/ps2x/iop/iop_subsystem.h b/ps2xIOP/include/ps2x/iop/iop_subsystem.h
+index 68fec81..623c152 100644
+--- a/ps2xIOP/include/ps2x/iop/iop_subsystem.h
++++ b/ps2xIOP/include/ps2x/iop/iop_subsystem.h
+@@ -28,6 +28,13 @@ namespace ps2x::iop
+         [[nodiscard]] bool stopModule(int32_t moduleId, int32_t *result = nullptr);
+         void runEeCycles(uint64_t eeCycles) noexcept;
+ 
++        // EE cycles worth one full emulator slice: the instruction slice IopEmulator::Impl::runCycles runs
++        // a ready thread for (kDefaultSlice), converted to EE cycles with the console's clock ratio. A
++        // caller that has to hand the IOP its cycles itself should accumulate them and call runEeCycles at
++        // least this many at a time: runCycles pays fixed work per call (the host SPU2 sync, the DMA and
++        // interrupt services, the timers, the scan for a ready thread), which otherwise dominates.
++        [[nodiscard]] static uint64_t sliceEeCycles() noexcept;
++
+         [[nodiscard]] RpcAbi selectRpcAbi(const RpcAbiRequest &request) const;
+         [[nodiscard]] bool canBindRpc(uint32_t sid) const noexcept;
+         [[nodiscard]] RpcResult handleRpc(const RpcRequest &request);
+diff --git a/ps2xIOP/src/emulator/iop_emulator.cpp b/ps2xIOP/src/emulator/iop_emulator.cpp
+index 12007c9..271edf0 100644
+--- a/ps2xIOP/src/emulator/iop_emulator.cpp
++++ b/ps2xIOP/src/emulator/iop_emulator.cpp
+@@ -805,8 +805,8 @@ namespace ps2x::iop::detail
+     void IopEmulator::runEeCycles(uint64_t eeCycles) noexcept
+     {
+         const uint64_t total = m_impl->eeCycleCarry + eeCycles;
+-        const uint64_t iopCycles = total / 8u;
+-        m_impl->eeCycleCarry = total % 8u;
++        const uint64_t iopCycles = total / kEeCyclesPerIopCycle;
++        m_impl->eeCycleCarry = total % kEeCyclesPerIopCycle;
+         if (iopCycles)
+             m_impl->runCycles(iopCycles);
+     }
+diff --git a/ps2xIOP/src/emulator/iop_emulator_const.h b/ps2xIOP/src/emulator/iop_emulator_const.h
+index 7004597..880055d 100644
+--- a/ps2xIOP/src/emulator/iop_emulator_const.h
++++ b/ps2xIOP/src/emulator/iop_emulator_const.h
+@@ -4,6 +4,10 @@
+ constexpr uint32_t kThreadReturnSentinel = 0x1FFFFF00u;
+ constexpr uint32_t kCallReturnSentinel = 0x1FFFFF04u;
+ constexpr uint64_t kIopClockHz = 36'864'000ull;
++// The console's clock ratio: the EE runs 294.912 MHz, the IOP 36.864 MHz.  IopEmulator::runEeCycles
++// converts the EE cycles an emulator step is worth into IOP cycles with it, and the EE scheduler uses
++// IopSubsystem::sliceEeCycles() (kDefaultSlice * this) to decide when a batch is worth running.
++constexpr uint64_t kEeCyclesPerIopCycle = 8u;
+ // NTSC field cadence (approximately 59.94 Hz).  VBlank imports are
+ // scheduler waits, not no-op timing hints: returning immediately lets
+ // high-priority IRX threads busy-loop and starve RPC server threads.
+diff --git a/ps2xIOP/src/iop_subsystem.cpp b/ps2xIOP/src/iop_subsystem.cpp
+index 5f871d3..44abbad 100644
+--- a/ps2xIOP/src/iop_subsystem.cpp
++++ b/ps2xIOP/src/iop_subsystem.cpp
+@@ -4,6 +4,7 @@
+ #include "ps2x/iop/iop_host_spu2.h"
+ #include "iop_module_manager.h"
+ #include "emulator/iop_emulator.h"
++#include "emulator/iop_emulator_const.h"
+ #include "module_factories.h"
+ #include "ps2x/iop/ps2_path.h"
+ 
+@@ -174,6 +175,11 @@ namespace ps2x::iop
+         m_impl->emulator.runEeCycles(eeCycles);
+     }
+ 
++    uint64_t IopSubsystem::sliceEeCycles() noexcept
++    {
++        return static_cast<uint64_t>(kDefaultSlice) * kEeCyclesPerIopCycle;
++    }
++
+     RpcAbi IopSubsystem::selectRpcAbi(const RpcAbiRequest &request) const
+     {
+         for (const auto &service : m_impl->coreServices)
+diff --git a/ps2xRuntime/include/ps2_runtime.h b/ps2xRuntime/include/ps2_runtime.h
+index 805a15f..fcd03fc 100644
+--- a/ps2xRuntime/include/ps2_runtime.h
++++ b/ps2xRuntime/include/ps2_runtime.h
+@@ -543,6 +543,7 @@ private:
+     void notifyIopSifTransfer(uint8_t *rdram, const ps2x::iop::SifTransfer &transfer);
+     void advanceIopEeCycles(uint64_t eeCycles) noexcept;
+     void resetIop();
++    void flushIopDebtBeforeEeIopAccess() const;
+ 
+     friend class PS2IopTransport;
+     friend class EeScheduler;
+@@ -586,6 +587,9 @@ private:
+     // Invocation stacks: bumped downwards from kInvocationStackBase, never freed.
+     uint32_t m_asyncCallbackStackFloor = kInvocationStackFloor;
+     uint32_t m_asyncCallbackStackTop = kInvocationStackBase;
++    // True while the IOP emulator is running on this thread: its host callbacks come back through this
++    // object, and they must not flush the IOP's cycle debt from inside the emulator.
++    bool m_inIopCycles = false;
+ 
+     std::atomic<uint32_t> m_missingFunctionPolicy{static_cast<uint32_t>(MissingFunctionPolicy::ContinueToTarget)};
+     std::atomic<bool> m_missingFunctionReported{false};
+diff --git a/ps2xRuntime/include/runtime/ee_scheduler.h b/ps2xRuntime/include/runtime/ee_scheduler.h
+index f247ff9..e29398b 100644
+--- a/ps2xRuntime/include/runtime/ee_scheduler.h
++++ b/ps2xRuntime/include/runtime/ee_scheduler.h
+@@ -228,6 +228,20 @@ struct EeKernelSnapshot
+     std::vector<EeEventFlagSnapshot> eventFlags;
+ };
+ 
++// How the scheduler feeds the IOP emulator. The guest's EE cycles are accumulated and handed to the IOP
++// in batches of at least batchEeCycles (one full emulator slice, ps2x::iop::IopSubsystem::sliceEeCycles),
++// instead of once per checkpoint: IopEmulator::Impl::runCycles pays fixed work per call (the host SPU2
++// sync, the DMA and interrupt services, the timers, the scan for a ready thread), which otherwise is paid
++// per emulated cycle. pendingEeCycles is the debt not handed over yet; runs and eeCycles count what has
++// been handed over, so a test can check that the IOP receives exactly eeCycles/8 IOP cycles.
++struct EeIopBatchStats
++{
++    uint64_t batchEeCycles = 0;
++    uint64_t pendingEeCycles = 0;
++    uint64_t runs = 0;
++    uint64_t eeCycles = 0;
++};
++
+ enum class EeEventType : uint8_t
+ {
+     Stop,
+@@ -282,6 +296,12 @@ public:
+     void accountCycles(uint32_t cycles) noexcept;
+     [[nodiscard]] bool isExecutingGuest() const noexcept;
+ 
++    // Hand the IOP every EE cycle it is owed (the batch debt) now, so that its state is current before the
++    // EE side asks it to do something, before a vertical-blank event is processed, and before the scheduler
++    // goes idle. Cheap when there is no debt.
++    void flushIopDebt() noexcept;
++    [[nodiscard]] EeIopBatchStats iopBatchStats() const noexcept;
++
+     // Kernel object API. All calls except postEvent/requestStop execute on the
+     // EE executor and therefore need no host synchronization.
+     void setupCurrentThread(uint32_t stack, uint32_t stackSize, uint32_t gp);
+@@ -426,6 +446,11 @@ private:
+     bool m_insideInterrupt = false;
+     uint32_t m_pendingEeTimerInterrupts = 0;
+     uint64_t m_eeCycle = 0;
++    // IOP batching: see EeIopBatchStats.
++    uint64_t m_iopBatchEeCycles = 0;
++    uint64_t m_iopPendingEeCycles = 0;
++    uint64_t m_iopBatchRuns = 0;
++    uint64_t m_iopBatchEeCyclesTotal = 0;
+     uint64_t m_sliceEndCycle = kDefaultTimeSliceCycles;
+     std::thread::id m_executorThread{};
+     std::atomic<bool> m_running{false};
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index 01717d4..dfd7fec 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -5,9 +5,12 @@
+ // The runtime's own guest-RAM regions (kInvocationStackSize): one place, ps2_guest_memory.h. Not
+ // Syscalls/Helpers/State.h: its KE_* constants would clash with this file's own.
+ #include "runtime/ps2_guest_memory.h"
++// IopSubsystem::sliceEeCycles(): how many EE cycles one full IOP emulator slice is worth.
++#include "ps2x/iop/iop_subsystem.h"
+ 
+ #include <algorithm>
+ #include <cassert>
++#include <cstdlib>
+ #include <cstring>
+ #include <limits>
+ #include <stdexcept>
+@@ -78,6 +81,21 @@ namespace
+ EeScheduler::EeScheduler(PS2Runtime &runtime)
+     : m_runtime(runtime)
+ {
++    // One batch is a full emulator slice of IOP cycles, in EE cycles. The IOP's own constant decides the
++    // size (nothing is copied here), and the ratio stays exactly 1 IOP cycle per 8 EE cycles because
++    // IopSubsystem::runEeCycles divides by 8 and keeps the remainder across calls.
++    m_iopBatchEeCycles = ps2x::iop::IopSubsystem::sliceEeCycles();
++    // Diagnostic: force the batch size. The default is one slice; DON_IOP_BATCH_EE_CYCLES=8 restores the
++    // pre-0033 feed (one run per 8-cycle checkpoint), which is how the before/after measurements of
++    // patch 0033 were taken.
++    if (const char *forced = std::getenv("DON_IOP_BATCH_EE_CYCLES"))
++    {
++        const unsigned long long value = std::strtoull(forced, nullptr, 0);
++        if (value != 0ull)
++        {
++            m_iopBatchEeCycles = static_cast<uint64_t>(value);
++        }
++    }
+ }
+ 
+ EeScheduler::~EeScheduler()
+@@ -396,13 +414,43 @@ void EeScheduler::accountCycles(uint32_t cycles) noexcept
+     const uint64_t elapsed = std::max<uint64_t>(1u, cycles);
+     m_eeCycle += elapsed;
+     m_pendingEeTimerInterrupts |= m_runtime.memory().advanceEeTimers(elapsed);
+-    m_runtime.advanceIopEeCycles(elapsed);
++    // The IOP gets the same total as it did when it was fed every checkpoint (one IOP cycle per 8 EE
++    // cycles, the console's ratio), but only in batches of at least one full emulator slice.
++    m_iopPendingEeCycles += elapsed;
++    if (m_iopPendingEeCycles >= m_iopBatchEeCycles)
++    {
++        flushIopDebt();
++    }
+     if (m_pendingEeTimerInterrupts != 0u)
+     {
+         m_checkpointPending.store(true, std::memory_order_release);
+     }
+ }
+ 
++void EeScheduler::flushIopDebt() noexcept
++{
++    const uint64_t debt = m_iopPendingEeCycles;
++    if (debt == 0u)
++    {
++        return;
++    }
++    assertExecutor();
++    m_iopPendingEeCycles = 0u;
++    ++m_iopBatchRuns;
++    m_iopBatchEeCyclesTotal += debt;
++    m_runtime.advanceIopEeCycles(debt);
++}
++
++EeIopBatchStats EeScheduler::iopBatchStats() const noexcept
++{
++    EeIopBatchStats stats;
++    stats.batchEeCycles = m_iopBatchEeCycles;
++    stats.pendingEeCycles = m_iopPendingEeCycles;
++    stats.runs = m_iopBatchRuns;
++    stats.eeCycles = m_iopBatchEeCyclesTotal;
++    return stats;
++}
++
+ bool EeScheduler::isExecutingGuest() const noexcept
+ {
+     return m_guestExecuting.load(std::memory_order_acquire);
+@@ -1869,6 +1917,9 @@ void EeScheduler::processEvent(const EeEvent &event)
+         requestStop();
+         break;
+     case EeEventType::VBlankStart:
++        // The vertical blank is a point at which the EE side may look at the IOP's state: hand over
++        // whatever is owed before the blank is processed.
++        flushIopDebt();
+         ++m_vsyncTick;
+         m_runtime.memory().gs().vsyncTick.store(m_vsyncTick, std::memory_order_release);
+         if ((m_vsyncTick & 1u) != 0u)
+@@ -1999,6 +2050,9 @@ void EeScheduler::writeGuestU32(uint32_t address, uint32_t value)
+ 
+ void EeScheduler::waitForEvent()
+ {
++    // Nothing from the EE will run while the scheduler is idle, so bring the IOP up to date first: from
++    // here on the only cycles it receives are the idle ones below.
++    flushIopDebt();
+     std::unique_lock lock(m_eventMutex);
+     if (!m_events.empty() || m_stopRequested.load(std::memory_order_acquire))
+     {
+@@ -2053,6 +2107,9 @@ void EeScheduler::waitForEvent()
+             accountCycles(step);
+             remaining -= step;
+         }
++        // The idle time is EE time too: the IOP gets its share of it now, as it did when it was fed every
++        // checkpoint, and not one batch later.
++        flushIopDebt();
+         m_checkpointPending.store(true, std::memory_order_release);
+     }
+ }
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index 413302e..c9b163b 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -577,34 +577,40 @@ PS2Runtime::~PS2Runtime()
+ 
+ ps2x::iop::ModuleLoadResult PS2Runtime::loadIopModule(std::string_view path, const void *arguments, uint32_t argumentSize)
+ {
++    flushIopDebtBeforeEeIopAccess();
+     auto scope = m_iopHost->enterCall(nullptr, m_memory.getRDRAM());
+     return m_iopSubsystem->loadModule(path, arguments, argumentSize);
+ }
+ 
+ ps2x::iop::ModuleLoadResult PS2Runtime::loadIopModuleBuffer(uint32_t guestAddress, const void *arguments, uint32_t argumentSize)
+ {
++    flushIopDebtBeforeEeIopAccess();
+     auto scope = m_iopHost->enterCall(nullptr, m_memory.getRDRAM());
+     return m_iopSubsystem->loadModuleBuffer(guestAddress, arguments, argumentSize);
+ }
+ 
+ bool PS2Runtime::stopIopModule(int32_t moduleId, int32_t *result)
+ {
++    flushIopDebtBeforeEeIopAccess();
+     auto scope = m_iopHost->enterCall(nullptr, m_memory.getRDRAM());
+     return m_iopSubsystem->stopModule(moduleId, result);
+ }
+ 
+ ps2x::iop::RpcAbi PS2Runtime::selectIopRpcAbi(const ps2x::iop::RpcAbiRequest &request) const
+ {
++    flushIopDebtBeforeEeIopAccess();
+     return m_iopSubsystem->selectRpcAbi(request);
+ }
+ 
+ bool PS2Runtime::canBindIopRpc(uint32_t sid) const noexcept
+ {
++    flushIopDebtBeforeEeIopAccess();
+     return m_iopSubsystem->canBindRpc(sid);
+ }
+ 
+ ps2x::iop::RpcResult PS2Runtime::handleIopRpc(uint8_t *rdram, R5900Context *ctx, ps2x::iop::RpcRequest request)
+ {
++    flushIopDebtBeforeEeIopAccess();
+     auto scope = m_iopHost->enterCall(ctx, rdram);
+     request.callToken = scope.token();
+     return m_iopSubsystem->handleRpc(request);
+@@ -612,13 +618,31 @@ ps2x::iop::RpcResult PS2Runtime::handleIopRpc(uint8_t *rdram, R5900Context *ctx,
+ 
+ void PS2Runtime::notifyIopSifTransfer(uint8_t *rdram, const ps2x::iop::SifTransfer &transfer)
+ {
++    flushIopDebtBeforeEeIopAccess();
+     auto scope = m_iopHost->enterCall(nullptr, rdram);
+     m_iopSubsystem->onSifTransfer(transfer);
+ }
+ 
+ void PS2Runtime::advanceIopEeCycles(uint64_t eeCycles) noexcept
+ {
++    // The IOP runs host callbacks that come back through this object (the memory accessors below): they
++    // must not flush the debt from inside the emulator, so the flag says "the IOP is on the stack".
++    m_inIopCycles = true;
+     m_iopSubsystem->runEeCycles(eeCycles);
++    m_inIopCycles = false;
++}
++
++// The EE scheduler hands the IOP its cycles in batches (EeScheduler::flushIopDebt). Before the EE side
++// asks the IOP to do something or touches its memory, the debt is cleared so that the IOP's state is
++// current, exactly as it was when the emulator was fed every checkpoint. Not while the IOP is running:
++// the same accessors are its own host callbacks.
++void PS2Runtime::flushIopDebtBeforeEeIopAccess() const
++{
++    if (m_inIopCycles || !m_eeScheduler)
++    {
++        return;
++    }
++    m_eeScheduler->flushIopDebt();
+ }
+ 
+ void PS2Runtime::resetIop()
+@@ -633,31 +657,37 @@ ps2x::iop::DebugSnapshot PS2Runtime::iopDebugSnapshot() const
+ 
+ uint32_t PS2Runtime::allocateIopMemory(uint32_t size, uint32_t alignment)
+ {
++    flushIopDebtBeforeEeIopAccess();
+     return m_iopSubsystem ? m_iopSubsystem->allocateMemory(size, alignment) : 0u;
+ }
+ 
+ bool PS2Runtime::freeIopMemory(uint32_t address)
+ {
++    flushIopDebtBeforeEeIopAccess();
+     return m_iopSubsystem && m_iopSubsystem->freeMemory(address);
+ }
+ 
+ bool PS2Runtime::readIopMemory(uint32_t address, void *destination, size_t size) const
+ {
++    flushIopDebtBeforeEeIopAccess();
+     return m_iopSubsystem && m_iopSubsystem->readMemory(address, destination, size);
+ }
+ 
+ bool PS2Runtime::writeIopMemory(uint32_t address, const void *source, size_t size)
+ {
++    flushIopDebtBeforeEeIopAccess();
+     return m_iopSubsystem && m_iopSubsystem->writeMemory(address, source, size);
+ }
+ 
+ bool PS2Runtime::zeroIopMemory(uint32_t address, size_t size)
+ {
++    flushIopDebtBeforeEeIopAccess();
+     return m_iopSubsystem && m_iopSubsystem->zeroMemory(address, size);
+ }
+ 
+ bool PS2Runtime::isIopMemoryRange(uint32_t address, size_t size) const
+ {
++    flushIopDebtBeforeEeIopAccess();
+     return m_iopSubsystem && m_iopSubsystem->isMemoryRange(address, size);
+ }
+ 

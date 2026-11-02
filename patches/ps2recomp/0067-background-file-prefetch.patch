@@ -1,0 +1,124 @@
+# 0067-background-file-prefetch: the disc's files are read into the host's page cache in the background
+#
+# What it fixes: the game thread reads the disc's files on the host synchronously (PS2Vfs fopen/fread, the IOP
+# host's openHostFile/readHostFile). A first read of data that is not in the page cache waits for the disk: 8 to 53 ms
+# per read measured with strace on a hard disk (RAID of rotational drives), so the "NOW LOADING" screen showed blanks
+# of 80 to 130 ms while the game thread used 3 ms of CPU. The console keeps animating while the disc is read.
+# Now opening a file for reading starts, once per path, a detached thread that reads it front to back (files under
+# 256 KiB are left alone), so the game thread's reads find the data in memory. DON_NO_PREFETCH=1 turns it off.
+# How it was verified: route to blank 4000 (en-jpvoice, DON_PLAY_MOVIES=1, DON_PACING_LOG=1) after evicting the disc
+# files from the page cache: without the prefetch max 116.69 ms, p99.9 61.63; with it max 45.11 ms, p99.9 38.96;
+# tests/runtime/file_prefetch_test. Original work (no other project).
+#
+diff --git a/ps2xRuntime/include/runtime/ps2_file_prefetch.h b/ps2xRuntime/include/runtime/ps2_file_prefetch.h
+new file mode 100644
+index 0000000..5c100c9
+--- /dev/null
++++ b/ps2xRuntime/include/runtime/ps2_file_prefetch.h
+@@ -0,0 +1,66 @@
++#ifndef PS2_FILE_PREFETCH_H
++#define PS2_FILE_PREFETCH_H
++
++// T-214 (journal 038): the game thread read the disc's files on the host synchronously, so the first read
++// of a file that is not in the host's page cache stalled it for the disk's latency (8 to 53 ms per read
++// on a hard disk, a whole blank or more on the "NOW LOADING" screen). The console reads while the game
++// keeps running. This reads a file once, in the background, so that the game thread's reads hit the cache.
++
++#include <algorithm>
++#include <atomic>
++#include <cstdint>
++#include <cstdlib>
++#include <cstdio>
++#include <filesystem>
++#include <mutex>
++#include <string>
++#include <thread>
++#include <unordered_set>
++#include <vector>
++
++namespace ps2_file_prefetch
++{
++    // Bytes the background threads have read so far (for the test).
++    inline std::atomic<uint64_t> &bytesRead()
++    {
++        static std::atomic<uint64_t> total{0};
++        return total;
++    }
++
++    // Starts, once per path, a background thread that reads the file front to back and drops the data.
++    // Files under kMinBytes are left alone (a small read costs one seek, the same as the prefetch would).
++    inline void start(const std::filesystem::path &path)
++    {
++        constexpr uint64_t kMinBytes = 256u * 1024u;
++        if (const char *off = std::getenv("DON_NO_PREFETCH"); off && off[0] == '1')
++            return;
++        static std::mutex mutex;
++        static std::unordered_set<std::string> started;
++        std::error_code error;
++        const uint64_t size = std::filesystem::file_size(path, error);
++        if (error || size < kMinBytes)
++            return;
++        const std::string key = path.string();
++        {
++            std::lock_guard<std::mutex> lock(mutex);
++            if (!started.insert(key).second)
++                return;
++        }
++        std::thread([key]() {
++            std::FILE *stream = std::fopen(key.c_str(), "rb");
++            if (!stream)
++                return;
++            std::vector<char> chunk(1u << 20);
++            for (;;)
++            {
++                const size_t got = std::fread(chunk.data(), 1u, chunk.size(), stream);
++                bytesRead().fetch_add(got, std::memory_order_relaxed);
++                if (got != chunk.size())
++                    break;
++            }
++            std::fclose(stream);
++        }).detach();
++    }
++} // namespace ps2_file_prefetch
++
++#endif
+diff --git a/ps2xRuntime/src/lib/ps2_iop_host.cpp b/ps2xRuntime/src/lib/ps2_iop_host.cpp
+index 8d46e03..d380a3e 100644
+--- a/ps2xRuntime/src/lib/ps2_iop_host.cpp
++++ b/ps2xRuntime/src/lib/ps2_iop_host.cpp
+@@ -3,6 +3,7 @@
+ #include "ps2_runtime.h"
+ #include "ps2_stubs.h"
+ #include "Kernel/Stubs/SIF.h"
++#include "runtime/ps2_file_prefetch.h"
+ #include "runtime/ps2_memory.h"
+ #include "Kernel/Stubs/MemoryCard.h"
+ #include "Kernel/Syscalls/Common.h"
+@@ -304,6 +305,7 @@ uint64_t PS2IopHostAdapter::openHostFile(std::string_view path)
+     }
+ 
+     const std::filesystem::path hostPath{std::string(path)};
++    ps2_file_prefetch::start(hostPath);
+ #if defined(_WIN32)
+     std::FILE *stream = ::_wfopen(hostPath.c_str(), L"rb");
+ #else
+diff --git a/ps2xRuntime/src/lib/ps2_vfs.cpp b/ps2xRuntime/src/lib/ps2_vfs.cpp
+index aff25e6..13f4c1d 100644
+--- a/ps2xRuntime/src/lib/ps2_vfs.cpp
++++ b/ps2xRuntime/src/lib/ps2_vfs.cpp
+@@ -1,5 +1,6 @@
+ #include "runtime/ps2_vfs.h"
+ 
++#include "runtime/ps2_file_prefetch.h"
+ #include "runtime/ps2_memory.h"
+ #include "runtime/ps2_rom_device.h"
+ 
+@@ -184,6 +185,8 @@ int32_t PS2Vfs::open(std::string_view path, uint32_t flags, const PS2VfsMounts &
+             return -1;
+         }
+ 
++        if (exists && (flags & PS2_FIO_O_RDWR) == PS2_FIO_O_RDONLY)
++            ps2_file_prefetch::start(hostPath);
+         FILE *stream = std::fopen(hostPath.string().c_str(), hostMode(flags));
+         const uint32_t access = flags & PS2_FIO_O_RDWR;
+         if (!stream && !exists && (flags & PS2_FIO_O_CREAT) != 0u &&

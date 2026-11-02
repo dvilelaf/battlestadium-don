@@ -1,0 +1,332 @@
+instruction	family	sites_in_game	cases_run	equal_to_reference	smallest_failing_case	overflow_cases_not_run	note
+add	arith	12	494	yes		182	
+addu	arith	15467	676	yes		0	
+sub	arith	0	580	yes		96	
+subu	arith	2344	676	yes		0	
+dadd	arith	0	562	yes		114	
+daddu	arith	50463	676	yes		0	
+dsub	arith	0	571	yes		105	
+dsubu	arith	134	676	yes		0	
+and	arith	3807	676	yes		0	
+or	arith	5144	676	yes		0	
+xor	arith	216	676	yes		0	
+nor	arith	119	676	yes		0	
+addi	arith	29	171	yes		24	
+addiu	arith	81900	195	yes		0	
+daddi	arith	0	180	yes		15	
+daddiu	arith	97	195	yes		0	
+andi	arith	10000	195	yes		0	
+ori	arith	10271	195	yes		0	
+xori	arith	469	195	yes		0	
+lui	arith	33504	10	yes		0	
+beq	branches	4494	507	yes		0	
+bne	branches	2619	507	yes		0	
+beql	branches	4757	507	yes		0	
+bnel	branches	3054	507	yes		0	
+blez	branches	1153	26	yes		0	
+bgtz	branches	418	26	yes		0	
+blezl	branches	119	26	yes		0	
+bgtzl	branches	39	26	yes		0	
+bltz	branches	1280	26	yes		0	
+bgez	branches	668	26	yes		0	
+bltzl	branches	364	26	yes		0	
+bgezl	branches	218	26	yes		0	
+bltzal	branches	0	26	yes		0	
+bgezal	branches	0	26	yes		0	
+bltzall	branches	0	26	yes		0	
+bgezall	branches	0	26	yes		0	
+slt	compare	3414	169	yes		0	
+sltu	compare	1680	169	yes		0	
+movz	compare	527	169	yes		0	
+movn	compare	778	169	yes		0	
+slti	compare	3023	85	yes		0	
+sltiu	compare	1138	85	yes		0	
+add.s	fpu	5931	2648	no	distinct fs=0x00000000 ft=0x7f800000: f3: got 0000000000000000:000000007f800000 want 0000000000000000:000000007f7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, piece 5); 717 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255=34, exp255=32, exp255+normal=410, exp255+zero=28
+sub.s	fpu	3720	2648	no	distinct fs=0x00000000 ft=0x7f800000: f3: got 0000000000000000:00000000ff800000 want 0000000000000000:00000000ff7fffff; FCR31: got 0000000000000000:000000000003c000 want 0000000000000000:0000000000030000	0	exponent-all-ones operands are not clamped; not patched (journal 025, piece 5); 714 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255=34, exp255=32, exp255+normal=410, exp255+zero=28
+mul.s	fpu	6604	2648	no	distinct fs=0x00000000 ft=0x7f800000: f3: got 0000000000000000:00000000ffc00000 want 0000000000000000:0000000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, piece 5); 713 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255=34, exp255=32, exp255+normal=410, exp255+zero=28
+div.s	fpu	1981	2648	no	distinct fs=0x00000000 ft=0x7fc00000: f3: got 0000000000000000:000000007fc00000 want 0000000000000000:0000000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, piece 5); failing classes: denormal+exp255=9, exp255=32, exp255+normal=364, exp255+zero=6
+max.s	fpu	23	2648	yes		0	883 cases differ only in the sticky exception flags (no site reads them)
+min.s	fpu	6	2648	yes		0	882 cases differ only in the sticky exception flags (no site reads them)
+rsqrt.s	fpu	0	2648	no	distinct fs=0x00000000 ft=0x00000000: f3: got 0000000000000000:00000000ffc00000 want 0000000000000000:000000007f7fffff; FCR31: got 0000000000000000:000000000083c078 want 0000000000000000:000000000081c078	0	no site in this game; not patched; 196 cases reference ambiguous; 813 cases differ only in the sticky exception flags (no site reads them)
+adda.s	fpu	687	2256	no	distinct fs=0x00000000 ft=0x7f800000: ACC: got 0000000000000000:000000007f800000 want 0000000000000000:000000007f7fffff; FCR31: got 0000000000000000:000000000003c000 want 0000000000000000:0000000000030000	0	exponent-all-ones operands are not clamped; not patched (journal 025, piece 5); 602 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255=30, exp255=30, exp255+normal=370, exp255+zero=20
+suba.s	fpu	0	2256	no	distinct fs=0x00000000 ft=0x7f800000: ACC: got 0000000000000000:00000000ff800000 want 0000000000000000:00000000ff7fffff; FCR31: got 0000000000000000:000000000003c000 want 0000000000000000:0000000000030000	0	exponent-all-ones operands are not clamped; not patched (journal 025, piece 5); 602 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255=30, exp255=30, exp255+normal=370, exp255+zero=20
+mula.s	fpu	440	2256	no	distinct fs=0x00000000 ft=0x7f800000: ACC: got 0000000000000000:00000000ffc00000 want 0000000000000000:0000000000000000; FCR31: got 0000000000000000:000000000003c000 want 0000000000000000:0000000000030000	0	exponent-all-ones operands are not clamped; not patched (journal 025, piece 5); 602 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255=30, exp255=30, exp255+normal=370, exp255+zero=20
+madd.s	fpu	759	2405	no	distinct fs=0x00000000 ft=0x80000000 acc=0x7f800000: f3: got 0000000000000000:000000007f800000 want 0000000000000000:000000007f7fffff; FCR31: got 0000000000000000:000000000003c000 want 0000000000000000:0000000000030000	0	exponent-all-ones operands are not clamped; not patched (journal 025, piece 5); 495 cases differ only in the sticky exception flags (no site reads them)
+msub.s	fpu	366	2405	no	distinct fs=0x00000000 ft=0x41100000 acc=0x7f800000: f3: got 0000000000000000:000000007f800000 want 0000000000000000:000000007f7fffff; FCR31: got 0000000000000000:000000000003c000 want 0000000000000000:0000000000030000	0	exponent-all-ones operands are not clamped; not patched (journal 025, piece 5); 497 cases differ only in the sticky exception flags (no site reads them)
+madda.s	fpu	112	2209	no	distinct fs=0x00000000 ft=0x7f800000 acc=0x00800000: ACC: got 0000000000000000:00000000ffc00000 want 0000000000000000:0000000000800000	0	exponent-all-ones operands are not clamped; not patched (journal 025, piece 5); 590 cases differ only in the sticky exception flags (no site reads them)
+msuba.s	fpu	6	2209	no	distinct fs=0x00000000 ft=0x7f800000 acc=0x7f7fffff: ACC: got 0000000000000000:00000000ffc00000 want 0000000000000000:000000007f7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, piece 5); 587 cases differ only in the sticky exception flags (no site reads them)
+sqrt.s	fpu	96	61	no	distinct ft=0x7f800000: f3: got 0000000000000000:000000007f800000 want 0000000000000000:000000005f7fffff; FCR31: got 0000000000000000:000000000003c000 want 0000000000000000:000000000000c000	0	exponent-all-ones operands are not clamped; not patched (journal 025, piece 5); 28 cases differ only in the sticky exception flags (no site reads them); failing classes: exp255=6
+abs.s	fpu	29	61	yes		0	21 cases differ only in the sticky exception flags (no site reads them)
+neg.s	fpu	654	61	yes		0	20 cases differ only in the sticky exception flags (no site reads them)
+mov.s	fpu	2132	61	yes		0	
+cvt.w.s	fpu	911	61	yes		0	
+cvt.s.w	fpu	3597	65	yes		0	
+c.f.s	fpu	0	4418	yes		0	
+c.eq.s	fpu	344	4418	no	distinct fs=0x7f7fffff ft=0x7f800000 fcr=0x0: FCR31: got 0000000000000000:0000000000000000 want 0000000000000000:0000000000800000	0	exponent-all-ones operands are not clamped; not patched (journal 025, piece 5); failing classes: exp255=22, exp255+normal=20
+c.lt.s	fpu	1451	4418	no	distinct fs=0x00000000 ft=0x7fc00000 fcr=0x0: FCR31: got 0000000000000000:0000000000000000 want 0000000000000000:0000000000800000	0	exponent-all-ones operands are not clamped; not patched (journal 025, piece 5); failing classes: denormal+exp255=18, exp255=10, exp255+normal=220, exp255+zero=12
+c.le.s	fpu	1131	4418	no	distinct fs=0x00000000 ft=0x7fc00000 fcr=0x0: FCR31: got 0000000000000000:0000000000000000 want 0000000000000000:0000000000800000	0	exponent-all-ones operands are not clamped; not patched (journal 025, piece 5); failing classes: denormal+exp255=18, exp255=32, exp255+normal=232, exp255+zero=12
+bc1f	fpu	1184	8	yes		0	
+bc1t	fpu	949	8	yes		0	
+bc1fl	fpu	350	8	yes		0	
+bc1tl	fpu	420	8	yes		0	
+mfc1	fpu	1089	282	yes		0	
+mtc1	fpu	11335	33	yes		0	
+cfc1	fpu	0	56	yes		0	10 cases reference ambiguous
+ctc1	fpu	1	90	yes		0	18 cases reference ambiguous
+lwc1	fpu	23988	240	yes		0	
+swc1	fpu	17857	240	yes		0	
+lb	memory	1220	270	yes		0	
+lbu	memory	5233	270	yes		0	
+lh	memory	1892	270	yes		0	
+lhu	memory	1779	270	yes		0	
+lw	memory	66663	270	yes		0	
+lwu	memory	204	270	yes		0	
+ld	memory	15310	270	yes		0	
+lq	memory	11841	294	yes		0	
+sb	memory	3670	570	yes		0	
+sh	memory	1872	570	yes		0	
+sw	memory	37831	570	yes		0	
+sd	memory	12715	570	yes		0	
+sq	memory	12399	984	yes		0	
+lwl	memory	159	2808	yes		0	
+lwr	memory	159	2808	yes		0	
+swl	memory	155	2808	yes		0	
+swr	memory	154	2808	yes		0	
+ldl	memory	1101	5616	yes		0	
+ldr	memory	1101	5616	yes		0	
+sdl	memory	1259	5616	yes		0	
+sdr	memory	1262	5616	yes		0	
+paddw	mmi	0	1082	yes		0	
+psubw	mmi	4	1082	yes		0	
+pcgtw	mmi	0	1082	yes		0	
+pmaxw	mmi	0	1082	yes		0	
+paddh	mmi	80	1082	yes		0	
+psubh	mmi	0	1082	yes		0	
+pcgth	mmi	6	1082	yes		0	
+pmaxh	mmi	16	1082	yes		0	
+paddb	mmi	0	1082	yes		0	
+psubb	mmi	15	1082	yes		0	
+pcgtb	mmi	0	1082	yes		0	
+paddsw	mmi	0	1082	yes		0	
+psubsw	mmi	0	1082	yes		0	
+pextlw	mmi	4	1082	yes		0	
+ppacw	mmi	101	1082	yes		0	
+paddsh	mmi	0	1082	yes		0	
+psubsh	mmi	0	1082	yes		0	
+pextlh	mmi	0	1082	yes		0	
+ppach	mmi	0	1082	yes		0	
+paddsb	mmi	0	1082	yes		0	
+psubsb	mmi	0	1082	yes		0	
+pextlb	mmi	36	1082	yes		0	
+ppacb	mmi	8	1082	yes		0	
+pceqw	mmi	0	1082	yes		0	
+pminw	mmi	0	1082	yes		0	
+padsbh	mmi	0	1082	yes		0	
+pceqh	mmi	0	1082	yes		0	
+pminh	mmi	16	1082	yes		0	
+pceqb	mmi	0	1082	yes		0	
+padduw	mmi	29	1082	yes		0	
+psubuw	mmi	0	1082	yes		0	
+pextuw	mmi	4	1082	yes		0	
+padduh	mmi	0	1082	no	distinct a0=0xffffffffffffffff:0xffffffffffffffff a1=0xffffffffffffffff:0xffffffffffffffff: r2: got fffefffefffefffe:fffefffefffefffe want ffffffffffffffff:ffffffffffffffff	0	no site in this game; not patched; failing classes: =714
+psubuh	mmi	0	1082	no	distinct a0=0x0:0x0 a1=0xffffffffffffffff:0xffffffffffffffff: r2: got 0001000100010001:0001000100010001 want 0000000000000000:0000000000000000	0	no site in this game; not patched; failing classes: =647
+paddub	mmi	11	1082	yes		0	
+psubub	mmi	0	1082	yes		0	
+pextub	mmi	18	1082	yes		0	
+psllvw	mmi	0	1082	no	distinct a0=0x0:0x0 a1=0xffffffffffffffff:0xffffffffffffffff: r2: got 0000000000000000:0000000000000000 want ffffffffffffffff:ffffffffffffffff	0	no site in this game; not patched; failing classes: =934
+psrlvw	mmi	0	1082	no	distinct a0=0x0:0x0 a1=0xffffffffffffffff:0xffffffffffffffff: r2: got 0000000000000000:0000000000000000 want ffffffffffffffff:ffffffffffffffff	0	no site in this game; not patched; failing classes: =920
+psravw	mmi	0	1082	no	distinct a0=0x0:0x0 a1=0xffffffffffffffff:0xffffffffffffffff: r2: got 0000000000000000:0000000000000000 want ffffffffffffffff:ffffffffffffffff	0	no site in this game; not patched; failing classes: =856
+pinth	mmi	0	1082	no	distinct a0=0xfe81ff807f0100:0x100fe81ff807f01 a1=0x0:0x0: r2: got 00fe000081ff0000:807f000001000000 want 01000000fe810000:ff8000007f010000	0	no site in this game; not patched; failing classes: =532
+pcpyld	mmi	819	1082	yes		0	
+pand	mmi	30	1082	yes		0	
+pxor	mmi	3	1082	yes		0	
+por	mmi	41	1082	yes		0	
+pnor	mmi	30	1082	yes		0	
+pinteh	mmi	0	1082	no	distinct a0=0x0:0x0 a1=0x7fffffff7fffffff:0x7fffffff7fffffff: r2: got 00007fff0000ffff:00007fff0000ffff want 0000ffff0000ffff:0000ffff0000ffff	0	no site in this game; not patched; failing classes: =816
+pcpyud	mmi	27	1082	yes		0	
+pext5	mmi	0	49	yes		0	
+ppac5	mmi	0	49	yes		0	
+pabsw	mmi	0	49	no	distinct a1=0xffffffffffffffff:0xffffffffffffffff: r2: got 0000000000000000:0000000000000000 want 0000000100000001:0000000100000001	0	no site in this game; not patched; failing classes: =35
+pabsh	mmi	0	49	no	distinct a1=0xffffffffffffffff:0xffffffffffffffff: r2: got 0000000000000000:0000000000000000 want 0001000100010001:0001000100010001	0	no site in this game; not patched; failing classes: =35
+pexeh	mmi	0	49	no	distinct a1=0x7fffffff7fffffff:0x7fffffff7fffffff: r2: got ffff7fffffff7fff:ffff7fffffff7fff want 7fffffff7fffffff:7fffffff7fffffff	0	no site in this game; not patched; failing classes: =24
+prevh	mmi	0	49	no	distinct a1=0xfe81ff807f0100:0x100fe81ff807f01: r2: got 0100807f81ff00fe:7f01ff80fe810100 want 7f01ff80fe810100:0100807f81ff00fe	0	no site in this game; not patched; failing classes: =21
+pexew	mmi	58	49	yes		0	
+prot3w	mmi	0	49	no	distinct a1=0xfe81ff807f0100:0x100fe81ff807f01: r2: got 807f01000100fe81:ff807f0100fe81ff want 0100fe81807f0100:ff807f0100fe81ff	0	no site in this game; not patched; failing classes: =21
+pexch	mmi	0	49	no	distinct a1=0x7fffffff7fffffff:0x7fffffff7fffffff: r2: got ffff7fffffff7fff:ffff7fffffff7fff want 7fff7fffffffffff:7fff7fffffffffff	0	no site in this game; not patched; failing classes: =24
+pcpyh	mmi	2	49	yes		0	
+pexcw	mmi	0	49	no	distinct a1=0xfe81ff807f0100:0x100fe81ff807f01: r2: got 00fe81ff807f0100:0100fe81ff807f01 want 0100fe8100fe81ff:ff807f01807f0100	0	no site in this game; not patched; failing classes: =21
+psllh	mmi	4	424	yes		0	
+psrlh	mmi	50	424	yes		0	
+psrah	mmi	4	424	yes		0	
+psllw	mmi	0	824	yes		0	
+psrlw	mmi	0	824	yes		0	
+psraw	mmi	0	824	yes		0	
+pmaddw	mmi	0	1345	no	distinct a0=0x0:0x0 a1=0x0:0x0: r2: got a5a5a5a500000025:4b5a6978c3d2e1f0 want 89abcdef76543210:4b5a6978c3d2e1f0; LO: got 0000000000000000:00000000c3d2e1f0 want 0000000000000000:ffffffffc3d2e1f0; HI1: got 0000000000000000:0123456789abcdef want 0000000000000000:ffffffff89abcdef	0	no site in this game; not patched; failing classes: =1345
+pmsubw	mmi	0	1345	no	distinct a0=0x0:0x0 a1=0x0:0x0: r2: got a5a5a5a500000025:4b5a6978c3d2e1f0 want 89abcdef76543210:4b5a6978c3d2e1f0; LO: got 0000000000000000:00000000c3d2e1f0 want 0000000000000000:ffffffffc3d2e1f0; HI1: got 0000000000000000:0123456789abcdef want 0000000000000000:ffffffff89abcdef	0	no site in this game; not patched; failing classes: =1345
+pmultw	mmi	0	1345	no	distinct a0=0x0:0x0 a1=0x0:0x0: r2: got a5a5a5a500000025:0000000000000000 want 0000000000000000:0000000000000000; HI1: got 0000000000000000:0123456789abcdef want 0000000000000000:0000000000000000; LO1: got 0000000000000000:fedcba9876543210 want 0000000000000000:0000000000000000	0	no site in this game; not patched; failing classes: =1345
+pmultuw	mmi	0	1345	no	distinct a0=0x0:0x0 a1=0x0:0x0: HI1: got 0000000000000000:0123456789abcdef want 0000000000000000:0000000000000000; LO1: got 0000000000000000:fedcba9876543210 want 0000000000000000:0000000000000000	0	no site in this game; not patched; failing classes: =1322
+pmadduw	mmi	0	1345	no	distinct a0=0x0:0x0 a1=0x0:0x0: r2: got a5a5a5a500000025:4b5a6978c3d2e1f0 want 89abcdef76543210:4b5a6978c3d2e1f0; LO: got 0000000000000000:00000000c3d2e1f0 want 0000000000000000:ffffffffc3d2e1f0; HI1: got 0000000000000000:0123456789abcdef want 0000000000000000:ffffffff89abcdef	0	no site in this game; not patched; failing classes: =1345
+pmaddh	mmi	0	1345	no	distinct a0=0x0:0x0 a1=0x0:0x0: r2: got a5a5a5a500000025:4b5a6978c3d2e1f0 want 89abcdef76543210:4b5a6978c3d2e1f0; HI: got 0000000000000000:000000004b5a6978 want 0000000000000000:0f1e2d3c4b5a6978; LO: got 0000000000000000:00000000c3d2e1f0 want 0000000000000000:8796a5b4c3d2e1f0	0	no site in this game; not patched; failing classes: =1345
+pmsubh	mmi	0	1345	no	distinct a0=0x0:0x0 a1=0x0:0x0: r2: got a5a5a5a500000025:4b5a6978c3d2e1f0 want 89abcdef76543210:4b5a6978c3d2e1f0; HI: got 0000000000000000:000000004b5a6978 want 0000000000000000:0f1e2d3c4b5a6978; LO: got 0000000000000000:00000000c3d2e1f0 want 0000000000000000:8796a5b4c3d2e1f0	0	no site in this game; not patched; failing classes: =1345
+pmulth	mmi	0	1345	no	distinct a0=0x0:0x0 a1=0x0:0x0: r2: got a5a5a5a500000025:0000000000000000 want 0000000000000000:0000000000000000; HI1: got 0000000000000000:0123456789abcdef want 0000000000000000:0000000000000000; LO1: got 0000000000000000:fedcba9876543210 want 0000000000000000:0000000000000000	0	no site in this game; not patched; failing classes: =1345
+phmadh	mmi	0	1345	no	distinct a0=0x0:0x0 a1=0x0:0x0: r2: got a5a5a5a500000025:4b5a6978c3d2e1f0 want 0000000000000000:0000000000000000; HI: got 0000000000000000:000000004b5a6978 want 0000000000000000:0000000000000000; LO: got 0000000000000000:00000000c3d2e1f0 want 0000000000000000:0000000000000000	0	no site in this game; not patched; failing classes: =1345
+phmsbh	mmi	0	1345	no	distinct a0=0x0:0x0 a1=0x0:0x0: r2: got a5a5a5a500000025:4b5a6978c3d2e1f0 want 0000000000000000:0000000000000000; HI: got 0000000000000000:000000004b5a6978 want 0000000000000000:ffffffff00000000; LO: got 0000000000000000:00000000c3d2e1f0 want 0000000000000000:ffffffff00000000	0	no site in this game; not patched; failing classes: =1345
+pdivw	mmi	0	625	no	distinct a0=0x0:0x0 a1=0x0:0x0: HI1: got 0000000000000000:0123456789abcdef want 0000000000000000:0000000000000000; LO1: got 0000000000000000:fedcba9876543210 want 0000000000000000:ffffffffffffffff	0	no site in this game; not patched; failing classes: =625
+pdivuw	mmi	0	625	no	distinct a0=0x0:0x0 a1=0x0:0x0: LO: got 0000000000000000:00000000ffffffff want 0000000000000000:ffffffffffffffff; HI1: got 0000000000000000:0123456789abcdef want 0000000000000000:0000000000000000; LO1: got 0000000000000000:fedcba9876543210 want 0000000000000000:ffffffffffffffff	0	no site in this game; not patched; failing classes: =625
+pdivbw	mmi	0	625	no	distinct a0=0x0:0x0 a1=0x0:0x0: HI1: got 0000000000000000:0123456789abcdef want 0000000000000000:0000000000000000; LO1: got 0000000000000000:fedcba9876543210 want 0000000000000000:ffffffffffffffff	0	no site in this game; not patched; failing classes: =625
+pmfhi	mmi	0	340	no	distinct hi=0x0:0x0 lo=0x0:0x0: r2: got a5a5a5a500000025:0000000000000000 want 0000000000000000:0000000000000000	0	no site in this game; not patched; failing classes: =300
+pmflo	mmi	0	340	no	distinct hi=0x0:0x0 lo=0x0:0x0: r2: got a5a5a5a500000025:0000000000000000 want 0000000000000000:0000000000000000	0	no site in this game; not patched; failing classes: =300
+pmfhl.lw	mmi	0	340	no	distinct hi=0x0:0x0 lo=0xffffffffffffffff:0xffffffffffffffff: r2: got 0000000000000000:ffffffffffffffff want 00000000ffffffff:00000000ffffffff	0	no site in this game; not patched; failing classes: =292
+pmfhl.uw	mmi	0	340	no	distinct hi=0x0:0x0 lo=0xffffffffffffffff:0xffffffffffffffff: r2: got 0000000000000000:ffffffffffffffff want 00000000ffffffff:00000000ffffffff	0	no site in this game; not patched; failing classes: =292
+pmfhl.slw	mmi	0	340	no	distinct hi=0x0:0x0 lo=0xffffffffffffffff:0xffffffffffffffff: r2: got 0000000000000000:ffffffffffffffff want 000000007fffffff:000000007fffffff	0	no site in this game; not patched; failing classes: =295
+pmfhl.lh	mmi	0	340	no	distinct hi=0x0:0x0 lo=0x8080808080808080:0x8080808080808080: r2: got 0000000080008000:0000000080008000 want 0000000080808080:0000000080808080	0	no site in this game; not patched; failing classes: =279
+pmfhl.sh	mmi	0	340	no	distinct hi=0x0:0x0 lo=0xffffffffffffffff:0xffffffffffffffff: r2: got 0000000000000000:ffffffffffffffff want 00000000ffffffff:00000000ffffffff	0	no site in this game; not patched; failing classes: =281
+pmthi	mmi	0	25	no	distinct a0=0x0:0x0: HI1: got 0000000000000000:0f1e2d3c4b5a6978 want 0000000000000000:0000000000000000	0	no site in this game; not patched; failing classes: =25
+pmtlo	mmi	0	25	no	distinct a0=0x0:0x0: LO1: got 0000000000000000:8796a5b4c3d2e1f0 want 0000000000000000:0000000000000000	0	no site in this game; not patched; failing classes: =25
+pmthl.lw	mmi	0	100	no	distinct a0=0x0:0x0 hilo: HI: got 0000000000000000:0000000000000000 want 0000000000000000:0f1e2d3c00000000; LO: got 0000000000000000:0000000000000000 want 0000000000000000:8796a5b400000000; HI1: got 0000000000000000:0123456789abcdef want 0000000000000000:0123456700000000	0	no site in this game; not patched; failing classes: =99
+plzcw	mmi	0	126	no	distinct a0=0xfffffffe00000001:0x706050403020100: r4: got ffffffffffffffff:fffffffe00000001 want 0706050403020100:fffffffe00000001	0	no site in this game; not patched; failing classes: =64
+qfsrv	mmi	42	2448	yes		0	
+mfsa	mmi	2	20	yes		0	
+mtsa	mmi	1	330	yes		0	
+mtsab	mmi	32	272	yes		0	
+mtsah	mmi	1	272	yes		0	
+mult	muldiv	1581	507	yes		0	
+multu	muldiv	9	507	yes		0	
+mult1	muldiv	67	507	yes		0	
+multu1	muldiv	1	507	yes		0	
+madd	muldiv	31	3042	yes		0	
+maddu	muldiv	0	3042	yes		0	
+madd1	muldiv	0	3042	yes		0	
+maddu1	muldiv	0	3042	yes		0	
+div	muldiv	332	272	yes		0	
+divu	muldiv	176	272	yes		0	
+div1	muldiv	8	272	yes		0	
+divu1	muldiv	0	272	yes		0	
+mfhi	muldiv	324	12	yes		0	
+mflo	muldiv	359	12	yes		0	
+mfhi1	muldiv	6	12	yes		0	
+mflo1	muldiv	5	12	yes		0	
+mthi	muldiv	2	13	yes		0	
+mtlo	muldiv	24	13	yes		0	
+mthi1	muldiv	2	13	yes		0	
+mtlo1	muldiv	2	13	yes		0	
+sll	shifts	10507	39	yes		0	
+srl	shifts	3116	39	yes		0	
+sra	shifts	1681	39	yes		0	
+dsll	shifts	791	39	yes		0	
+dsrl	shifts	125	39	yes		0	
+dsra	shifts	18	39	yes		0	
+dsll32	shifts	2117	39	yes		0	
+dsrl32	shifts	294	39	yes		0	
+dsra32	shifts	711	39	yes		0	
+sllv	shifts	502	143	yes		0	
+srlv	shifts	262	143	yes		0	
+srav	shifts	109	143	yes		0	
+dsllv	shifts	19	143	yes		0	
+dsrlv	shifts	6	143	yes		0	
+dsrav	shifts	0	143	yes		0	
+vadd	vu0	1302	1239	no	mask=0xf distinct fs=40000000,c0000000,40400000,40800000 ft=7f000000,ffffffff,cf000000,3f800000: vf3: got 40a00000ceffffff:ffffffff7f000000 want 40a00000ceffffff:ff7fffff7f000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 791 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=120, denormal+exp255+normal+zero=24, exp255+normal=192, exp255+normal+zero=112
+vaddx	vu0	0	1092	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=7f800000: vf3: got 7f8000007f800000:7f8000007f800000 want 7f7ffffe7f7fffff:7f7fffff7f7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 871 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=32, exp255+normal=145, exp255+normal+zero=44
+vaddy	vu0	4	3159	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=7f800000: vf3: got 7f8000007f800000:7f8000007f800000 want 7f7ffffe7f7fffff:7f7fffff7f7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 2581 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255=3, denormal+exp255+normal=85, exp255=5, exp255+normal=374, exp255+normal+zero=109, exp255+zero=2
+vaddz	vu0	4	3159	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=7f800000: vf3: got 7f8000007f800000:7f8000007f800000 want 7f7ffffe7f7fffff:7f7fffff7f7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 2581 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255=3, denormal+exp255+normal=85, exp255=5, exp255+normal=374, exp255+normal+zero=109, exp255+zero=2
+vaddw	vu0	1	3159	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=7f800000: vf3: got 7f8000007f800000:7f8000007f800000 want 7f7ffffe7f7fffff:7f7fffff7f7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 2581 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255=3, denormal+exp255+normal=85, exp255=5, exp255+normal=374, exp255+normal+zero=109, exp255+zero=2
+vaddq	vu0	0	1092	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=7f800000: vf3: got 7f8000007f800000:7f8000007f800000 want 7f7ffffe7f7fffff:7f7fffff7f7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 832 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=35, exp255+normal=175, exp255+normal+zero=50
+vaddi	vu0	72	3159	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=7f800000: vf3: got 7f8000007f800000:7f8000007f800000 want 7f7ffffe7f7fffff:7f7fffff7f7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 2542 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255=3, denormal+exp255+normal=88, exp255=5, exp255+normal=404, exp255+normal+zero=115, exp255+zero=2
+vadda	vu0	0	147	no	mask=0xf fs=7f7fffff,ff7fffff,7f800000,3f800001 ft=00000000,007fffff,00000000,007fffff: vACC: got 3f8000017f800000:ff7fffff7f7fffff want 3f8000017f7fffff:ff7fffff7f7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 96 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=3, denormal+exp255+normal+zero=6, exp255+normal=31, exp255+normal+zero=11
+vaddax	vu0	174	2613	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=7f800000: vACC: got 7f8000007f800000:7f8000007f800000 want 7f7ffffe7f7fffff:7f7fffff7f7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 2139 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255=3, denormal+exp255+normal=71, exp255=5, exp255+normal=304, exp255+normal+zero=89, exp255+zero=2
+vadday	vu0	174	2613	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=7f800000: vACC: got 7f8000007f800000:7f8000007f800000 want 7f7ffffe7f7fffff:7f7fffff7f7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 2139 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255=3, denormal+exp255+normal=71, exp255=5, exp255+normal=304, exp255+normal+zero=89, exp255+zero=2
+vaddaz	vu0	87	2613	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=7f800000: vACC: got 7f8000007f800000:7f8000007f800000 want 7f7ffffe7f7fffff:7f7fffff7f7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 2139 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255=3, denormal+exp255+normal=71, exp255=5, exp255+normal=304, exp255+normal+zero=89, exp255+zero=2
+vaddaw	vu0	0	546	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=7f800000: vACC: got 7f8000007f800000:7f8000007f800000 want 7f7ffffe7f7fffff:7f7fffff7f7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 429 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=18, exp255+normal=75, exp255+normal+zero=24
+vaddaq	vu0	0	546	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=7f800000: vACC: got 7f8000007f800000:7f8000007f800000 want 7f7ffffe7f7fffff:7f7fffff7f7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 390 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=21, exp255+normal=105, exp255+normal+zero=30
+vaddai	vu0	0	546	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=7f800000: vACC: got 7f8000007f800000:7f8000007f800000 want 7f7ffffe7f7fffff:7f7fffff7f7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 390 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=21, exp255+normal=105, exp255+normal+zero=30
+vsub	vu0	1059	1239	no	mask=0xf distinct fs=40000000,c0000000,40400000,40800000 ft=7f000000,ffffffff,cf000000,3f800000: vf3: got 404000004f000000:fffffffffeffffff want 404000004f000000:7f7ffffefeffffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 791 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=120, denormal+exp255+normal+zero=24, exp255+normal=192, exp255+normal+zero=112
+vsubx	vu0	0	1092	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=7f800000: vf3: got ff800000ff800000:ff800000ff800000 want ff7fffffff7ffffe:ff7fffffff7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 871 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=32, exp255+normal=145, exp255+normal+zero=44
+vsuby	vu0	0	1092	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=7f800000: vf3: got ff800000ff800000:ff800000ff800000 want ff7fffffff7ffffe:ff7fffffff7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 871 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=32, exp255+normal=145, exp255+normal+zero=44
+vsubz	vu0	0	1092	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=7f800000: vf3: got ff800000ff800000:ff800000ff800000 want ff7fffffff7ffffe:ff7fffffff7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 871 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=32, exp255+normal=145, exp255+normal+zero=44
+vsubw	vu0	0	1092	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=7f800000: vf3: got ff800000ff800000:ff800000ff800000 want ff7fffffff7ffffe:ff7fffffff7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 871 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=32, exp255+normal=145, exp255+normal+zero=44
+vsubq	vu0	0	1092	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=7f800000: vf3: got ff800000ff800000:ff800000ff800000 want ff7fffffff7ffffe:ff7fffffff7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 832 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=35, exp255+normal=175, exp255+normal+zero=50
+vsubi	vu0	0	1092	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=7f800000: vf3: got ff800000ff800000:ff800000ff800000 want ff7fffffff7ffffe:ff7fffffff7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 832 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=35, exp255+normal=175, exp255+normal+zero=50
+vsuba	vu0	0	147	no	mask=0xf fs=7f7fffff,ff7fffff,7f800000,3f800001 ft=00000000,007fffff,00000000,007fffff: vACC: got 3f8000017f800000:ff7fffff7f7fffff want 3f8000017f7fffff:ff7fffff7f7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 96 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=3, denormal+exp255+normal+zero=6, exp255+normal=31, exp255+normal+zero=11
+vsubax	vu0	0	546	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=7f800000: vACC: got ff800000ff800000:ff800000ff800000 want ff7fffffff7ffffe:ff7fffffff7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 429 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=18, exp255+normal=75, exp255+normal+zero=24
+vsubay	vu0	0	546	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=7f800000: vACC: got ff800000ff800000:ff800000ff800000 want ff7fffffff7ffffe:ff7fffffff7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 429 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=18, exp255+normal=75, exp255+normal+zero=24
+vsubaz	vu0	0	546	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=7f800000: vACC: got ff800000ff800000:ff800000ff800000 want ff7fffffff7ffffe:ff7fffffff7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 429 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=18, exp255+normal=75, exp255+normal+zero=24
+vsubaw	vu0	0	546	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=7f800000: vACC: got ff800000ff800000:ff800000ff800000 want ff7fffffff7ffffe:ff7fffffff7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 429 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=18, exp255+normal=75, exp255+normal+zero=24
+vsubaq	vu0	0	546	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=7f800000: vACC: got ff800000ff800000:ff800000ff800000 want ff7fffffff7ffffe:ff7fffffff7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 390 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=21, exp255+normal=105, exp255+normal+zero=30
+vsubai	vu0	0	546	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=7f800000: vACC: got ff800000ff800000:ff800000ff800000 want ff7fffffff7ffffe:ff7fffffff7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 390 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=21, exp255+normal=105, exp255+normal+zero=30
+vmul	vu0	365	1239	no	mask=0xf distinct fs=40000000,c0000000,40400000,40800000 ft=7f000000,ffffffff,cf000000,3f800000: vf3: got 40800000cfc00000:ffffffff7f7fffff want 40800000cfc00000:7f7fffff7f7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 791 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=120, denormal+exp255+normal+zero=24, exp255+normal=192, exp255+normal+zero=112
+vmulx	vu0	260	3159	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=7f800000: vf3: got ff8000007f800000:ffc00000ffc00000 want ff7fffff7f7fffff:8000000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 2581 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255=3, denormal+exp255+normal=85, exp255=5, exp255+normal=374, exp255+normal+zero=109, exp255+zero=2
+vmuly	vu0	232	3159	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=7f800000: vf3: got ff8000007f800000:ffc00000ffc00000 want ff7fffff7f7fffff:8000000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 2581 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255=3, denormal+exp255+normal=85, exp255=5, exp255+normal=374, exp255+normal+zero=109, exp255+zero=2
+vmulz	vu0	298	3159	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=7f800000: vf3: got ff8000007f800000:ffc00000ffc00000 want ff7fffff7f7fffff:8000000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 2581 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255=3, denormal+exp255+normal=85, exp255=5, exp255+normal=374, exp255+normal+zero=109, exp255+zero=2
+vmulw	vu0	96	3159	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=7f800000: vf3: got ff8000007f800000:ffc00000ffc00000 want ff7fffff7f7fffff:8000000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 2581 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255=3, denormal+exp255+normal=85, exp255=5, exp255+normal=374, exp255+normal+zero=109, exp255+zero=2
+vmulq	vu0	0	1092	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=7f800000: vf3: got ff8000007f800000:ffc00000ffc00000 want ff7fffff7f7fffff:8000000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 832 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=35, exp255+normal=175, exp255+normal+zero=50
+vmuli	vu0	50	3159	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=7f800000: vf3: got ff8000007f800000:ffc00000ffc00000 want ff7fffff7f7fffff:8000000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 2542 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255=3, denormal+exp255+normal=88, exp255=5, exp255+normal=404, exp255+normal+zero=115, exp255+zero=2
+vmula	vu0	87	1092	no	mask=0xf fs=40000000,c0000000,40400000,40800000 ft=7f000000,ffffffff,cf000000,3f800000: vACC: got 40800000cfc00000:ffffffff7f7fffff want 40800000cfc00000:7f7fffff7f7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 684 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=116, denormal+exp255+normal+zero=20, exp255+normal=170, exp255+normal+zero=102
+vmulax	vu0	301	2613	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=7f800000: vACC: got ff8000007f800000:ffc00000ffc00000 want ff7fffff7f7fffff:8000000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 2139 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255=3, denormal+exp255+normal=71, exp255=5, exp255+normal=304, exp255+normal+zero=89, exp255+zero=2
+vmulay	vu0	104	2613	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=7f800000: vACC: got ff8000007f800000:ffc00000ffc00000 want ff7fffff7f7fffff:8000000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 2139 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255=3, denormal+exp255+normal=71, exp255=5, exp255+normal=304, exp255+normal+zero=89, exp255+zero=2
+vmulaz	vu0	40	2613	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=7f800000: vACC: got ff8000007f800000:ffc00000ffc00000 want ff7fffff7f7fffff:8000000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 2139 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255=3, denormal+exp255+normal=71, exp255=5, exp255+normal=304, exp255+normal+zero=89, exp255+zero=2
+vmulaw	vu0	64	2613	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=7f800000: vACC: got ff8000007f800000:ffc00000ffc00000 want ff7fffff7f7fffff:8000000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 2139 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255=3, denormal+exp255+normal=71, exp255=5, exp255+normal=304, exp255+normal+zero=89, exp255+zero=2
+vmulaq	vu0	0	546	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=7f800000: vACC: got ff8000007f800000:ffc00000ffc00000 want ff7fffff7f7fffff:8000000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 390 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=21, exp255+normal=105, exp255+normal+zero=30
+vmulai	vu0	0	546	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=7f800000: vACC: got ff8000007f800000:ffc00000ffc00000 want ff7fffff7f7fffff:8000000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 390 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=21, exp255+normal=105, exp255+normal+zero=30
+vmadd	vu0	89	1239	no	mask=0xf distinct fs=40000000,c0000000,40400000,40800000 ft=7f000000,ffffffff,cf000000,3f800000 acc=00000000,bf800000,3f800001,7f800000: vf3: got 7f800000cfbfffff:ffffffff7f7fffff want 7f7fffffcfbfffff:7f7ffffe7f7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 443 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=51, denormal+exp255+normal+zero=449, exp255+normal=48, exp255+normal+zero=248
+vmaddx	vu0	1	3159	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=80000000 acc=00000000,bf800000,3f800001,7f800000: vf3: got 7f8000003f800001:bf80000000000000 want 7f7fffff3f800001:bf80000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 1546 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=18, denormal+exp255+normal+zero=924, exp255+normal=131, exp255+normal+zero=540
+vmaddy	vu0	96	3159	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=80000000 acc=00000000,bf800000,3f800001,7f800000: vf3: got 7f8000003f800001:bf80000000000000 want 7f7fffff3f800001:bf80000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 1546 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=18, denormal+exp255+normal+zero=924, exp255+normal=131, exp255+normal+zero=540
+vmaddz	vu0	127	3159	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=80000000 acc=00000000,bf800000,3f800001,7f800000: vf3: got 7f8000003f800001:bf80000000000000 want 7f7fffff3f800001:bf80000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 1546 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=18, denormal+exp255+normal+zero=924, exp255+normal=131, exp255+normal+zero=540
+vmaddw	vu0	205	3159	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=80000000 acc=00000000,bf800000,3f800001,7f800000: vf3: got 7f8000003f800001:bf80000000000000 want 7f7fffff3f800001:bf80000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 1546 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=18, denormal+exp255+normal+zero=924, exp255+normal=131, exp255+normal+zero=540
+vmaddq	vu0	0	1092	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=80000000 acc=00000000,bf800000,3f800001,7f800000: vf3: got 7f8000003f800001:bf80000000000000 want 7f7fffff3f800001:bf80000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 441 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=5, denormal+exp255+normal+zero=383, exp255+normal=65, exp255+normal+zero=198
+vmaddi	vu0	0	1092	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=80000000 acc=00000000,bf800000,3f800001,7f800000: vf3: got 7f8000003f800001:bf80000000000000 want 7f7fffff3f800001:bf80000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 441 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=5, denormal+exp255+normal+zero=383, exp255+normal=65, exp255+normal+zero=198
+vmadda	vu0	174	1092	no	mask=0xf fs=40000000,c0000000,40400000,40800000 ft=7f000000,ffffffff,cf000000,3f800000 acc=00000000,bf800000,3f800001,7f800000: vACC: got 7f800000cfbfffff:ffffffff7f7fffff want 7f7fffffcfbfffff:7f7ffffe7f7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 374 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=47, denormal+exp255+normal+zero=403, exp255+normal=44, exp255+normal+zero=224
+vmaddax	vu0	151	2613	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=80000000 acc=00000000,bf800000,3f800001,7f800000: vACC: got 7f8000003f800001:bf80000000000000 want 7f7fffff3f800001:bf80000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 1278 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=16, denormal+exp255+normal+zero=758, exp255+normal=105, exp255+normal+zero=456
+vmadday	vu0	108	2613	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=80000000 acc=00000000,bf800000,3f800001,7f800000: vACC: got 7f8000003f800001:bf80000000000000 want 7f7fffff3f800001:bf80000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 1278 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=16, denormal+exp255+normal+zero=758, exp255+normal=105, exp255+normal+zero=456
+vmaddaz	vu0	91	2613	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=80000000 acc=00000000,bf800000,3f800001,7f800000: vACC: got 7f8000003f800001:bf80000000000000 want 7f7fffff3f800001:bf80000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 1278 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=16, denormal+exp255+normal+zero=758, exp255+normal=105, exp255+normal+zero=456
+vmaddaw	vu0	0	546	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=80000000 acc=00000000,bf800000,3f800001,7f800000: vACC: got 7f8000003f800001:bf80000000000000 want 7f7fffff3f800001:bf80000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 187 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=3, denormal+exp255+normal+zero=217, exp255+normal=27, exp255+normal+zero=112
+vmaddaq	vu0	0	546	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=80000000 acc=00000000,bf800000,3f800001,7f800000: vACC: got 7f8000003f800001:bf80000000000000 want 7f7fffff3f800001:bf80000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 173 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=3, denormal+exp255+normal+zero=217, exp255+normal=39, exp255+normal+zero=114
+vmaddai	vu0	0	546	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=80000000 acc=00000000,bf800000,3f800001,7f800000: vACC: got 7f8000003f800001:bf80000000000000 want 7f7fffff3f800001:bf80000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 173 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=3, denormal+exp255+normal+zero=217, exp255+normal=39, exp255+normal+zero=114
+vmsub	vu0	0	294	no	mask=0xf distinct fs=40400000,3eaaaaab,00800000,007fffff ft=00000000,007fffff,00000000,007fffff acc=00000000,bf800000,3f800001,7f800000: vf3: got 7f8000003f800001:bf80000000000000 want 7f7fffff3f800001:bf80000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 112 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=7, denormal+exp255+normal+zero=107, exp255+normal=10, exp255+normal+zero=58
+vmsubx	vu0	0	1092	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=80000000 acc=00000000,bf800000,3f800001,7f800000: vf3: got 7f8000003f800001:bf80000000000000 want 7f7fffff3f800001:bf80000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 455 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=5, denormal+exp255+normal+zero=383, exp255+normal=53, exp255+normal+zero=196
+vmsuby	vu0	0	1092	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=80000000 acc=00000000,bf800000,3f800001,7f800000: vf3: got 7f8000003f800001:bf80000000000000 want 7f7fffff3f800001:bf80000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 455 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=5, denormal+exp255+normal+zero=383, exp255+normal=53, exp255+normal+zero=196
+vmsubz	vu0	48	3159	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=80000000 acc=00000000,bf800000,3f800001,7f800000: vf3: got 7f8000003f800001:bf80000000000000 want 7f7fffff3f800001:bf80000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 1546 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=18, denormal+exp255+normal+zero=924, exp255+normal=131, exp255+normal+zero=540
+vmsubw	vu0	291	3159	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=80000000 acc=00000000,bf800000,3f800001,7f800000: vf3: got 7f8000003f800001:bf80000000000000 want 7f7fffff3f800001:bf80000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 1546 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=18, denormal+exp255+normal+zero=924, exp255+normal=131, exp255+normal+zero=540
+vmsubq	vu0	0	1092	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=80000000 acc=00000000,bf800000,3f800001,7f800000: vf3: got 7f8000003f800001:bf80000000000000 want 7f7fffff3f800001:bf80000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 441 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=5, denormal+exp255+normal+zero=383, exp255+normal=65, exp255+normal+zero=198
+vmsubi	vu0	0	1092	no	mask=0xf distinct fs=00000000,80000000,3f800000,bf800000 b=80000000 acc=00000000,bf800000,3f800001,7f800000: vf3: got 7f8000003f800001:bf80000000000000 want 7f7fffff3f800001:bf80000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 441 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=5, denormal+exp255+normal+zero=383, exp255+normal=65, exp255+normal+zero=198
+vmsuba	vu0	0	147	no	mask=0xf fs=40400000,3eaaaaab,00800000,007fffff ft=00000000,007fffff,00000000,007fffff acc=00000000,bf800000,3f800001,7f800000: vACC: got 7f8000003f800001:bf80000000000000 want 7f7fffff3f800001:bf80000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 43 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=3, denormal+exp255+normal+zero=61, exp255+normal=6, exp255+normal+zero=34
+vmsubax	vu0	0	546	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=80000000 acc=00000000,bf800000,3f800001,7f800000: vACC: got 7f8000003f800001:bf80000000000000 want 7f7fffff3f800001:bf80000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 187 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=3, denormal+exp255+normal+zero=217, exp255+normal=27, exp255+normal+zero=112
+vmsubay	vu0	0	546	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=80000000 acc=00000000,bf800000,3f800001,7f800000: vACC: got 7f8000003f800001:bf80000000000000 want 7f7fffff3f800001:bf80000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 187 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=3, denormal+exp255+normal+zero=217, exp255+normal=27, exp255+normal+zero=112
+vmsubaz	vu0	0	546	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=80000000 acc=00000000,bf800000,3f800001,7f800000: vACC: got 7f8000003f800001:bf80000000000000 want 7f7fffff3f800001:bf80000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 187 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=3, denormal+exp255+normal+zero=217, exp255+normal=27, exp255+normal+zero=112
+vmsubaw	vu0	0	546	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=80000000 acc=00000000,bf800000,3f800001,7f800000: vACC: got 7f8000003f800001:bf80000000000000 want 7f7fffff3f800001:bf80000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 187 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=3, denormal+exp255+normal+zero=217, exp255+normal=27, exp255+normal+zero=112
+vmsubaq	vu0	0	546	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=80000000 acc=00000000,bf800000,3f800001,7f800000: vACC: got 7f8000003f800001:bf80000000000000 want 7f7fffff3f800001:bf80000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 173 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=3, denormal+exp255+normal+zero=217, exp255+normal=39, exp255+normal+zero=114
+vmsubai	vu0	0	546	no	mask=0xf fs=00000000,80000000,3f800000,bf800000 b=80000000 acc=00000000,bf800000,3f800001,7f800000: vACC: got 7f8000003f800001:bf80000000000000 want 7f7fffff3f800001:bf80000000000000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 173 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=3, denormal+exp255+normal+zero=217, exp255+normal=39, exp255+normal+zero=114
+vmax	vu0	87	749	yes		0	
+vmaxx	vu0	1	1157	yes		0	
+vmaxy	vu0	0	546	yes		0	
+vmaxz	vu0	0	546	yes		0	
+vmaxw	vu0	0	546	yes		0	
+vmaxi	vu0	0	546	yes		0	
+vmini	vu0	87	749	yes		0	
+vminix	vu0	1	546	yes		0	
+vminiy	vu0	0	546	yes		0	
+vminiz	vu0	0	546	yes		0	
+vminiw	vu0	0	546	yes		0	
+vminii	vu0	0	1157	yes		0	
+vopmula	vu0	1	553	no	distinct fs=40000000,c0000000,40400000,40800000 ft=7f000000,ffffffff,cf000000,3f800000 acc=00000000,bf800000,3f800001,7f800000: vACC: got 7f800000ffffffff:7f7fffff4f800000 want 7f800000ff7fffff:7f7fffff4f800000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 325 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=25, denormal+exp255+normal+zero=108, exp255+normal=24, exp255+normal+zero=71
+vopmsub	vu0	1	651	no	distinct fs=40000000,c0000000,40400000,40800000 ft=7f000000,ffffffff,cf000000,3f800000 acc=00000000,bf800000,3f800001,7f800000: vf3: got 3f03c02dffffffff:ff7fffffcf800000 want 3f03c02d7f7fffff:ff7fffffcf800000	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 226 cases differ only in the sticky exception flags (no site reads them); failing classes: denormal+exp255+normal=27, denormal+exp255+normal+zero=236, exp255+normal=26, exp255+normal+zero=136
+vabs	vu0	87	994	yes		0	
+vmove	vu0	4	945	yes		0	
+vmr32	vu0	6	945	yes		0	
+vftoi0	vu0	0	602	no	mask=0xf fs=4b800000,4b800001,4effffff,4f000000: vf2: got 800000007fffff80:0100000201000000 want 7fffffff7fffff80:0100000201000000	0	no site in this game; not patched; failing classes: denormal+exp255+normal+zero=12, denormal+exp255+zero=12, denormal+normal=7, exp255+normal=50, exp255+zero=11, normal=94
+vitof0	vu0	0	602	yes		0	
+vftoi4	vu0	0	602	no	mask=0xf fs=4b800000,4b800001,4effffff,4f000000: vf2: got 8000000080000000:1000002010000000 want 7fffffff7fffffff:1000002010000000	0	no site in this game; not patched; failing classes: denormal+exp255+normal+zero=12, denormal+exp255+zero=12, denormal+normal=7, exp255+normal=50, exp255+zero=11, normal=105
+vitof4	vu0	0	602	yes		0	
+vftoi12	vu0	0	602	no	mask=0xf fs=41100000,42c80000,437f0000,4b000000: vf2: got 80000000000ff000:0006400000009000 want 7fffffff000ff000:0006400000009000	0	no site in this game; not patched; failing classes: denormal+exp255+normal+zero=12, denormal+exp255+zero=12, denormal+normal=7, exp255+normal=50, exp255+zero=11, normal=141
+vitof12	vu0	0	602	yes		0	
+vftoi15	vu0	0	602	no	mask=0xf fs=41100000,42c80000,437f0000,4b000000: vf2: got 80000000007f8000:0032000000048000 want 7fffffff007f8000:0032000000048000	0	no site in this game; not patched; failing classes: denormal+exp255+normal+zero=12, denormal+exp255+zero=12, denormal+normal=7, exp255+normal=50, exp255+zero=11, normal=141
+vitof15	vu0	0	602	yes		0	
+vnop	vu0	157	1	yes		0	
+vsqrt	vu0	1	1659	no	ftf=0 fsf=0 fs=807fffff,7f7fffff,ff7fffff,7f000000 ft=ffffffff,cf000000,3f800000,3f000000: Q: got 0000000000000000:000000007fffffff want 0000000000000000:000000005f7fffff	0	exponent-all-ones operands are not clamped; not patched (journal 025, pieces 5 and 6); 316 cases differ only in the sticky exception flags (no site reads them); failing classes: exp255=177
+vdiv	vu0	0	75	no	ftf=0 fsf=0 fs=00000000,80000000,3f800000,bf800000 ft=00000000,007fffff,00000000,007fffff: Q: got 0000000000000000:0000000000000000 want 0000000000000000:000000007f7fffff	0	no site in this game; not patched; failing classes: denormal+exp255=1, denormal+normal=4, exp255+normal=8, exp255+zero=2, normal+zero=7, zero=2
+vrsqrt	vu0	0	75	no	ftf=0 fsf=0 fs=7f7fffff,ff7fffff,7f800000,3f800001 ft=00000000,007fffff,00000000,007fffff: Q: got 0000000000000000:0000000000000000 want 0000000000000000:000000007f7fffff	0	no site in this game; not patched; 6 cases differ only in the sticky exception flags (no site reads them)
+qmfc2.ni	vu0	11	84	yes		0	
+qmtc2.ni	vu0	15	84	yes		0	
+cfc2.ni	vu0	50	614	yes		0	171 cases reference ambiguous
+ctc2.ni	vu0	116	432	yes		0	76 cases reference ambiguous
+lqc2	vu0	1059	252	yes		0	6 cases reference ambiguous
+sqc2	vu0	1418	252	yes		0	12 cases reference ambiguous

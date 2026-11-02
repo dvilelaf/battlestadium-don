@@ -1,0 +1,18 @@
+# Files over 1 MB that the Windows archive may carry (public_check.py --large-allow, size rule only).
+# One entry per line: <glob relative to the archive root> <reason>. `*` also crosses `/`.
+# The hash, format and personal rules still scan every file listed here.
+don-windows-*/Battle Stadium DON.exe the game executable (our code, no game data)
+don-windows-*/don_gs.dll PCSX2 GS bridge library
+don-windows-*/don_vu.dll PCSX2 microVU bridge library
+don-windows-*/don_spu2.dll PCSX2 SPU2 bridge library
+don-windows-*/SDL3.dll SDL3 library
+don-windows-*/shaderc_shared.dll shaderc library
+don-windows-*/zstd.dll zstd library
+don-windows-*/bin/ps2_recomp.exe the recompiler executable (builds the player's module)
+don-windows-*/config/functions.ghidra.csv function names, addresses and sizes (table)
+don-windows-*/config/recomp/functions.filtered.csv function names, addresses and sizes (table)
+don-windows-*/resources/GameIndex.yaml PCSX2 game database (GPL)
+don-windows-*/resources/RedumpDatabase.yaml PCSX2 disc database (GPL)
+don-windows-*/resources/fonts/Twemoji.Mozilla.ttf Twemoji font (CC-BY 4.0, licence shipped)
+don-windows-*/toolchain/bin/* the pinned LLVM executables
+don-windows-*/toolchain/lib/clang/17/include/arm_*.h the pinned LLVM compiler's own headers

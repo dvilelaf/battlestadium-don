@@ -1,0 +1,229 @@
+# 0066-pad-actuators-to-host: the guest's vibration calls reach the host
+#
+# What it fixes: scePadSetActAlign and scePadSetActDirect answered 1 and did nothing, so the game's own vibration
+# setting (key configuration, "Vibration ON/OFF" per player) never reached a gamepad. Now the runtime keeps the
+# align table (which byte of the data drives the small motor, 0, or the large one, 1; 0xFF none) and the last data
+# per (port, slot) as the SDK defines them, derives the two motors (small on/off, large 0..255) and tells the host
+# through a new optional callback of Ps2HostPad, `actuator(user, port, slot, small, large)`, on the game thread and
+# only when the pair changed. A closed port, scePadInit and scePadEnd switch the motors off (one callback with 0, 0);
+# scePadPortOpen resets the align table to the default {0, 1, FF...}: the game never calls scePadSetActAlign (measured) and
+# sends {small, large} to SetActDirect, so byte 0 is the small motor and byte 1 the large one. Both calls answer 0 for a pad that is not open, not plugged in
+# or outside the description (they answered 1 always). DON_TRACE_PAD_ACT=1 prints one "[don-pad]" line per call
+# (off by default, no cost when off; refused calls are traced too). A source without `actuator` behaves as before.
+# Verified: tests/runtime/pad_actuator_test (the motors from the align table, change-only reports, two ports, close /
+# init / end silence, refusals, no callback); tests/runtime/host_pad_source_test still passes; the game's calls in a
+# fight: docs/journal/035-vibration.md.
+#
+diff --git a/ps2xRuntime/include/runtime/ps2_host_pad.h b/ps2xRuntime/include/runtime/ps2_host_pad.h
+index 0c59217..08d4a5a 100644
+--- a/ps2xRuntime/include/runtime/ps2_host_pad.h
++++ b/ps2xRuntime/include/runtime/ps2_host_pad.h
+@@ -54,6 +54,13 @@ struct Ps2HostPad
+     // Fills *out (initialised to "not connected, nothing pressed") for the pad at (port, slot). Called
+     // only for a (port, slot) inside the description above. Required: a source without read is ignored.
+     void (*read)(void *user, int port, int slot, Ps2HostPadState *out) = nullptr;
++
++    // Optional. The vibration motors of the pad at (port, slot) as the guest has set them with
++    // scePadSetActAlign/scePadSetActDirect: `small_motor` is 0 or 1 (the small motor is on or off) and
++    // `large_motor` 0..255 (the large motor's strength). Called on the game thread, only when the pair
++    // for that (port, slot) changed, and with 0, 0 when the guest closes the port or re-initialises the
++    // library. The same rules as read: copy the values and return, do not block or call into the runtime.
++    void (*actuator)(void *user, int port, int slot, uint8_t small_motor, uint8_t large_motor) = nullptr;
+ };
+ 
+ #endif
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
+index 7e5173c..4272866 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
+@@ -17,6 +17,10 @@ namespace ps2_stubs
+         // the game's own copy of the function (0x118EB0: its open-table entry is 0 -> 'c' = 99), which the game
+         // relies on: its pad poll opens a slot only while GetState says 99 (0x138FB0, the multitap branch).
+         constexpr int32_t kPadStateNotOpen = 99;
++        // The align table of a pad that was just opened: byte 0 small motor, byte 1 large motor. The game never calls
++        // scePadSetActAlign (measured, T-308) and sends {small, large, 0...} to scePadSetActDirect, so this is the
++        // mapping it assumes.
++        constexpr uint8_t kPadActAlignDefault[6] = {0u, 1u, 0xFF, 0xFF, 0xFF, 0xFF};
+         // Capacity of the pad table (a PS2 has two ports, a multitap gives a port up to four slots)...
+         constexpr size_t kPadPortCount = PS2_HOST_PAD_MAX_PORTS;
+         constexpr size_t kPadMaxSlotCount = PS2_HOST_PAD_MAX_SLOTS;
+@@ -69,6 +73,13 @@ namespace ps2_stubs
+             uint8_t lastData[32]{};
+             uint32_t readCount = 0u;
+             uint32_t lastReadDataAddr = 0u;
++            // The actuators (vibration). actAlign[i] says which motor byte i of scePadSetActDirect's data drives:
++            // 0 the small motor, 1 the large one, 0xFF none (the SDK's table). The game never sets it (it sends
++            // {small, large} to SetActDirect), so a pad starts with {0, 1, FF...}. actSmall/actLarge are what the host was last told.
++            uint8_t actAlign[6] = {0u, 1u, 0xFF, 0xFF, 0xFF, 0xFF};
++            uint8_t actData[6]{};
++            uint8_t actSmall = 0u;
++            uint8_t actLarge = 0u;
+         };
+ 
+         std::mutex g_padOverrideMutex;
+@@ -213,6 +224,62 @@ namespace ps2_stubs
+         void applyKeyboardState(PadInputState &, bool) {}
+ #endif // PS2X_NO_RAYLIB
+ 
++        // DON_TRACE_PAD_ACT=1: one line per actuator call (T-308). Read once.
++        bool padActTrace()
++        {
++            static const bool on = []() {
++                const char *text = std::getenv("DON_TRACE_PAD_ACT");
++                return text != nullptr && text[0] != '\0' && text[0] != '0';
++            }();
++            return on;
++        }
++
++        // The motors a pad's align table and last data give: the last byte of each motor wins.
++        void padMotorsFromData(const PadPortState &p, uint8_t &small, uint8_t &large)
++        {
++            small = 0u;
++            large = 0u;
++            for (int i = 0; i < 6; ++i)
++            {
++                if (p.actAlign[i] == 0u)
++                    small = p.actData[i] ? 1u : 0u;
++                else if (p.actAlign[i] == 1u)
++                    large = p.actData[i];
++            }
++        }
++
++        // Tells the host when the motors of (port, slot) changed. Called with g_padStateMutex held: the host's
++        // callback must not block (ps2_host_pad.h).
++        void padNotifyActuatorsLocked(PS2Runtime *runtime, int port, int slot, PadPortState &p)
++        {
++            uint8_t small = 0u, large = 0u;
++            padMotorsFromData(p, small, large);
++            if (small == p.actSmall && large == p.actLarge)
++                return;
++            p.actSmall = small;
++            p.actLarge = large;
++            if (padActTrace())
++                std::fprintf(stderr, "[don-pad] actuators port %d slot %d: small %u large %u\n", port, slot,
++                             static_cast<unsigned>(small), static_cast<unsigned>(large));
++            const Ps2HostPad *source = runtime ? runtime->padBackend().hostSource() : nullptr;
++            if (source && source->actuator)
++                source->actuator(source->user, port, slot, small, large);
++        }
++
++        // The motors go off: a closed port or a re-initialised library does not leave a pad shaking.
++        void padSilenceAllLocked(PS2Runtime *runtime)
++        {
++            for (size_t port = 0; port < kPadPortCount; ++port)
++            {
++                for (size_t slot = 0; slot < kPadMaxSlotCount; ++slot)
++                {
++                    PadPortState &p = g_padPorts[port][slot];
++                    std::memset(p.actData, 0, sizeof(p.actData));
++                    padNotifyActuatorsLocked(runtime, static_cast<int>(port), static_cast<int>(slot), p);
++                }
++            }
++        }
++
+         void resetPadStateLocked()
+         {
+             for (auto &slots : g_padPorts)
+@@ -420,6 +487,7 @@ namespace ps2_stubs
+         (void)runtime;
+         {
+             std::lock_guard<std::mutex> lock(g_padStateMutex);
++            padSilenceAllLocked(runtime);
+             resetPadStateLocked();
+         }
+         setReturnS32(ctx, 1);
+@@ -651,6 +719,7 @@ namespace ps2_stubs
+         (void)runtime;
+         {
+             std::lock_guard<std::mutex> lock(g_padStateMutex);
++            padSilenceAllLocked(runtime);
+             resetPadStateLocked();
+         }
+         setReturnS32(ctx, 1);
+@@ -664,7 +733,6 @@ namespace ps2_stubs
+     void scePadPortClose(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
+         (void)rdram;
+-        (void)runtime;
+         std::lock_guard<std::mutex> lock(g_padStateMutex);
+         PadPortState *portState = lookupPadPortStateLocked(static_cast<int>(getRegU32(ctx, 4)),
+                                                            static_cast<int>(getRegU32(ctx, 5)));
+@@ -678,6 +746,10 @@ namespace ps2_stubs
+         portState->pressureEnabled = false;
+         portState->reqState = 0u;
+         portState->transientState = 0u;
++        std::memset(portState->actData, 0, sizeof(portState->actData));
++        std::memcpy(portState->actAlign, kPadActAlignDefault, sizeof(portState->actAlign));
++        padNotifyActuatorsLocked(runtime, static_cast<int>(getRegU32(ctx, 4)), static_cast<int>(getRegU32(ctx, 5)),
++                                 *portState);
+         setReturnS32(ctx, 1);
+     }
+ 
+@@ -702,6 +774,8 @@ namespace ps2_stubs
+         portState->dmaAddr = dmaAddr;
+         portState->reqState = 0u;
+         portState->transientState = 0u;
++        std::memset(portState->actData, 0, sizeof(portState->actData));
++        std::memcpy(portState->actAlign, kPadActAlignDefault, sizeof(portState->actAlign));
+         if (dmaStr)
+         {
+             ps2TraceGuestRangeWrite(rdram, dmaAddr, 32u, "scePadPortOpen", ctx);
+@@ -774,17 +848,54 @@ namespace ps2_stubs
+         setReturnS32(ctx, 0);
+     }
+ 
++    // scePadSetActAlign(port, slot, const uint8_t *align /* 6 bytes */): which motor each byte of the data given to
++    // scePadSetActDirect drives (0 small, 1 large, 0xFF none). Returns 1 when the pad is open and plugged in, else 0.
+     void scePadSetActAlign(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
+-        (void)rdram;
+-        (void)runtime;
++        const int port = static_cast<int>(getRegU32(ctx, 4));
++        const int slot = static_cast<int>(getRegU32(ctx, 5));
++        const uint8_t *align = getConstMemPtr(rdram, getRegU32(ctx, 6));
++        std::lock_guard<std::mutex> lock(g_padStateMutex);
++        PadPortState *portState = lookupPadPortStateLocked(port, slot);
++        if (!portState || !portState->open || !align || !padConnected(runtime, port, slot))
++        {
++            if (padActTrace())
++                std::fprintf(stderr, "[don-pad] SetActAlign refused: port %d slot %d open %d\n", port, slot,
++                             portState ? static_cast<int>(portState->open) : -1);
++            setReturnS32(ctx, 0);
++            return;
++        }
++        std::memcpy(portState->actAlign, align, sizeof(portState->actAlign));
++        if (padActTrace())
++            std::fprintf(stderr, "[don-pad] SetActAlign port %d slot %d: %02x %02x %02x %02x %02x %02x\n", port, slot,
++                         align[0], align[1], align[2], align[3], align[4], align[5]);
++        padNotifyActuatorsLocked(runtime, port, slot, *portState);
+         setReturnS32(ctx, 1);
+     }
+ 
++    // scePadSetActDirect(port, slot, const uint8_t *data /* 6 bytes */): the values of the motors, in the order of
++    // the align table: the small motor 0 or 1 (on/off), the large one 0..255. Returns 1 when the pad is open and
++    // plugged in, else 0.
+     void scePadSetActDirect(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
+-        (void)rdram;
+-        (void)runtime;
++        const int port = static_cast<int>(getRegU32(ctx, 4));
++        const int slot = static_cast<int>(getRegU32(ctx, 5));
++        const uint8_t *data = getConstMemPtr(rdram, getRegU32(ctx, 6));
++        std::lock_guard<std::mutex> lock(g_padStateMutex);
++        PadPortState *portState = lookupPadPortStateLocked(port, slot);
++        if (!portState || !portState->open || !data || !padConnected(runtime, port, slot))
++        {
++            if (padActTrace())
++                std::fprintf(stderr, "[don-pad] SetActDirect refused: port %d slot %d open %d\n", port, slot,
++                             portState ? static_cast<int>(portState->open) : -1);
++            setReturnS32(ctx, 0);
++            return;
++        }
++        std::memcpy(portState->actData, data, sizeof(portState->actData));
++        if (padActTrace())
++            std::fprintf(stderr, "[don-pad] SetActDirect port %d slot %d: %02x %02x %02x %02x %02x %02x\n", port, slot,
++                         data[0], data[1], data[2], data[3], data[4], data[5]);
++        padNotifyActuatorsLocked(runtime, port, slot, *portState);
+         setReturnS32(ctx, 1);
+     }
+ 

@@ -1,0 +1,128 @@
+# 0055-host-replacements-return-at-the-run-loop: a host replacement dispatched by the scheduler's run loop
+# continues at the return address instead of being called again for ever
+#
+# What it fixes: when a checkpoint comes due exactly at the call of a function that a host implementation
+# replaced (replaceFunction: the game's multitap wrappers 0x255CA0, 0x255DC0, 0x255E30 and 0x255EA0, donWrite
+# for descriptors 1 and 2 at 0x10C868, sceCdSearchFile bound at 0x11A7A8; docs/journal/029 follow-up),
+# dispatchGuestBranch unwinds with pc = the replacement's entry and the run loop calls it as the resume
+# address. A host replacement returns without setting pc (the rule "came back with pc equal to its entry"
+# in dispatchGuestBranch continues the caller), so the run loop found pc unchanged and called it again, for
+# ever, repeating its side effects (the four multitap answers, the TTY write, the file search).
+#
+# What it changes: replaceFunction records that the table slot is a host implementation (registerFunction,
+# used for functions shaped like generated code, clears the record); after the run loop calls a function,
+# if pc is still its entry, the slot is a host implementation and no unwinding is in progress (patch 0054's
+# flag: a replacement wrapping generated code that a checkpoint unwound with pc = its entry is called again),
+# pc = ra. The record is sized on demand and ps2IsNativeFunction answers false beyond it. Generated code, the table
+# initializer, and the rule in dispatchGuestBranch are untouched. ee_scheduler.h declares
+# ps2IsNativeFunction(); ps2_runtime.h is not changed.
+#
+# How it was verified: tests/runtime/unwind_not_return_test.cpp now forces the checkpoint at the native
+# function's dispatch too and, in a second forced checkpoint, the back edge of a wrapping replacement (49
+# sites): unpatched 13 runs differ, patched 0; without the "no unwinding" condition 6 differ; all 21 host
+# tests pass.
+#
+diff --git a/ps2xRuntime/include/runtime/ee_scheduler.h b/ps2xRuntime/include/runtime/ee_scheduler.h
+index a7b00b4..7245d48 100644
+--- a/ps2xRuntime/include/runtime/ee_scheduler.h
++++ b/ps2xRuntime/include/runtime/ee_scheduler.h
+@@ -285,6 +285,10 @@ struct EeThreadCreateParams
+     uint32_t option = 0;
+ };
+ 
++// Patch 0055: true when the function table entry at `address` was put there by replaceFunction
++// (a host implementation, which returns without setting pc, relying on the caller to continue after the call).
++bool ps2IsNativeFunction(uint32_t address) noexcept;
++
+ class EeScheduler
+ {
+ public:
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index 518ab13..16ce6eb 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -332,7 +332,18 @@ void EeScheduler::run()
+             m_insideInterrupt = !running->invocations.empty() && running->invocations.back().kind == GuestInvocationKind::Interrupt;
+             m_unwinding = false; // the unwinding (if any) has reached the run loop
+             m_guestExecuting.store(true, std::memory_order_release);
++            const uint32_t entryPc = context.pc;
+             function(m_rdram, &context, &m_runtime);
++            // Patch 0055: a host implementation dispatched from here (a checkpoint was due at its call, so
++            // the unwinding reached the run loop with its entry as the resume address) returns without
++            // setting pc, as it does to a generated caller. Continue at the return address; without this
++            // the run loop calls it again, for ever. Not when a checkpoint answered "due" inside the call
++            // (patch 0054's flag, cleared just before it): then pc is where the wrapped generated code
++            // resumes, which may be this entry, and the function must be called again.
++            if (context.pc == entryPc && !m_unwinding && ps2IsNativeFunction(entryPc))
++            {
++                context.pc = getRegU32(&context, 31);
++            }
+             m_guestExecuting.store(false, std::memory_order_release);
+             m_insideInterrupt = false;
+         }
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index acd5a87..cd0303c 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -1149,6 +1149,19 @@ namespace
+     }
+ }
+ 
++// Patch 0055: which slots of the function table hold a host implementation (put there by replaceFunction).
++static std::vector<uint8_t> &nativeFunctionSlots()
++{
++    // Sized on demand: the table's slot count is not known before its initializer ran, and a test may set up
++    // a table of another size.
++    static std::vector<uint8_t> slots;
++    if (slots.size() < g_ps2RecompiledFunctionTableSlotCount)
++    {
++        slots.resize(g_ps2RecompiledFunctionTableSlotCount, 0u);
++    }
++    return slots;
++}
++
+ bool PS2Runtime::replaceFunction(uint32_t address, RecompiledFunction func)
+ {
+     uint32_t slot = 0u;
+@@ -1162,12 +1175,40 @@ bool PS2Runtime::replaceFunction(uint32_t address, RecompiledFunction func)
+     }
+ 
+     g_ps2RecompiledFunctionTable[slot] = func;
++    // Patch 0055: a function put in the table here replaces guest code with a host implementation, which
++    // returns without setting pc. The generated table is filled by its own initializer, and registerFunction
++    // (below) is for functions shaped like generated code, which set pc themselves or ask to be called again.
++    std::vector<uint8_t> &slots = nativeFunctionSlots();
++    if (slot < slots.size())
++    {
++        slots[slot] = 1u;
++    }
+     return true;
+ }
+ 
++bool ps2IsNativeFunction(uint32_t address) noexcept
++{
++    uint32_t slot = 0u;
++    if (!generatedFunctionTableSlot(address, slot))
++    {
++        return false;
++    }
++    const std::vector<uint8_t> &slots = nativeFunctionSlots();
++    return slot < slots.size() && slots[slot] != 0u;
++}
++
+ bool PS2Runtime::registerFunction(uint32_t address, RecompiledFunction func)
+ {
+-    return replaceFunction(address, func);
++    if (!replaceFunction(address, func))
++    {
++        return false;
++    }
++    uint32_t slot = 0u;
++    if (generatedFunctionTableSlot(address, slot) && slot < nativeFunctionSlots().size())
++    {
++        nativeFunctionSlots()[slot] = 0u;
++    }
++    return true;
+ }
+ 
+ bool PS2Runtime::hasFunction(uint32_t address) const

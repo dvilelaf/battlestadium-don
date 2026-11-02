@@ -1,0 +1,38 @@
+# T-401: PCSX2's CMake files build for Windows with clang-cl cross-compiling from Linux (the Windows route).
+#
+# What it fixes, two things that only matter for that build:
+#  * cmake/BuildParameters.cmake adds -msse4.1 to every language when USE_CLANG_CL; the MASM
+#    assembler (llvm-ml, used for common/FastJmp.asm) rejects it. The option is now limited to C and C++.
+#  * cmake/SearchForStuff.cmake names the directory 3rdparty/D3D12MemAlloc, the folder is
+#    3rdparty/d3d12memalloc: it fails on a case-sensitive file system (this build runs on Linux). Only
+#    reached when building the Direct3D 12 renderer on Windows.
+# Neither changes a Linux build (the first is under USE_CLANG_CL, the second under WIN32).
+# Verified: the GS bridge builds and links for Windows (tools/pipeline/build_windows.sh); patch 0001-0004 and this one
+# apply from clean with tools/setup/fetch_pcsx2.sh --reset.
+# Found while building PCSX2 for Windows in docs/knowledge/17-windows-toolchain.md (P8, P9); the same two edits.
+diff --git a/cmake/BuildParameters.cmake b/cmake/BuildParameters.cmake
+index 80c4469..30d5448 100644
+--- a/cmake/BuildParameters.cmake
++++ b/cmake/BuildParameters.cmake
+@@ -97,7 +97,7 @@ if("${CMAKE_HOST_SYSTEM_PROCESSOR}" STREQUAL "x86_64" OR "${CMAKE_HOST_SYSTEM_PR
+ 
+ 		if(USE_CLANG_CL)
+ 			# clang-cl => need to explicitly enable SSE4.1.
+-			add_compile_options("-msse4.1")
++			add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-msse4.1>")
+ 		endif()
+ 	else()
+ 		# Multi-ISA => SSE4, otherwise native.
+diff --git a/cmake/SearchForStuff.cmake b/cmake/SearchForStuff.cmake
+index f3b71b7..16a27e1 100644
+--- a/cmake/SearchForStuff.cmake
++++ b/cmake/SearchForStuff.cmake
+@@ -32,7 +32,7 @@ endif()
+ 
+ # Platform-specific dependencies.
+ if (WIN32)
+-	add_subdirectory(3rdparty/D3D12MemAlloc EXCLUDE_FROM_ALL)
++	add_subdirectory(3rdparty/d3d12memalloc EXCLUDE_FROM_ALL)
+ 	add_subdirectory(3rdparty/winpixeventruntime EXCLUDE_FROM_ALL)
+ 	add_subdirectory(3rdparty/winwil EXCLUDE_FROM_ALL)
+ 	set(FFMPEG_INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/3rdparty/ffmpeg/include")

@@ -1,0 +1,90 @@
+# 0038-pacing-does-not-change-guest-state: which emulated cycle the idle scheduler stops at no longer
+# depends on the host clock
+#
+# What it fixes: the host's speed selected the guest's state. The same input script gave two different,
+# each reproducible, guest states at vertical blank 60 depending on how much host time a blank carried
+# (docs/journal/014: DON_TRACE_STATE=1 or 2 gave 40,651,185 IOP cycles, n >= 3 gave 40,645,063, at
+# practically the same EE cycle). The intent of the pacing is that the host clock decides only how long
+# the host thread sleeps.
+#
+# The mechanism (EeScheduler::waitForEvent, the idle path): when the guest has nothing to run, the
+# scheduler advances the emulated clock to the next thing that is due, which is the earliest scheduled
+# event OR the next EE timer interrupt. It chose between the two by comparing HOST deadlines: the
+# event's (a fixed point in real time, start + k periods) against "now + the timer's duration". With an
+# early host that gives the same answer as comparing cycles. With a late host the blank's host deadline
+# is already past, so it is always "earlier": the clock jumped straight to the blank, over the timer
+# interrupts that fall before it, and delivered them late and merged (pending timer interrupts are a
+# bit mask: seven became one). The guest then saw timer interrupts at other cycles, ran other code,
+# and the IOP got different flush points (accountCycles/flushIopDebt are called per stop). Even an
+# undisturbed run was affected (the host lagging the absolute schedule by a few ms is enough).
+#
+# What it changes:
+#   * waitForEvent compares the EMULATED cycles of the two candidates (the timer wins only when it is
+#     strictly earlier in cycles; a tie goes to the scheduled event, as before) and takes the host
+#     deadline of the one chosen, which still decides only how long the thread sleeps.
+#   * processDueDeadlines, once the host has waited for the earliest host deadline of the events whose
+#     cycle has been reached, takes ALL of them (it left for a later pass those whose own host deadline
+#     was still ahead). Two events due together were therefore processed either together, sorted by
+#     cycle/type/id, or one after the other in host-deadline order after the first one's handler had
+#     run, depending on how early the host was. Not exercised by a test here (no scenario of two events
+#     due within one dispatch is built); changed for the same reason and it removes a host-time input.
+#
+# What it keeps: the vertical-blank schedule in emulated cycles (one period apart from the previous
+# deadline, not from the cycle at which the event was processed); the host pacing (an early thread still
+# sleeps until the host deadline, a late one does not sleep: catching up is allowed, changing emulated
+# state is not); the IOP's total feed (one cycle per 8 EE cycles) and its flush points; the fast path.
+#
+# How it was verified: tests/runtime/pacing_neutral_test.cpp runs the same guest (a frame loop that
+# waits for the blank, two stretches that spin across a blank, a TIM0 timer interrupt every 640,000 EE
+# cycles with an INTC handler) three times in one process: undisturbed, with 10 ms and with 20 ms of host
+# time burnt in the host GS's vsync callback per blank (the 20 ms one is always late), 36 blanks each,
+# and compares line by line the EE cycle, the IOP batch statistics, what a host SPU2 sees through
+# advance(), the guest's call count and the timer interrupts taken. On the base tree (this series
+# through 0036) it fails (every blank differs, 7 timer interrupts at blank 1 become fewer or merged
+# later); with this patch it passes, three runs in a row. scheduler_fast_path_test's nanoseconds per
+# dispatch and every other test are unchanged (see docs/journal/017-pacing-does-not-change-guest-state.md).
+#
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index bda398b..8df424c 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -1951,11 +1951,14 @@ void EeScheduler::processDueDeadlines()
+                 }
+             }
+ 
+-            const auto pacedNow = std::chrono::steady_clock::now();
++            // Patch 0038: every event whose cycle has been reached is taken now, once the host has waited for
++            // the earliest of their host deadlines. Before, an event was left for a later pass when its own
++            // host deadline was still ahead, so whether two events due together were processed together (in
++            // the order of their cycle, type and id) or one after the other (in the order of their host
++            // deadlines, after the first one's handler had run) depended on how early the host was.
+             auto firstFuture = std::partition(m_deadlines.begin(), m_deadlines.end(),
+-                                              [this, pacedNow](const ScheduledEvent &item)
+-                                              { return item.deadlineCycle <= m_eeCycle &&
+-                                                       item.hostDeadline <= pacedNow; });
++                                              [this](const ScheduledEvent &item)
++                                              { return item.deadlineCycle <= m_eeCycle; });
+             due.insert(due.end(),
+                        std::make_move_iterator(m_deadlines.begin()),
+                        std::make_move_iterator(firstFuture));
+@@ -2176,11 +2179,16 @@ void EeScheduler::waitForEvent()
+     }
+     if (hasTimerDeadline)
+     {
+-        const auto timerHostDeadline = std::chrono::steady_clock::now() + eeCyclesToHostDuration(timerCycles);
+-        if (timerHostDeadline < hostDeadline)
++        // Patch 0038: which of the two comes first is decided by the EMULATED cycle. Before, the two host
++        // deadlines were compared, and the scheduled event's one is a fixed point in real time while the
++        // timer's is "now + its duration": a host that was late (the blank's host deadline already past)
++        // always picked the blank, jumped over the timer interrupts that fall before it and delivered them
++        // late and merged, so the guest saw a different run than with an early host.
++        const uint64_t timerDeadlineCycle = m_eeCycle + timerCycles;
++        if (m_deadlines.empty() || timerDeadlineCycle < deadlineCycle)
+         {
+-            deadlineCycle = m_eeCycle + timerCycles;
+-            hostDeadline = timerHostDeadline;
++            deadlineCycle = timerDeadlineCycle;
++            hostDeadline = std::chrono::steady_clock::now() + eeCyclesToHostDuration(timerCycles);
+         }
+     }
+ 

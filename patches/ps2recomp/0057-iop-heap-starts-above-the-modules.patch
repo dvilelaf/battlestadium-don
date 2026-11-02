@@ -1,0 +1,25 @@
+# 0057-iop-heap-starts-above-the-modules: the IOP heap base moves from 0x120000 down to 0xB0000
+#
+# What it fixes: the IOP's AllocSysMemory heap was 0x120000..0x1F0000 (832 KB) and the 14 modules' blocks filled it
+# before sndfi's start-up asked for 0x4280 + 2 x 0x8000 bytes: all three returned 0, sndfi's reply to SNDF call 0x100
+# was -2, the game's start-up of the effects driver (FUN_00376038) never stored 1 in [0x4B2DE8] and its per-frame
+# sound function (0x377E58) returned at once for ever: no effect, no sequenced music. The module arena below the heap
+# ends at 0x9BD00 (14 loads, docs/knowledge/14), so 0x9BD00..0x120000 (540 KB) were unused. New base 0xB0000.
+# Verified: tests/runtime/iop_heap_capacity_test fails (3 blocks refused) without this patch and passes with it;
+# then the game run (journal 011, third follow-up).
+#
+diff --git a/ps2xIOP/src/emulator/core/iop_memory.h b/ps2xIOP/src/emulator/core/iop_memory.h
+index 537faa7..6405a81 100644
+--- a/ps2xIOP/src/emulator/core/iop_memory.h
++++ b/ps2xIOP/src/emulator/core/iop_memory.h
+@@ -22,7 +22,9 @@ namespace ps2x::iop::detail
+         static constexpr uint32_t Spu2End = 0x1FA00000u;
+         static constexpr uint32_t SifBase = 0x1D000000u;
+         static constexpr uint32_t SifEnd = 0x1D001000u;
+-        static constexpr uint32_t HeapBase = 0x00120000u;
++        // Patch 0057: the heap starts right above the module arena (the 14 modules of the game end at 0x9BD00, measured),
++        // not at 0x120000: with that base 0x120000..0x1F0000 was full at the start-up of sndfi (0x4280 + 2 x 0x8000 refused).
++        static constexpr uint32_t HeapBase = 0x000B0000u;
+         static constexpr uint32_t HeapLimit = 0x001F0000u;
+ 
+         struct Allocation

@@ -1,0 +1,356 @@
+# 0034-scheduler-fast-path: what the EE scheduler does on every dispatch
+#
+# Why: profiling the port (tools/verify/profile_summary.py on a DON_PROFILE run, 186 s at the opening
+# video, 172,000 samples) showed the game's own recompiled code is under 3% of the game thread's time
+# while the scheduler's bookkeeping after every dispatch is about half of it: on every iteration of
+# EeScheduler::run() the old checkpointDue read the deadline atomically and then processPendingEvents()
+# ran unconditionally (twice per dispatch: at the top of the loop and after the guest call), taking the
+# event mutex, reading steady_clock (a vDSO clock_gettime, the single hottest address of the profile,
+# 16-21%), scanning the deadline list, allocating and sorting a vector of due events, and every 4096
+# dispatches publishing a full heap-allocating debug snapshot. At ~6-12M dispatches per second that is
+# ~40 ns of host CPU per dispatch of pure bookkeeping (about 120 host cycles for 8 guest cycles).
+#
+# What it changes:
+#   * checkpointDue is now a cycle addition, one relaxed load of the "a slow path is due" flag
+#     (m_checkpointPending, which postEvent/requestStop/the timer path already set) and one comparison
+#     with m_nextFastPathCycle, a cycle pre-computed by the slow path: the earliest of the next
+#     deadline, the end of the time slice and the next IOP batch boundary. The rest of the old
+#     checkpointDue (two more atomic loads, the deadline and slice comparisons, the reschedule test)
+#     moved into slowPathCheckpoint(), which also refreshes m_nextFastPathCycle.
+#   * processPendingEvents() returns immediately when the flag is clear, so the clock read, the event
+#     mutex, the deadline scan, the sort and its allocation happen only when something is due.
+#   * the debug snapshot every 4096 dispatches is gone; snapshot() (any thread) asks for one and the
+#     slow path publishes it (the reader keeps the last one until then). The other publishSnapshot()
+#     call sites (state changes) are unchanged.
+#   * flushIopDebt() and scheduleEvent() refresh the fast path's cycle (a flusher or a new earlier
+#     deadline moves the boundary), and the slice-expiry path raises the flag so that
+#     processPendingEvents still applies the preemption.
+#   * counters (EeDispatchStats: dispatches, fastPath, slowPath, nextCycle) and a plain, lock-free
+#     eeCycle() accessor for tests; PS2X_EE_SCHEDULER_STATS lets a test guard on their existence.
+#
+# Lateness bound (nothing is seen later than before by more than this): zero dispatches for anything
+# that happens on the executor thread (an event posted by the guest, a scheduled deadline, a slice
+# expiry - the flag is set in the same call and the next processPendingEvents sees it, exactly as
+# before) and one dispatch for anything posted from another thread (the flag is tested on every
+# dispatch). The fast path's boundary is always <= the true earliest boundary, and every place that can
+# move it earlier sets the flag or recomputes it; the timers of the main processor are deliberately
+# NOT batched (see below), so their interrupt timing is bit-for-bit what it was.
+#
+# The EE timers: PS2Memory::advanceEeTimers is still called with the dispatch's cycles on every
+# dispatch, exactly as before, including the GIF_STAT FQC clear and the map lookup. Batching it (the
+# task's option) needs the guest-visible timer values to stay exact at every read/write of a timer
+# register and the interrupt to be raised at the same emulated cycle; that is a second change in
+# ps2_memory.{h,cpp} and was judged too risky to land in the same night as this one. The profile shows
+# the whole advanceEeTimers path inside EeScheduler::run()'s 6.7% share, i.e. much smaller than the
+# clock/mutex/allocation work this patch removes.
+#
+# How it was verified (2026-10-13, scratch worktrees of the pinned commit with patches/ps2recomp/series
+# applied, /tmp/opencode/wt-0034 and its reference /tmp/opencode/wt-0034-base):
+#   * CMake + Ninja in build/rt-tests-0034 and build/rt-tests-0034-base (PS2RECOMP_DIR pointing at each
+#     tree, -DPS2X_WITH_RAYLIB=OFF -DFETCHCONTENT_FULLY_DISCONNECTED=ON, -j4): both build with no
+#     warning and no error;
+#   * all 12 existing test executables pass in both trees ("all checks passed"; the one-line last lines
+#     are in the task report), including iop_batch_test (the IOP feed of 0033) and the three tests that
+#     drive threads, priorities and time slices;
+#   * tests/runtime/scheduler_fast_path_test.cpp (new; it builds against both trees, the counter part
+#     guarded by PS2X_EE_SCHEDULER_STATS) runs a host-function guest through 1.4M dispatches with a real
+#     PS2Runtime and a fake host GS/SPU2. The trace it prints is identical in both builds:
+#         blank 0 tick=1 calls=614412 / blank 1 tick=2 calls=1228822 / blank 2 tick=3 calls=1400001
+#     i.e. the vertical blanks land on the same emulated cycles (614,412 dispatches = one
+#     kVBlankPeriodCycles of 4,915,299 cycles) and the host GS's vsync callback is called once per blank;
+#     the IOP checks of iop_batch_test hold (handed over + pending = the EE cycles, the host SPU2 sees
+#     EE cycles / 8, one run per batch); a stop request posted from the test's main thread is acted on
+#     within the in-flight dispatch (the check allows 8);
+#   * measured on that test, same binary, same work: 104.35 ns per dispatch before and 12.80 ns after
+#     (8.2x), 147.4 ms before and 52.8 ms after for the whole run; the slow path is entered 175 times in
+#     1,401,563 dispatches (0.0125%, once per IOP batch of 256 dispatches plus the three blanks).
+
+diff --git a/ps2xRuntime/include/runtime/ee_scheduler.h b/ps2xRuntime/include/runtime/ee_scheduler.h
+index e29398b..13a5776 100644
+--- a/ps2xRuntime/include/runtime/ee_scheduler.h
++++ b/ps2xRuntime/include/runtime/ee_scheduler.h
+@@ -242,6 +242,21 @@ struct EeIopBatchStats
+     uint64_t eeCycles = 0;
+ };
+ 
++// Patch 0034: the scheduler's common path is a cycle addition, one relaxed load of the "a slow path is
++// due" flag and one comparison with a cycle pre-computed by the slow path; everything that needs the
++// clock, a lock, the deadline list or an allocation happens in the slow path. The counters below are
++// plain (the executor thread is the only writer) and exist so that a run can report the real rate.
++// PS2X_EE_SCHEDULER_STATS says the counters and dispatchStats() exist, so a test can guard on it and
++// still build against a tree without this patch.
++#define PS2X_EE_SCHEDULER_STATS 1
++struct EeDispatchStats
++{
++    uint64_t dispatches = 0;  // checkpoint decisions taken (one per dispatch)
++    uint64_t fastPath = 0;    // ... answered without entering the slow path
++    uint64_t slowPath = 0;    // ... that entered the slow path
++    uint64_t nextCycle = 0;   // the cycle the fast path compares against
++};
++
+ enum class EeEventType : uint8_t
+ {
+     Stop,
+@@ -301,6 +316,11 @@ public:
+     // goes idle. Cheap when there is no debt.
+     void flushIopDebt() noexcept;
+     [[nodiscard]] EeIopBatchStats iopBatchStats() const noexcept;
++    [[nodiscard]] EeDispatchStats dispatchStats() const noexcept;
++    // Patch 0034: the emulated EE cycle right now. Plain read; the executor thread is the only thread
++    // that advances it, so a call from the executor (the host GS's vsync callback, a guest test hook) is
++    // exact and lock-free.
++    [[nodiscard]] uint64_t eeCycle() const noexcept { return m_eeCycle; }
+ 
+     // Kernel object API. All calls except postEvent/requestStop execute on the
+     // EE executor and therefore need no host synchronization.
+@@ -412,6 +432,10 @@ private:
+     void waitForEvent();
+     void scheduleEvent(uint64_t deadlineCycle, std::chrono::steady_clock::time_point hostDeadline, EeEvent event);
+     void updateNextDeadline();
++    // Patch 0034: the slow path (the code that used to run on every dispatch) and the pre-computation of
++    // the next cycle at which the common path must look again.
++    [[nodiscard]] bool slowPathCheckpoint() noexcept;
++    void updateFastPathCycle() noexcept;
+     [[nodiscard]] bool hasReadyAtOrAbovePriority(int priority) const;
+     void renewTimeSlice();
+     void copyMainContextToRuntime();
+@@ -456,8 +480,17 @@ private:
+     std::atomic<bool> m_running{false};
+     std::atomic<bool> m_guestExecuting{false};
+     std::atomic<bool> m_stopRequested{false};
+-    std::atomic<bool> m_checkpointPending{false};
+-    uint32_t m_debugPublishCountdown = 0u;
++    // m_checkpointPending and m_snapshotRequested are read/written by threads other than the executor
++    // (postEvent, requestStop, snapshot), and snapshot() is const, so both are mutable.
++    mutable std::atomic<bool> m_checkpointPending{false};
++    // Patch 0034: the fast path's boundary (the earliest of the next deadline, the end of the time slice
++    // and the next IOP batch) and its counters. m_snapshotRequested is set by snapshot() (any thread) and
++    // consumed by the slow path on the executor thread.
++    uint64_t m_nextFastPathCycle = 0;
++    uint64_t m_dispatchCount = 0;
++    uint64_t m_fastPathCount = 0;
++    uint64_t m_slowPathCount = 0;
++    mutable std::atomic<bool> m_snapshotRequested{false};
+ 
+     mutable std::mutex m_eventMutex;
+     std::condition_variable m_eventCv;
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index dfd7fec..bda398b 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -40,7 +40,6 @@ namespace
+     constexpr auto kVBlankPeriod = std::chrono::microseconds(16667);
+     constexpr auto kVBlankDuration = std::chrono::microseconds(500);
+     constexpr uint64_t kAlarmTickMicroseconds = 64u;
+-    constexpr uint32_t kDebugPublishDispatchInterval = 4096u;
+ 
+     constexpr uint64_t microsecondsToEeCycles(uint64_t microseconds)
+     {
+@@ -136,7 +135,13 @@ void EeScheduler::reset(uint8_t *rdram, const R5900Context &mainContext)
+     m_sliceEndCycle = kDefaultTimeSliceCycles;
+     m_stopRequested.store(false, std::memory_order_release);
+     m_checkpointPending.store(false, std::memory_order_release);
+-    m_debugPublishCountdown = 0u;
++    // Patch 0034: the fast path starts with the boundary of the first thing that is due (the scheduleEvent
++    // call at the end of reset() refreshes it) and the counters start at zero.
++    m_nextFastPathCycle = m_sliceEndCycle;
++    m_dispatchCount = 0;
++    m_fastPathCount = 0;
++    m_slowPathCount = 0;
++    m_snapshotRequested.store(false, std::memory_order_release);
+     {
+         std::lock_guard lock(m_eventMutex);
+         m_events.clear();
+@@ -236,17 +241,12 @@ void EeScheduler::run()
+             }
+         }
+         R5900Context &context = running->activeContext();
+-        if (m_debugPublishCountdown == 0u)
+-        {
+-            copyMainContextToRuntime();
+-            publishSnapshot();
+-            m_debugPublishCountdown = kDebugPublishDispatchInterval - 1u;
+-        }
+-        else
+-        {
+-            --m_debugPublishCountdown;
+-        }
+-
++        // Patch 0034: the snapshot every 4096 dispatches is gone. The debug snapshot serves a reader that
++        // is rarely there (the runtime's debug panel, which this port does not build, and the port's
++        // DON_TRACE_THREADS diagnostic, which reads it once per second); it is published on demand by
++        // snapshot() (the request is seen by the slow path in checkpointDue) and by the state changes
++        // that already published it. copyMainContextToRuntime() is still called where it was needed for
++        // the debugger outside this loop.
+         publishDebugContext(context);
+ 
+         if (context.pc == 0u)
+@@ -377,11 +377,38 @@ void EeScheduler::postEvent(EeEvent event)
+ 
+ bool EeScheduler::checkpointDue(uint32_t cycles) noexcept
+ {
++    // Patch 0034: the common path. accountCycles keeps exactly the work it did before (the EE cycle
++    // addition, the timer advance, the IOP batch) because the timers are read by the guest and their
++    // interrupt timing is observable; everything else the old checkpointDue did - two more atomic
++    // loads, the deadline comparison, the slice comparison and, above all, the call to
++    // processPendingEvents that followed it in run() - now happens only when this flag is set or this
++    // cycle is reached. The flag is the same word postEvent/requestStop/the timer path already set.
+     accountCycles(cycles);
++    ++m_dispatchCount;
++    if (!m_checkpointPending.load(std::memory_order_relaxed) && m_eeCycle < m_nextFastPathCycle)
++    {
++        ++m_fastPathCount;
++        return false;
++    }
++    return slowPathCheckpoint();
++}
++
++bool EeScheduler::slowPathCheckpoint() noexcept
++{
++    ++m_slowPathCount;
++
++    // A debug snapshot was asked for (snapshot() from another thread); this is the executor's chance to
++    // publish one. The reader keeps the last one until then.
++    if (m_snapshotRequested.exchange(false, std::memory_order_acq_rel))
++    {
++        copyMainContextToRuntime();
++        publishSnapshot();
++    }
+ 
+     if (m_checkpointPending.load(std::memory_order_acquire) ||
+         m_stopRequested.load(std::memory_order_acquire))
+     {
++        updateFastPathCycle();
+         return true;
+     }
+ 
+@@ -389,11 +416,13 @@ bool EeScheduler::checkpointDue(uint32_t cycles) noexcept
+     if (nextEventCycle != 0u && m_eeCycle >= nextEventCycle)
+     {
+         m_checkpointPending.store(true, std::memory_order_release);
++        updateFastPathCycle();
+         return true;
+     }
+ 
+     if (m_eeCycle < m_sliceEndCycle)
+     {
++        updateFastPathCycle();
+         return false;
+     }
+ 
+@@ -402,13 +431,55 @@ bool EeScheduler::checkpointDue(uint32_t cycles) noexcept
+     {
+         m_rescheduleRequested = true;
+         m_timeSliceExpired = true;
++        // The reschedule is applied by processPendingEvents() (applyPendingPreemption), which now runs
++        // only when this flag is set, so the slice expiry has to raise it.
++        m_checkpointPending.store(true, std::memory_order_release);
++        updateFastPathCycle();
+         return true;
+     }
+ 
+     renewTimeSlice();
++    updateFastPathCycle();
+     return false;
+ }
+ 
++void EeScheduler::updateFastPathCycle() noexcept
++{
++    // The earliest cycle at which the common path must look again. The invariant that matters is that
++    // this is never LATER than the true earliest boundary: a value that is too early only costs an extra
++    // slow path. The EE timers are advanced on every dispatch (see checkpointDue), so they need no
++    // boundary of their own.
++    uint64_t next = m_sliceEndCycle;
++    const uint64_t deadline = m_nextDeadlineCycle.load(std::memory_order_acquire);
++    if (deadline != 0u && deadline < next)
++    {
++        next = deadline;
++    }
++    if (m_iopPendingEeCycles >= m_iopBatchEeCycles)
++    {
++        next = m_eeCycle; // a batch is due now
++    }
++    else
++    {
++        const uint64_t iopDue = m_eeCycle + (m_iopBatchEeCycles - m_iopPendingEeCycles);
++        if (iopDue < next)
++        {
++            next = iopDue;
++        }
++    }
++    m_nextFastPathCycle = next;
++}
++
++EeDispatchStats EeScheduler::dispatchStats() const noexcept
++{
++    EeDispatchStats stats;
++    stats.dispatches = m_dispatchCount;
++    stats.fastPath = m_fastPathCount;
++    stats.slowPath = m_slowPathCount;
++    stats.nextCycle = m_nextFastPathCycle;
++    return stats;
++}
++
+ void EeScheduler::accountCycles(uint32_t cycles) noexcept
+ {
+     const uint64_t elapsed = std::max<uint64_t>(1u, cycles);
+@@ -439,6 +510,9 @@ void EeScheduler::flushIopDebt() noexcept
+     ++m_iopBatchRuns;
+     m_iopBatchEeCyclesTotal += debt;
+     m_runtime.advanceIopEeCycles(debt);
++    // Patch 0034: the next IOP batch is due one batch from now; the fast path's boundary followed the
++    // debt until here and has to move with it.
++    updateFastPathCycle();
+ }
+ 
+ EeIopBatchStats EeScheduler::iopBatchStats() const noexcept
+@@ -1528,6 +1602,12 @@ void EeScheduler::bindMainContextForSyscall(R5900Context &ctx, uint8_t *rdram)
+ 
+ EeKernelSnapshot EeScheduler::snapshot() const
+ {
++    // Patch 0034: publishing a snapshot is expensive (allocations, a sort and a mutex) and the reader is
++    // rare (the port's DON_TRACE_THREADS diagnostic reads it once per second), so a read asks for the
++    // next one instead of the scheduler publishing one every 4096 dispatches. The caller gets the last
++    // snapshot (at most one slow path old) and the executor publishes a fresh one at its next slow path.
++    m_snapshotRequested.store(true, std::memory_order_release);
++    m_checkpointPending.store(true, std::memory_order_release);
+     std::lock_guard lock(m_snapshotMutex);
+     return m_snapshot;
+ }
+@@ -1793,6 +1873,14 @@ void EeScheduler::applyPendingPreemption()
+ void EeScheduler::processPendingEvents()
+ {
+     assertExecutor();
++    // Patch 0034: the common path does not get here at all (the flag it already tests was clear and no
++    // boundary was reached), so the clock read, the event mutex, the deadline scan and the sorts below
++    // are paid only when there is something to do. run() still calls this at the top of every iteration
++    // and after every guest call, exactly as before; the early return is what makes that free.
++    if (!m_checkpointPending.load(std::memory_order_acquire))
++    {
++        return;
++    }
+     processDueDeadlines();
+     const uint32_t timerInterrupts = m_pendingEeTimerInterrupts;
+     m_pendingEeTimerInterrupts = 0u;
+@@ -1821,6 +1909,9 @@ void EeScheduler::processPendingEvents()
+         m_checkpointPending.store(pendingWork, std::memory_order_release);
+     }
+     applyPendingPreemption();
++    // Patch 0034: the deadline list and the slice may have moved above; the fast path's boundary has to
++    // follow so that it is never later than the earliest thing that is due.
++    updateFastPathCycle();
+ }
+ 
+ void EeScheduler::processDueDeadlines()
+@@ -2123,6 +2214,11 @@ void EeScheduler::scheduleEvent(uint64_t deadlineCycle,
+         m_deadlines.push_back(ScheduledEvent{deadlineCycle, hostDeadline, event, ++m_eventSequence});
+         updateNextDeadline();
+     }
++    // Patch 0034: a new deadline can be earlier than the one the fast path was built from, and the event
++    // that will process it needs processPendingEvents() to run, so the flag goes up. Both are cheap and
++    // this runs rarely (the vertical-blank schedule, the alarm, the waits).
++    updateFastPathCycle();
++    m_checkpointPending.store(true, std::memory_order_release);
+     m_eventCv.notify_one();
+ }
+ 

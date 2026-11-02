@@ -1,0 +1,82 @@
+# Survival Challenge: its menu entry, the character select, the first fight won, the result screen.
+#
+# Variant: the English one (en_patch/jpvoice/disc/SLPS_256.75). From power-on: Start twice (the title, then the menu comes up at about 3600), Down to Survival Challenge, Circle, Circle on Naruto, then a fixed fight loop (Square, Triangle, guard, R1, Circle, Cross); the first fight (Piccolo) ends at about 5300 and the RESULT screen is up at 5850.
+# Landmarks (named shots; blank = vertical blank): menu 3600, menu_survival 3900, charselect 4200, fight 4650, ko 5250, winner 5400, result 5850; it quits at 6000.
+#
+# Run it from the repository root (local.env loaded), with a folder for the shots:
+#   DON_PLAY_MOVIES=1 DON_TRACE_FRAMES=1 build/linux-dev/don --headless --renderer software --sound off \
+#       --shots work/shots/survival_result --input-script tools/run/scripts/survival_result.txt en_patch/jpvoice/disc/SLPS_256.75
+# It belongs to the regression suite (tests/regression/): the md5 of every landmark is in
+# tests/regression/routes.json. The timing holds with --sound off only (sound moves the blanks).
+270 tap LEFT 6
+330 tap CIRCLE 6
+2640 tap START 6
+3300 tap START 6
+3700 tap DOWN 4
+3900 tap CIRCLE 6
+4200 tap CIRCLE 6
+4500 tap CIRCLE 6
+4700 press RIGHT
+4750 release RIGHT
+4760 tap SQUARE 4
+4774 tap SQUARE 4
+4788 tap SQUARE 4
+4810 tap TRIANGLE 6
+4830 press L2
+4890 release L2
+4900 tap R1 4
+4915 tap CIRCLE 6
+4925 tap CROSS 6
+4940 press RIGHT
+4990 release RIGHT
+5000 tap SQUARE 4
+5014 tap SQUARE 4
+5028 tap SQUARE 4
+5050 tap TRIANGLE 6
+5070 press L2
+5130 release L2
+5140 tap R1 4
+5155 tap CIRCLE 6
+5165 tap CROSS 6
+5180 press RIGHT
+5230 release RIGHT
+5240 tap SQUARE 4
+5254 tap SQUARE 4
+5268 tap SQUARE 4
+5290 tap TRIANGLE 6
+5310 press L2
+5370 release L2
+5380 tap R1 4
+5395 tap CIRCLE 6
+5405 tap CROSS 6
+5420 press RIGHT
+5470 release RIGHT
+5480 tap SQUARE 4
+5494 tap SQUARE 4
+5508 tap SQUARE 4
+5530 tap TRIANGLE 6
+5550 press L2
+5610 release L2
+5620 tap R1 4
+5635 tap CIRCLE 6
+5645 tap CROSS 6
+5660 press RIGHT
+5710 release RIGHT
+5720 tap SQUARE 4
+5734 tap SQUARE 4
+5748 tap SQUARE 4
+5770 tap TRIANGLE 6
+5790 press L2
+5850 release L2
+5860 tap R1 4
+5875 tap CIRCLE 6
+5885 tap CROSS 6
+5900 press RIGHT
+3600 shot menu
+3900 shot menu_survival
+4200 shot charselect
+4650 shot fight
+5250 shot ko
+5400 shot winner
+5850 shot result
+6000 quit

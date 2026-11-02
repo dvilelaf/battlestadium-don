@@ -1,0 +1,106 @@
+# T-106: the software renderer gets its own executable memory.
+#
+# What it fixes: PCSX2's software rasterizer emits its code into GSCodeReserve, which handed out
+# pieces of the VM-wide code area (SysMemory::Allocate(), HostMemoryMap::SWrec). Without a running
+# VM that area does not exist, so opening the software renderer in a library that only hosts the
+# GS crashed or failed. GSCodeReserve now maps its own 64 MiB read-write-execute block the first time
+# the renderer asks for code space (mmap on POSIX, VirtualAlloc on Windows) and gives it back with
+# the new GSCodeReserve::ReleaseMemory(), which the bridge calls after GSclose(). Nothing else
+# changes: the generated code and its caches are the same, so the renderer still runs the JIT
+# (no C scanline fallback).
+# Verified: build/gs/gsreplay --synthetic ... --renderer software draws the expected pixels on the
+# host and in the build container, and the GS can be closed and opened again in the same process
+# (--reopen); see tests/gs. The Windows branch (VirtualAlloc) is compiled only on Windows and has
+# not been built or run yet.
+#
+# Idea taken from: Fukami (https://github.com/danisandoval/fukami), commit
+# e8818121566cfaf3d361e38745860b0a9438e27b, tools/patches/pcsx2/0003-software-renderer-without-vm-jit-map.patch (which avoids the JIT
+# memory by switching the renderer to C scanlines, a different approach that was not used).
+# The code here is written for this project. License GPL-3.0-or-later.
+diff --git a/pcsx2/GS/Renderers/Common/GSFunctionMap.cpp b/pcsx2/GS/Renderers/Common/GSFunctionMap.cpp
+index 9e59b80..862042b 100644
+--- a/pcsx2/GS/Renderers/Common/GSFunctionMap.cpp
++++ b/pcsx2/GS/Renderers/Common/GSFunctionMap.cpp
+@@ -4,8 +4,22 @@
+ #include "GS/Renderers/Common/GSFunctionMap.h"
+ #include "Memory.h"
+ 
++#include "common/Console.h"
++
++#if defined(_WIN32)
++#include "common/RedtapeWindows.h"
++#else
++#include <sys/mman.h>
++#endif
++
++// The software renderer's generated code lives in a block of executable memory owned by this
++// file, instead of the SWrec slice of the virtual machine's code map (SysMemory), which does
++// not exist when only the GS is running. 64 MiB, the size of that slice.
+ namespace GSCodeReserve
+ {
++	static constexpr size_t MEMORY_SIZE = HostMemoryMap::SWrecSize;
++
++	static u8* s_memory_block;
+ 	static u8* s_memory_base;
+ 	static u8* s_memory_end;
+ 	static u8* s_memory_ptr;
+@@ -13,11 +27,43 @@ namespace GSCodeReserve
+ 
+ void GSCodeReserve::ResetMemory()
+ {
+-	s_memory_base = SysMemory::GetSWRec();
+-	s_memory_end = SysMemory::GetSWRecEnd();
++	if (!s_memory_block)
++	{
++#if defined(_WIN32)
++		void* const block = VirtualAlloc(nullptr, MEMORY_SIZE, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
++		if (!block)
++#else
++		void* const block = mmap(nullptr, MEMORY_SIZE, PROT_READ | PROT_WRITE | PROT_EXEC,
++			MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
++		if (block == MAP_FAILED)
++#endif
++		{
++			pxFailRel("Failed to allocate executable memory for the GS software renderer.");
++		}
++		s_memory_block = static_cast<u8*>(block);
++	}
++
++	s_memory_base = s_memory_block;
++	s_memory_end = s_memory_block + MEMORY_SIZE;
+ 	s_memory_ptr = s_memory_base;
+ }
+ 
++void GSCodeReserve::ReleaseMemory()
++{
++	if (s_memory_block)
++	{
++#if defined(_WIN32)
++		VirtualFree(s_memory_block, 0, MEM_RELEASE);
++#else
++		munmap(s_memory_block, MEMORY_SIZE);
++#endif
++	}
++	s_memory_block = nullptr;
++	s_memory_base = nullptr;
++	s_memory_end = nullptr;
++	s_memory_ptr = nullptr;
++}
++
+ size_t GSCodeReserve::GetMemoryUsed()
+ {
+ 	return s_memory_ptr - s_memory_base;
+diff --git a/pcsx2/GS/Renderers/Common/GSFunctionMap.h b/pcsx2/GS/Renderers/Common/GSFunctionMap.h
+index b7598f2..5b37226 100644
+--- a/pcsx2/GS/Renderers/Common/GSFunctionMap.h
++++ b/pcsx2/GS/Renderers/Common/GSFunctionMap.h
+@@ -141,6 +141,9 @@ namespace GSCodeReserve
+ {
+ 	void ResetMemory();
+ 
++	/// Frees the executable memory. Call after the software renderer has been destroyed.
++	void ReleaseMemory();
++
+ 	size_t GetMemoryUsed();
+ 
+ 	u8* ReserveMemory(size_t size);

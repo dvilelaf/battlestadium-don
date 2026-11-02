@@ -1,0 +1,49 @@
+Recompiler: bltz, bgez, blez and bgtz (and their likely/link forms) test the whole 64-bit register.
+
+What it fixes: ControlFlowEmitter::conditionalBranchExpression emitted GPR_S32(ctx, rs) for the sign
+branches, so only the low 32 bits of the register were tested. The MIPS instructions compare the full
+64-bit value. The game's soft-float double subtract (FUN_00130598, gcc fp-bit) does
+"dsubu v0,t2,t3 ; bltz v0" on a 64-bit fraction that is positive but has bit 31 set, so the branch was
+taken wrongly, the subtraction came out as garbage (1.0 - 0.0007 returned about -7.1) and the camera
+look-at (FUN_0013a850) took its "looking straight up/down" branch: the 3D view rolled by 90 degrees.
+Affects 7538 branch sites in the generated code.
+
+How it was verified: tests/runtime/test_branch_sign.py builds a tiny MIPS ELF, runs the recompiler and reads
+the emitted conditions. It fails with the unpatched recompiler (GPR_S32) and passes with this patch applied
+(recompiler relinked with the patched control_flow_emitter.cpp). The game was NOT rebuilt or run with it.
+Generated code must be regenerated (tools/pipeline/generate.sh) for the fix to take effect.
+
+Original work for this repository (no code from another project).
+
+diff --git a/ps2xRecomp/src/lib/control_flow_emitter.cpp b/ps2xRecomp/src/lib/control_flow_emitter.cpp
+index 4bf8dc5..95f69d7 100644
+--- a/ps2xRecomp/src/lib/control_flow_emitter.cpp
++++ b/ps2xRecomp/src/lib/control_flow_emitter.cpp
+@@ -406,10 +406,10 @@ namespace ps2recomp
+             return fmt::format("GPR_U64(ctx, {}) != GPR_U64(ctx, {})", rsReg, rtReg);
+         case OPCODE_BLEZ:
+         case OPCODE_BLEZL:
+-            return fmt::format("GPR_S32(ctx, {}) <= 0", rsReg);
++            return fmt::format("GPR_S64(ctx, {}) <= 0", rsReg);
+         case OPCODE_BGTZ:
+         case OPCODE_BGTZL:
+-            return fmt::format("GPR_S32(ctx, {}) > 0", rsReg);
++            return fmt::format("GPR_S64(ctx, {}) > 0", rsReg);
+         case OPCODE_REGIMM:
+             switch (m_branchInst.rt)
+             {
+@@ -417,12 +417,12 @@ namespace ps2recomp
+             case REGIMM_BLTZL:
+             case REGIMM_BLTZAL:
+             case REGIMM_BLTZALL:
+-                return fmt::format("GPR_S32(ctx, {}) < 0", rsReg);
++                return fmt::format("GPR_S64(ctx, {}) < 0", rsReg);
+             case REGIMM_BGEZ:
+             case REGIMM_BGEZL:
+             case REGIMM_BGEZAL:
+             case REGIMM_BGEZALL:
+-                return fmt::format("GPR_S32(ctx, {}) >= 0", rsReg);
++                return fmt::format("GPR_S64(ctx, {}) >= 0", rsReg);
+             default:
+                 return "false";
+             }

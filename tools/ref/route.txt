@@ -1,0 +1,97 @@
+# Route for the six reference captures, from power-on of the game to the results screen.
+# Buttons are PS2 buttons. "wait_screen NAME" waits until the screen stored under
+# work/ref/pcsx2/auto/screens/NAME.png is on display (see drive.py store).
+# Run it with:  bash tools/ref/pcsx2_auto.sh start && uv run --no-project --with pillow --with numpy python -I tools/ref/drive.py route tools/ref/route.txt
+
+# Memory card prompt ("start the game as is?"). Cursor is on "no"; left then circle = "yes".
+wait_screen memcard-prompt 120
+wait 1
+press left
+press circle
+
+# Logos and opening video (about 100 s), then the title.
+wait_screen title 400
+capture 01-title
+
+# Title to main menu (default cursor: ひとりでバトスタ).
+press start
+wait_screen menu 240
+capture 02-menu
+
+# Single player character select.
+press circle
+wait_screen charselect 240
+capture 03-charselect
+
+# Back to the menu, then Practice (two down: サバイバルチャレンジ, プラクティス).
+press cross
+wait 6
+press down
+wait 4
+press down
+wait 4
+press circle
+wait_screen charselect-practice 240
+wait 3
+# Confirm 1P (Naruto) and Com (Sasuke), then the stage. The waits are generous: with a loaded
+# host the emulator runs at 20-40% speed and an early press is lost.
+press circle
+wait 5
+press circle
+wait_screen stage 240
+press circle
+# Stage loading, intro. No stable screen to wait on: the match starts after a few seconds.
+wait 30
+capture 04-match-1v1
+
+# Quit the practice match. The pause menu cursor starts on the first item; the last one
+# (練習を終了する) is four down, then "yes" is one up from the default "no".
+press start
+wait 2
+press down
+wait 2
+press down
+wait 2
+press down
+wait 2
+press down
+wait 2
+press circle
+wait 2
+press up
+wait 2
+press circle
+wait_screen charselect-practice 240
+
+# Back to the menu (cursor stays on Practice), one down is みんなでバトスタ.
+press cross
+wait 6
+press down
+wait 4
+press circle
+wait_screen entry 240
+
+# Entry screen: 1P and three Com. Start goes to character select, which has four fighters
+# preselected; four circles confirm them.
+press start
+wait_screen charselect4 240
+wait 3
+press circle
+wait 3
+press circle
+wait 3
+press circle
+wait 3
+press circle
+wait_screen stage4 240
+press circle
+# Loading and the character intros advance by themselves.
+wait 35
+capture 05-match-4p
+
+# The match ends by KO or by the 180 s timer (the emulator may run below full speed). The
+# results screen (the winner's pose) is matched on its stadium background, not on the winner.
+# It stays only a few seconds: it fades out (a nearly empty frame, then black) and goes back to
+# character select. (The match can take long when the host is loaded: 13% speed seen.) Capture at once; drive.py retakes a dump that replays to an empty picture.
+wait_screen results 1500
+capture 06-results

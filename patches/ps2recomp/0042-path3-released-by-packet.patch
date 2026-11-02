@@ -1,0 +1,120 @@
+Third path: the data held by MSKPATH3 leaves one end-of-packet-terminated GIF packet per lifting of the mask.
+
+What it fixes: the runtime queued the GIF channel's transfers while path 3 was masked and, when the mask went
+off, handed the GS the whole queue at once. This game masks path 3, sends its uploads (image + palette) through
+the GIF channel in one block, then runs a VIF1 stream of the shape lift / mask / FLUSHA / DIRECT <draw> over and
+over: on the console each lifting lets the third path start its next packet and the FLUSHA waits for it to end,
+so every upload reaches the GS just before the draw that uses it. With the whole block delivered first, later
+uploads overwrote earlier textures (3,405 of 5,608 textured vertices of the English menu were drawn after an
+overlapping upload on the port; 0 of 5,599 on the console; docs/journal/021).
+Now: a lifting releases ONE packet from the front of the queue (cut at the tag with EOP set by walking the GIF
+tags: PACKED, REGLIST and IMAGE payloads; the rest of a transfer stays at the front), in order, drained into the
+GS before the VIF1 stream goes on. The queue drains completely when the mask is off at FLUSHA, and at the end of
+a VIF1 transfer (processVIF1Data). Data arriving with the mask off still goes straight through, and the FBRST
+reset (which lifts the mask itself) still flushes everything. A packet that is truncated or has no closing tag
+is released whole. Only ps2_vif1_interpreter.cpp changes (no header).
+Verified: tests/runtime/path3_release_test.cpp (order p3:1 p2:A p3:2 p2:B p3:3 p2:C fails without the patch),
+the English menu and the Japanese variant on the game (docs/journal/021).
+Based on: the reference emulator's Gif_Unit.h / Vif_Codes.cpp (GPL-3.0) behaviour, no code taken.
+
+diff --git a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+index 536f77c..839fa9e 100644
+--- a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
++++ b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+@@ -30,6 +30,39 @@ namespace
+ {
+     constexpr uint8_t kGifFmtImage = 2u;
+ 
++    // Bytes of the first GIF packet (up to and including the tag with EOP set) in `data`; all of it when no
++    // closing tag is found or the data ends inside a packet.
++    size_t firstGifPacketBytes(const uint8_t *data, size_t sizeBytes)
++    {
++        size_t offset = 0u;
++        while (offset + 16u <= sizeBytes)
++        {
++            uint64_t tagLo = 0u;
++            std::memcpy(&tagLo, data + offset, sizeof(tagLo));
++            offset += 16u;
++
++            const uint64_t nloop = tagLo & 0x7FFFu;
++            const bool eop = (tagLo & 0x8000u) != 0u;
++            const uint8_t flg = static_cast<uint8_t>((tagLo >> 58) & 0x3u);
++            uint64_t nreg = (tagLo >> 60) & 0xFu;
++            if (nreg == 0u)
++                nreg = 16u;
++
++            uint64_t payload = nloop * 16u; // IMAGE and disabled
++            if (flg == 0u)
++                payload = nloop * nreg * 16u;
++            else if (flg == 1u)
++                payload = (nloop * nreg * 8u + 15u) & ~15ull;
++
++            if (offset + payload > sizeBytes)
++                return sizeBytes;
++            offset += static_cast<size_t>(payload);
++            if (eop)
++                return offset;
++        }
++        return sizeBytes;
++    }
++
+     uint32_t pendingGifImageQwc(const uint8_t *data, uint32_t sizeBytes)
+     {
+         if (!data || sizeBytes < 16u)
+@@ -305,6 +338,28 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+ 
+     uint32_t pos = 0;
+ 
++    // Third path data held while the mask was on leaves one EOP-terminated packet per lifting of the mask
++    // (the console's path 3 starts its next packet and the game masks again), in order.
++    auto releaseOnePath3Packet = [&]()
++    {
++        while (!m_path3MaskedFifo.empty() && m_path3MaskedFifo.front().size() < 16u)
++            m_path3MaskedFifo.erase(m_path3MaskedFifo.begin());
++        if (m_path3MaskedFifo.empty())
++            return;
++        auto &front = m_path3MaskedFifo.front();
++        const size_t n = firstGifPacketBytes(front.data(), front.size());
++        if (m_gifArbiter)
++            m_gifArbiter->submit(GifPathId::Path3, front.data(), static_cast<uint32_t>(n), false);
++        else if (m_gifPacketCallback)
++            m_gifPacketCallback(front.data(), static_cast<uint32_t>(n));
++        if (n >= front.size())
++            m_path3MaskedFifo.erase(m_path3MaskedFifo.begin());
++        else
++            front.erase(front.begin(), front.begin() + static_cast<std::ptrdiff_t>(n));
++        if (m_gifArbiter)
++            m_gifArbiter->drain();
++    };
++
+     while (pos + 4 <= sizeBytes)
+     {
+         if (m_vif1PendingPath2ImageQwc != 0u)
+@@ -390,7 +445,7 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+             const bool wasMasked = m_path3Masked;
+             m_path3Masked = (imm & 0x8000u) != 0u;
+             if (wasMasked && !m_path3Masked)
+-                flushMaskedPath3Packets();
++                releaseOnePath3Packet();
+             continue;
+         }
+         else if (opcode == VIF_MARK)
+@@ -401,6 +456,9 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+         }
+         else if (opcode == VIF_FLUSHE || opcode == VIF_FLUSH || opcode == VIF_FLUSHA)
+         {
++            // FLUSHA with the mask off: nothing holds the third path any more.
++            if (opcode == VIF_FLUSHA && !m_path3Masked)
++                flushMaskedPath3Packets();
+             continue;
+         }
+         else if (opcode == VIF_MSCAL || opcode == VIF_MSCALF)
+@@ -787,4 +845,8 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+             continue;
+         }
+     }
++
++    // End of the transfer with the mask off: drain what is left.
++    if (!m_path3Masked)
++        flushMaskedPath3Packets();
+ }

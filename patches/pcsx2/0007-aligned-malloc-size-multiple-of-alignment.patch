@@ -1,0 +1,24 @@
+# T-721: _aligned_malloc passes a size that is a multiple of the alignment to aligned_alloc.
+#
+# What it fixes: _aligned_malloc (common/AlignedMalloc.cpp) called aligned_alloc(align, size) with any
+# size. C11 7.22.3.1 requires size to be an integral multiple of the alignment; glibc tolerates it,
+# AddressSanitizer's aligned_alloc interceptor aborts with "invalid alignment requested in
+# aligned_alloc: 64" (size 0x46, GS thread) in the sanitized `don` of tools/run/setup_check.py --full.
+# The size is now rounded up, as the same function already does for macOS.
+# Verified: applies with `git apply --check` on the pinned tree; libdon_gs.so rebuilt with it and
+# tools/run/setup_check.py --full --only full-prepare-and-play run (see the T-721 report).
+#
+# Written for this project. License GPL-3.0-or-later.
+diff --git a/common/AlignedMalloc.cpp b/common/AlignedMalloc.cpp
+--- a/common/AlignedMalloc.cpp
++++ b/common/AlignedMalloc.cpp
+@@ -16,6 +16,9 @@
+ {
+ 	pxAssert(align < 0x10000);
+ #if defined(__USE_ISOC11) && !defined(ASAN_WORKAROUND) // not supported yet on gcc 4.9
++	// C11 7.22.3.1: size must be an integral multiple of the alignment. glibc tolerates any size,
++	// AddressSanitizer's aligned_alloc interceptor reports it as "invalid alignment requested".
++	size = (size + align - 1) & ~(align - 1);
+ 	return aligned_alloc(align, size);
+ #else
+ #ifdef __APPLE__

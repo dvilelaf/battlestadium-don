@@ -1,0 +1,13 @@
+# Load step: the same card folder, a second process: the game loads at start; the options show BGM 1 and SE 2. Landmarks: load_dialog 240, options_loaded 3400.
+# Variant: the English one. DON_PLAY_MOVIES=1, --sound off, the card folder is given by the harness (--mc-dir, a folder
+# of the run's own: tests/regression/harness.py). Belongs to the route save_and_load of tests/regression/routes.json.
+# The options screen: Up from the first entry of the main menu, Circle; rows Audio mode, BGM, SE, Auto save, Save, Load; the
+# selected value is the white one, BGM and SE start at 3 (journal 033).
+240 shot load_dialog
+330 tap CIRCLE 6
+2400 tap START 6
+2760 tap START 6
+3120 tap UP 6
+3200 tap CIRCLE 6
+3400 shot options_loaded
+3440 quit

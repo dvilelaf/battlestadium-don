@@ -1,0 +1,98 @@
+Patch 0092 (windows-static): build ps2_recomp for Windows with clang-cl /MT, static dependencies, and the same output as Linux.
+What: (1) ps2xRecomp/CMakeLists.txt: with PS2X_STATIC_RECOMP on WIN32, build the pinned zlib 1.3.1 as a static library
+  (https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz, SHA-256
+  9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23, zlib licence) and expose it as the ZLIB::ZLIB target libdwarf
+  looks for (an IMPORTED interface target: libdwarf's install(EXPORT) rejects a build-tree target outside an export set);
+  -static-libstdc++/-static-libgcc only for non-MSVC compilers (the static runtime comes from CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded);
+  EnableFastReleaseMode is skipped for MSVC-style compilers (ReleaseMode.cmake passes /fp:fast and /Qspectre-, which clang-cl
+  rejects, and the recompiler's output must not depend on floating-point relaxations).
+  (2) ps2_recompiler.cpp, config_manager.cpp: files the recompiler writes are opened std::ios::binary; in text mode on
+  Windows every "\n" became "\r\n", so the generated tree differed byte by byte from Linux's.
+Verified (T-738): cross-built in don-build-win:1 (clang-cl 17, Release, -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded); the .exe imports only
+  KERNEL32.dll; under Wine 9.0 (don-wine:1) it recompiled the frozen config; the output tree (all files except iop_native,
+  sources.txt, sources_big.txt: 57724 files) has the same tree hash as Linux's generated/.
+diff --git a/ps2xRecomp/CMakeLists.txt b/ps2xRecomp/CMakeLists.txt
+index 77eb67b..2bd585e 100644
+--- a/ps2xRecomp/CMakeLists.txt
++++ b/ps2xRecomp/CMakeLists.txt
+@@ -55,6 +55,24 @@ if(PS2X_STATIC_RECOMP)
+     set(ZSTD_BUILD_SHARED   OFF CACHE BOOL "" FORCE)
+     set(ZSTD_BUILD_STATIC   ON  CACHE BOOL "" FORCE)
+     FetchContent_MakeAvailable(zstd)
++
++    if(WIN32)
++        # Windows has no system zlib: build the pinned release as a static library and give libdwarf the ZLIB::ZLIB
++        # target it looks for (zlib's own CMake exposes neither the target nor its include folders).
++        FetchContent_Declare(
++            zlib
++            URL https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz
++            URL_HASH SHA256=9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23
++        )
++        set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
++        set(SKIP_INSTALL_ALL ON CACHE BOOL "" FORCE)
++        FetchContent_MakeAvailable(zlib)
++        # An IMPORTED interface target, because libdwarf's install(EXPORT) rejects a build-tree target outside an export set.
++        add_library(ZLIB::ZLIB INTERFACE IMPORTED GLOBAL)
++        set_target_properties(ZLIB::ZLIB PROPERTIES
++            INTERFACE_INCLUDE_DIRECTORIES "${zlib_SOURCE_DIR};${zlib_BINARY_DIR}"
++            INTERFACE_LINK_LIBRARIES "$<BUILD_INTERFACE:zlibstatic>")
++    endif()
+ endif()
+ 
+ FetchContent_Declare(
+@@ -146,7 +164,8 @@ PRIVATE
+     ps2_recomp_lib
+ )
+ 
+-if(PS2X_STATIC_RECOMP)
++if(PS2X_STATIC_RECOMP AND NOT MSVC)
++    # MSVC-style toolchains (clang-cl) take the static runtime from CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded instead.
+     target_link_options(ps2_recomp PRIVATE -static-libstdc++ -static-libgcc)
+ endif()
+ 
+@@ -162,7 +181,9 @@ install(DIRECTORY include/
+ 
+ include("${CMAKE_SOURCE_DIR}/ps2xRuntime/cmake/ReleaseMode.cmake")
+ 
+-if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
++# Not for MSVC-style compilers: ReleaseMode.cmake passes /fp:fast and /Qspectre- (rejected by clang-cl), and the
++# recompiler's output must not depend on floating-point relaxations.
++if(NOT MSVC AND (CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo"))
+     EnableFastReleaseMode(ps2_recomp_lib)
+     EnableFastReleaseMode(ps2_recomp)
+ endif()
+diff --git a/ps2xRecomp/src/lib/config_manager.cpp b/ps2xRecomp/src/lib/config_manager.cpp
+index 1a56a20..e5f2cea 100644
+--- a/ps2xRecomp/src/lib/config_manager.cpp
++++ b/ps2xRecomp/src/lib/config_manager.cpp
+@@ -376,7 +376,7 @@ namespace ps2recomp
+         patches["instructions"] = instPatches;
+         data["patches"] = patches;
+ 
+-        std::ofstream file(m_configPath);
++        std::ofstream file(m_configPath, std::ios::binary);
+         if (!file)
+         {
+             throw std::runtime_error("Failed to open file for writing: " + m_configPath);
+diff --git a/ps2xRecomp/src/lib/ps2_recompiler.cpp b/ps2xRecomp/src/lib/ps2_recompiler.cpp
+index 33932dd..38edbbe 100644
+--- a/ps2xRecomp/src/lib/ps2_recompiler.cpp
++++ b/ps2xRecomp/src/lib/ps2_recompiler.cpp
+@@ -1462,7 +1462,7 @@ namespace ps2recomp
+             if (m_config.singleFileOutput)
+             {
+                 fs::path outputPath = fs::path(m_config.outputPath) / "ps2_recompiled_functions.cpp";
+-                std::ofstream combinedOutput(outputPath);
++                std::ofstream combinedOutput(outputPath, std::ios::binary);
+                 if (!combinedOutput)
+                 {
+                     throw IoError("Failed to open combined output: " + outputPath.string());
+@@ -2432,7 +2432,7 @@ namespace ps2recomp
+ 
+     bool PS2Recompiler::writeToFile(const std::string &path, const std::string &content)
+     {
+-        std::ofstream file(path);
++        std::ofstream file(path, std::ios::binary);
+         if (!file)
+         {
+             m_reporter.error("file", "Failed to open file for writing: " + path);

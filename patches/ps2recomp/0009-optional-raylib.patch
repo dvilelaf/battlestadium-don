@@ -1,0 +1,362 @@
+Optional raylib: CMake option PS2X_WITH_RAYLIB (default ON); OFF builds the runtime library with no raylib
+
+What it fixes: the runtime library always fetched, compiled and linked raylib (plus imgui and rlImGui for
+the debug UI), even for a host that owns its window, audio and input (patches 0007 and 0008) and never
+uses them; a host linking SDL3 would carry two window systems. With -DPS2X_WITH_RAYLIB=OFF:
+
+  ps2xRuntime/CMakeLists.txt   FetchContent of raylib, imgui and rlImGui is skipped (nothing is fetched);
+        ps2_host_backend links nothing and defines PS2X_NO_RAYLIB for everything that links ps2_runtime;
+        the ps2EntryRunner executable (raylib window, debug UI, src/main.cpp) is not built or installed.
+        The ps2_runtime include directories and link line moved up, out of the runner section, unchanged.
+  ps2_host_backend.h            includes raylib.h only without PS2X_NO_RAYLIB.
+  raylib call sites with PS2X_NO_RAYLIB:
+    ps2_runtime.cpp  UploadFrame (UpdateTexture) compiled out; initialize() without setHostOwnsWindow(true)
+        prints "[don] this build of the runtime has no window of its own ..." and returns false; run()
+        without it prints the same and returns (with it, run() is the waiting loop of patch 0007); the
+        destructor's CloseAudioDevice/CloseWindow compiled out;
+    ps2_pad.cpp, ps2_pad.h  readRaylibState compiled out, PSPadBackend::hostMode() is always true: input
+        comes only from the host source of patch 0008, none installed means not connected;
+    Kernel/Stubs/Pad.cpp  applyGamepadState / applyKeyboardState / findFirstGamepad / axisToByte and the
+        PS2_IF_AGRESSIVE_LOGS keyboard trace compiled out (empty replacements);
+    ps2_audio.cpp  the raylib Sound code (playDecodedSample, pruneFinishedSounds, stopAll) is compiled out
+        the same way as on the Vita; the host's SPU2 (patch 0006) is then the only sound path;
+    ps2_debug_panel.cpp and src/main.cpp are only part of ps2EntryRunner and are not built.
+  Nothing else of the library included raylib: no further change was needed.
+With the option ON (the default) nothing changes in what is built or fetched.
+
+How it was verified: a second build tree configured with -DPS2X_WITH_RAYLIB=OFF and
+-DFETCHCONTENT_FULLY_DISCONNECTED=ON and no raylib/imgui source directories: the configure step succeeds
+and creates no _deps directory (nothing fetched); libps2_runtime.a has no symbol matching raylib, imgui or
+rlImGui (nm); host_loop_test and host_pad_source_test build against it and pass with DISPLAY unset
+(vsyncs at 60.00 Hz, pads from the host source, initialize() without the host flag fails loudly). The same
+tests built with raylib (option ON) pass as before. Not exercised: building ps2EntryRunner (needs raylib and
+a display to run), Windows and the Vita/Android paths.
+
+Based on: original work for this project against PS2Recomp commit
+2c5fbb9389e11dd95693385969490c9e8e6f57b4, on top of patches 0001 to 0006, 0007 and 0008.
+
+diff --git a/ps2xRuntime/CMakeLists.txt b/ps2xRuntime/CMakeLists.txt
+index 589d768..deed09e 100644
+--- a/ps2xRuntime/CMakeLists.txt
++++ b/ps2xRuntime/CMakeLists.txt
+@@ -16,6 +16,7 @@ option(PS2X_ENABLE_IOP_RPC_TRACE "Log unhandled IOP/SIF RPC trace suggestions" O
+ option(PS2X_STRICT_RETURN_DIAGNOSTICS "Route generated JR $ra returns through runtime branch diagnostics" OFF)
+ option(PS2X_SHOW_WINDOWS_CONSOLE "Show a console window for ps2EntryRunner on Windows release builds" ON)
+ option(PS2X_ENABLE_DEBUG_UI "Build the desktop runtime debug UI" ON)
++option(PS2X_WITH_RAYLIB "Build the raylib window/audio/input, the debug UI and the ps2EntryRunner executable. OFF: a library for a host that owns the window, audio and input (setHostOwnsWindow); nothing of raylib, imgui or rlImGui is fetched" ON)
+ 
+ if(PS2X_ENABLE_SCCACHE)
+     find_program(PS2X_SCCACHE_PROGRAM sccache)
+@@ -75,6 +76,7 @@ else()
+         set(PLATFORM "Android" CACHE STRING "" FORCE)
+     endif()
+ 
++    if(PS2X_WITH_RAYLIB)
+     FetchContent_Declare(
+         raylib
+         GIT_REPOSITORY "https://github.com/raysan5/raylib.git"
+@@ -127,6 +129,7 @@ else()
+         target_include_directories(rlImGui PUBLIC "${PS2X_RLIMGUI_SOURCE_DIR}")
+         target_link_libraries(rlImGui PUBLIC raylib imgui)
+     endif()
++    endif() # PS2X_WITH_RAYLIB
+ endif()
+ 
+ add_library(ps2_host_backend INTERFACE)
+@@ -234,12 +237,15 @@ if(PS2X_IS_VITA)
+         c
+         pthread
+     )
+-else()
++elseif(PS2X_WITH_RAYLIB)
+     target_link_libraries(ps2_host_backend INTERFACE raylib)
+ 
+     if(PS2X_IS_ANDROID)
+         target_link_libraries(ps2_host_backend INTERFACE log android)
+     endif()
++else()
++    # No raylib: the headers include none, and the runtime code that needs it is compiled out.
++    target_compile_definitions(ps2_host_backend INTERFACE PS2X_NO_RAYLIB=1)
+ endif()
+ 
+ if(PS2X_IS_ANDROID)
+@@ -437,6 +443,15 @@ target_sources(ps2_runtime PRIVATE
+     ${KERNEL_SRC_FILES}
+ )
+ 
++target_include_directories(ps2_runtime PUBLIC
++    ${CMAKE_CURRENT_SOURCE_DIR}/include
++    ${CMAKE_CURRENT_SOURCE_DIR}/src/lib/Kernel
++)
++
++target_link_libraries(ps2_runtime PUBLIC ps2_host_backend ffmpeg ps2_iop)
++
++# The runtime's own executable (ps2EntryRunner: raylib window, debug UI) exists only with raylib.
++if(PS2X_WITH_RAYLIB)
+ file(GLOB RUNNER_SRC_FILES CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/runner/*.cpp"
+ )
+@@ -501,12 +516,6 @@ if(MSVC)
+     target_compile_options(ps2EntryRunner PRIVATE /FS)
+ endif()
+ 
+-target_include_directories(ps2_runtime PUBLIC
+-    ${CMAKE_CURRENT_SOURCE_DIR}/include
+-    ${CMAKE_CURRENT_SOURCE_DIR}/src/lib/Kernel
+-)
+-
+-target_link_libraries(ps2_runtime PUBLIC ps2_host_backend ffmpeg ps2_iop)
+ target_link_libraries(ps2EntryRunner
+     PRIVATE
+     ps2_runtime
+@@ -591,11 +600,21 @@ if(PS2X_IS_ANDROID)
+     target_sources(ps2EntryRunner PRIVATE src/lib/ps2_android_runtime.cpp)
+ endif()
+ 
+-install(TARGETS ps2_runtime ps2EntryRunner
+-    RUNTIME DESTINATION bin
+-    LIBRARY DESTINATION lib
+-    ARCHIVE DESTINATION lib
+-)
++endif()
++
++if(PS2X_WITH_RAYLIB)
++    install(TARGETS ps2_runtime ps2EntryRunner
++        RUNTIME DESTINATION bin
++        LIBRARY DESTINATION lib
++        ARCHIVE DESTINATION lib
++    )
++else()
++    install(TARGETS ps2_runtime
++        RUNTIME DESTINATION bin
++        LIBRARY DESTINATION lib
++        ARCHIVE DESTINATION lib
++    )
++endif()
+ 
+ if(WIN32 AND PS2X_ENABLE_FFMPEG)
+     install(DIRECTORY "${FFMPEG_BIN_DIR}/"
+diff --git a/ps2xRuntime/include/ps2_host_backend.h b/ps2xRuntime/include/ps2_host_backend.h
+index 54910f8..1a09ca7 100644
+--- a/ps2xRuntime/include/ps2_host_backend.h
++++ b/ps2xRuntime/include/ps2_host_backend.h
+@@ -1,3 +1,7 @@
+ #pragma once
+ 
++// With PS2X_NO_RAYLIB (CMake option PS2X_WITH_RAYLIB=OFF) nothing of raylib is visible: the runtime has no
++// window, audio device or input of its own and the host provides them (PS2Runtime::setHostOwnsWindow).
++#ifndef PS2X_NO_RAYLIB
+ #include "raylib.h"
++#endif
+diff --git a/ps2xRuntime/include/runtime/ps2_pad.h b/ps2xRuntime/include/runtime/ps2_pad.h
+index cc91895..b42a4d9 100644
+--- a/ps2xRuntime/include/runtime/ps2_pad.h
++++ b/ps2xRuntime/include/runtime/ps2_pad.h
+@@ -26,7 +26,12 @@ public:
+ 
+     // true when the pads do not come from raylib: a source is installed, or the host owns the window
+     // (then, without a source, every pad is not connected and raylib is never called).
++#ifdef PS2X_NO_RAYLIB
++    // A build without raylib has no input of its own: always host mode.
++    bool hostMode() const { return true; }
++#else
+     bool hostMode() const { return m_hasSource || m_hostOwned; }
++#endif
+     bool hasHostSource() const { return m_hasSource; }
+     const Ps2HostPad *hostSource() const { return m_hasSource ? &m_source : nullptr; }
+ 
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
+index 8787982..2571b3a 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
+@@ -77,6 +77,7 @@ namespace ps2_stubs
+         uint32_t g_padSlotLimit[kPadPortCount] = {kPadDefaultSlots, kPadDefaultSlots};
+         int g_padReadLogCount = 0;
+ 
++#ifndef PS2X_NO_RAYLIB
+         uint8_t axisToByte(float axis)
+         {
+             axis = std::clamp(axis, -1.0f, 1.0f);
+@@ -202,6 +203,12 @@ namespace ps2_stubs
+             }
+         }
+ 
++#else
++        // No raylib: the pads always come from the host source (PSPadBackend::hostMode() is always true).
++        void applyGamepadState(PadInputState &) {}
++        void applyKeyboardState(PadInputState &, bool) {}
++#endif // PS2X_NO_RAYLIB
++
+         void resetPadStateLocked()
+         {
+             for (auto &slots : g_padPorts)
+@@ -713,6 +720,7 @@ namespace ps2_stubs
+             return;
+         }
+ 
++#ifndef PS2X_NO_RAYLIB
+         PS2_IF_AGRESSIVE_LOGS({
+             // The debug trace asks raylib for the keyboard: never with a host source or a host-owned window.
+             if (g_padReadLogCount < 48 && !(runtime && runtime->padBackend().hostMode()))
+@@ -734,6 +742,7 @@ namespace ps2_stubs
+                 }
+             }
+         });
++#endif // PS2X_NO_RAYLIB
+ 
+         setReturnS32(ctx, 1);
+     }
+diff --git a/ps2xRuntime/src/lib/ps2_audio.cpp b/ps2xRuntime/src/lib/ps2_audio.cpp
+index 6bb6494..308c763 100644
+--- a/ps2xRuntime/src/lib/ps2_audio.cpp
++++ b/ps2xRuntime/src/lib/ps2_audio.cpp
+@@ -73,7 +73,9 @@ struct PS2AudioBackend::Impl
+ {
+     struct TrackedSound
+     {
++#ifndef PS2X_NO_RAYLIB
+         Sound snd;
++#endif
+         uint32_t sampleKey;
+     };
+     std::vector<TrackedSound> activeSounds;
+@@ -228,7 +230,7 @@ void PS2AudioBackend::play(uint32_t sampleAddr, float pitch, float volume, uint3
+ 
+ void PS2AudioBackend::pruneFinishedSounds()
+ {
+-#if defined(PLATFORM_VITA)
++#if defined(PLATFORM_VITA) || defined(PS2X_NO_RAYLIB)
+     return;
+ #else
+     auto &sounds = m_impl->activeSounds;
+@@ -251,7 +253,7 @@ void PS2AudioBackend::pruneFinishedSounds()
+ void PS2AudioBackend::playDecodedSample(uint32_t sampleKey, DecodedSample &sample, float pitch, float volume,
+                                         bool isBgm)
+ {
+-#if defined(PLATFORM_VITA)
++#if defined(PLATFORM_VITA) || defined(PS2X_NO_RAYLIB)
+     (void)sampleKey;
+     (void)sample;
+     (void)pitch;
+@@ -315,7 +317,7 @@ void PS2AudioBackend::stop(uint32_t voiceId)
+ void PS2AudioBackend::stopAll()
+ {
+     std::lock_guard<std::mutex> lock(m_mutex);
+-#if defined(PLATFORM_VITA)
++#if defined(PLATFORM_VITA) || defined(PS2X_NO_RAYLIB)
+     return;
+ #else
+     for (auto &t : m_impl->activeSounds)
+diff --git a/ps2xRuntime/src/lib/ps2_pad.cpp b/ps2xRuntime/src/lib/ps2_pad.cpp
+index 67e8a45..b479c1e 100644
+--- a/ps2xRuntime/src/lib/ps2_pad.cpp
++++ b/ps2xRuntime/src/lib/ps2_pad.cpp
+@@ -28,6 +28,7 @@ namespace
+ 
+ namespace
+ {
++#ifndef PS2X_NO_RAYLIB
+ // The runtime's own raylib mapping (gamepad 0 or the keyboard; port and slot are ignored).
+ bool readRaylibState(uint8_t *data, size_t size)
+ {
+@@ -127,6 +128,7 @@ bool readRaylibState(uint8_t *data, size_t size)
+     data[3] = static_cast<uint8_t>(btns >> 8);
+     return true;
+ }
++#endif // PS2X_NO_RAYLIB
+ }
+ 
+ void PSPadBackend::setHostSource(const Ps2HostPad *source)
+@@ -171,8 +173,10 @@ void PSPadBackend::readHost(int port, int slot, Ps2HostPadState &out) const
+ 
+ bool PSPadBackend::readState(int port, int slot, uint8_t *data, size_t size)
+ {
++#ifndef PS2X_NO_RAYLIB
+     if (!hostMode())
+         return readRaylibState(data, size);
++#endif
+ 
+     if (!data || size < 32)
+         return false;
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index 0b39208..e791014 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -374,6 +374,7 @@ namespace
+     }
+ }
+ 
++#ifndef PS2X_NO_RAYLIB
+ static void UploadFrame(Texture2D &tex, PS2Runtime *rt, uint32_t &outWidth, uint32_t &outHeight)
+ {
+     static uint64_t s_lastPresentationTick = std::numeric_limits<uint64_t>::max();
+@@ -477,6 +478,7 @@ static void UploadFrame(Texture2D &tex, PS2Runtime *rt, uint32_t &outWidth, uint
+     outHeight = height;
+     s_hasUploadedFrame = true;
+ }
++#endif // PS2X_NO_RAYLIB
+ 
+ PS2Runtime::PS2Runtime()
+ {
+@@ -535,6 +537,8 @@ PS2Runtime::~PS2Runtime()
+ #if defined(PLATFORM_VITA)
+         m_audioBackend.stopAll();
+         m_audioBackend.setAudioReady(false);
++#elif defined(PS2X_NO_RAYLIB)
++        // No raylib audio device exists in this build.
+ #else
+         // A host-owned window/audio device is not ours to query or close (and raylib is not called).
+         if (!m_hostOwnsWindow && IsAudioDeviceReady())
+@@ -549,10 +553,12 @@ PS2Runtime::~PS2Runtime()
+             m_debugUiInitialized = false;
+         }
+ 
++#ifndef PS2X_NO_RAYLIB
+         if (!m_hostOwnsWindow && IsWindowReady())
+         {
+             CloseWindow();
+         }
++#endif
+ 
+         m_loadedModules.clear();
+     }
+@@ -758,6 +764,12 @@ bool PS2Runtime::initialize(const char *title)
+             m_audioBackend.setAudioReady(false);
+             return true;
+         }
++#ifdef PS2X_NO_RAYLIB
++        std::cerr << "[don] this build of the runtime has no window of its own (PS2X_WITH_RAYLIB=OFF): "
++                     "call setHostOwnsWindow(true) before initialize()"
++                  << std::endl;
++        return false;
++#else
+ #if defined(PLATFORM_VITA)
+         InitWindow(HOST_WINDOW_WIDTH, HOST_WINDOW_HEIGHT, title); // raylib vita does not support audio
+ #else
+@@ -772,6 +784,7 @@ bool PS2Runtime::initialize(const char *title)
+             m_debugUiInitCallback(*this, m_debugUiUserData);
+             m_debugUiInitialized = true;
+         }
++#endif // PS2X_NO_RAYLIB
+ 
+         return true;
+     }
+@@ -2501,6 +2514,12 @@ void PS2Runtime::run()
+         return;
+     }
+ 
++#ifdef PS2X_NO_RAYLIB
++    std::cerr << "[don] this build of the runtime has no window of its own (PS2X_WITH_RAYLIB=OFF): "
++                 "call setHostOwnsWindow(true) before initialize() and drive the game with startGameThread()"
++              << std::endl;
++    return;
++#else
+     // A blank image to use as a framebuffer
+     Image blank = GenImageColor(FB_WIDTH, FB_HEIGHT, BLANK);
+     Texture2D frameTex = LoadTextureFromImage(blank);
+@@ -2592,4 +2611,5 @@ void PS2Runtime::run()
+     CloseWindow();
+ 
+     RUNTIME_LOG("[run] exiting loop");
++#endif // PS2X_NO_RAYLIB
+ }

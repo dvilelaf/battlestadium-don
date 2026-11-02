@@ -1,0 +1,8 @@
+# Instruction patches applied by the recompiler (format: { address = "0x...", value = "0x0" }).
+#
+# Task T-021 reviewed the 7 instructions that the analyzer proposed to nop out
+# (0x11a31c, 0x11a808, 0x11b264, 0x11b310, 0x11b608, 0x11bde0, 0x11dc34).
+# None is kept: each is an ordinary `sw` to a global variable in the data area, not
+# self-modifying code. Nopping it would drop a real state write. See
+# docs/knowledge/02-ps2-executable.md, section "Instruction patches proposed by the analyzer".
+instructions = []

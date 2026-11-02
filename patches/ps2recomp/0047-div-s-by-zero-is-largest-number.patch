@@ -1,0 +1,41 @@
+Recompiler: div.s by zero (or by a denormal) gives the largest finite number, not an infinity.
+
+What it fixes: the emitted text tested `ft == 0.0f`, set a flag bit the console does not have (0x100000) and wrote
+copysignf(INFINITY, fs * 0.0f), which is a NaN when fs is zero. The console has no infinities and no NaNs: the reference
+emulator's interpreter (third_party/pcsx2/pcsx2/FPU.cpp, DIV_S and checkDivideByZero, :107 and DIV_S below it) gives the largest
+finite number with the sign of the operands when the divisor's exponent field is zero (a denormal counts as zero), sets
+D|SD in FCR31 (I|SI when the dividend is zero too) and does not touch the destination otherwise. The emitted text now does that
+with bit operations on the two registers; any other divisor uses the host's division, which under the game's mode (round
+toward zero, flush-to-zero, denormals-are-zero) is the console's.
+
+How it was verified: tests/conformance family "fpu", div.s: 735 cases differed before (zero, denormal and normal divisors with
+dividends of every class) and 411 after, all of them with an operand whose exponent field is all ones (not clamped: see
+journal 025, piece 5). The infinity that a division by zero used to put in a register fed every later operation on it; this
+removes that source. 1,981 div.s sites in the game. A division by zero can happen in a fight (a length that is zero, a
+normalisation of a null vector).
+
+Original work for this repository (no code from another project).
+
+diff --git a/ps2xRecomp/src/lib/fpu_translator.cpp b/ps2xRecomp/src/lib/fpu_translator.cpp
+--- a/ps2xRecomp/src/lib/fpu_translator.cpp
++++ b/ps2xRecomp/src/lib/fpu_translator.cpp
+@@ -53,10 +53,15 @@
+             case COP1_S_MUL:
+                 return fmt::format("ctx->f[{}] = FPU_MUL_S(ctx->f[{}], ctx->f[{}]);", fd, fs, ft);
+             case COP1_S_DIV:
+-                return fmt::format("if (ctx->f[{}] == 0.0f) {{ ctx->fcr31 |= 0x100000; /* DZ flag */ "
+-                                   "ctx->f[{}] = copysignf(INFINITY, ctx->f[{}] * 0.0f); }} "
+-                                   "else ctx->f[{}] = ctx->f[{}] / ctx->f[{}];",
+-                                   ft, fd, fs, fd, fs, ft);
++                // The console has no infinities: a divisor with exponent 0 (zero, or a denormal, which does not exist) gives the
++                // largest finite number with the sign of the operands and sets D|SD (I|SI when the dividend is zero too)
++                // (FPU.cpp: DIV_S, checkDivideByZero). Any other divisor: the host's division, which under the game's
++                // round-toward-zero mode is the console's.
++                return fmt::format("{{ uint32_t a_, b_; std::memcpy(&a_, &ctx->f[{}], sizeof(a_)); std::memcpy(&b_, &ctx->f[{}], sizeof(b_)); "
++                                   "if ((b_ & 0x7F800000u) == 0) {{ ctx->fcr31 |= ((a_ & 0x7F800000u) == 0) ? 0x20040u : 0x10020u; "
++                                   "uint32_t r_ = ((a_ ^ b_) & 0x80000000u) | 0x7F7FFFFFu; std::memcpy(&ctx->f[{}], &r_, sizeof(r_)); }} "
++                                   "else ctx->f[{}] = ctx->f[{}] / ctx->f[{}]; }}",
++                                   fs, ft, fd, fd, fs, ft);
+             case COP1_S_SQRT:
+                 // R5900: SQRT.S fd, ft takes its source from ft (the fs field is 0).
+                 // Negative inputs use the magnitude (PCSX2 FPU.cpp SQRT_S).

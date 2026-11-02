@@ -1,0 +1,174 @@
+# 4-player fight on the KONOHA (Hidden Leaf) stage: P1 = Naruto doing his special move (ougi), P2-P4 COM (Goku, Sanji, Zoro).
+# Reproduces a friend's video (Windows/NVIDIA): after Naruto's full-screen cutscene (red streak + close-up) the stage
+# textures and the HUD turned to garbage. This script reaches that cutscene and keeps fighting ~20 s afterwards.
+#
+# Menu path (as multiplayer_ougi.txt, journals 026/033): title, main menu (Down x3 = MULTIPLAYER), ENTRY EDITING (all four
+# slots start as PLAYER; Right+Circle on slots 2-4 makes them COM), Start, character select (P1 Circle = Naruto; the COM
+# cursors then start on Sasuke/Luffy/Zoro: Right x2+Circle = Goku, Right+Down+Circle = Sanji, Circle = Zoro), STAGE SELECT
+# (opens on GOING MERRY; Up x2 = HIDDEN LEAF, Circle). Konoha: GET READY at ~6120, the fight starts ~6150.
+# Naruto's ougi: the ultra-combo pattern of multiplayer_ougi.txt shifted by -200 blanks. Fight cutscenes (blanks, --sound off):
+#   Naruto: blanks 6540-6620 (red streak from 6540, close-up 6560-6600, back to the stage 6630); Zoro 7500; Sanji 7680-7740 (COM ougi, blue streak).
+# Run with --sound off (this timing); DON_PLAY_MOVIES=1 is needed (it fixes the boot timing):
+#   DON_PLAY_MOVIES=1 build/player/don-linux/don --headless --renderer vulkan --sound off --players 4 \
+#       --shots DIR --input-script tools/run/scripts/konoha_ougi.txt en_patch/jpvoice/disc/SLPS_256.75
+# Checked (2026-10-18, Linux/Vulkan lavapipe): menus, stage (houses, crowd, 4-portrait HUD) and cutscene seen in the shots;
+# exits 0 at blank 7800 (~20 s after Naruto's cutscene).
+270 tap LEFT 6
+330 tap CIRCLE 6
+2640 tap START 6
+2640 P2:tap SELECT 4
+2640 P3:tap SELECT 4
+2640 P4:tap SELECT 4
+2960 tap DOWN 4
+3020 tap DOWN 4
+3080 tap DOWN 4
+3200 tap CIRCLE 6
+3420 tap START 6
+3560 tap DOWN 4
+3640 tap DOWN 4
+3720 tap DOWN 4
+3820 tap CIRCLE 6
+4100 tap RIGHT 4
+4130 tap CIRCLE 6
+4160 tap RIGHT 4
+4190 tap CIRCLE 6
+4220 tap RIGHT 4
+4250 tap CIRCLE 6
+4330 tap START 6
+4400 tap CIRCLE 6
+4500 tap RIGHT 4
+4530 tap RIGHT 4
+4580 tap CIRCLE 6
+4700 tap RIGHT 4
+4730 tap DOWN 4
+4780 tap CIRCLE 6
+4900 tap CIRCLE 6
+5050 tap UP 4
+5110 tap UP 4
+5200 tap CIRCLE 6
+6400 tap RIGHT 4
+6409 tap RIGHT 4
+6414 press RIGHT
+6460 release RIGHT
+6462 tap SQUARE 4
+6475 tap SQUARE 4
+6488 tap SQUARE 4
+6505 tap RIGHT 4
+6508 tap SQUARE 4
+6535 tap CIRCLE 5
+6570 tap TRIANGLE 5
+6600 press R2
+6625 release R2
+6640 tap LEFT 4
+6649 tap LEFT 4
+6654 press LEFT
+6700 release LEFT
+6702 tap SQUARE 4
+6715 tap SQUARE 4
+6728 tap SQUARE 4
+6745 tap LEFT 4
+6748 tap SQUARE 4
+6775 tap CIRCLE 5
+6810 tap TRIANGLE 5
+6840 press R2
+6865 release R2
+6880 tap RIGHT 4
+6889 tap RIGHT 4
+6894 press RIGHT
+6940 release RIGHT
+6942 tap SQUARE 4
+6955 tap SQUARE 4
+6968 tap SQUARE 4
+6985 tap RIGHT 4
+6988 tap SQUARE 4
+7015 tap CIRCLE 5
+7050 tap TRIANGLE 5
+7080 press R2
+7105 release R2
+7120 tap LEFT 4
+7129 tap LEFT 4
+7134 press LEFT
+7180 release LEFT
+7182 tap SQUARE 4
+7195 tap SQUARE 4
+7208 tap SQUARE 4
+7225 tap LEFT 4
+7228 tap SQUARE 4
+7255 tap CIRCLE 5
+7290 tap TRIANGLE 5
+5200 shot k_5200
+5300 shot k_5300
+5400 shot k_5400
+5500 shot k_5500
+5600 shot k_5600
+5700 shot k_5700
+5800 shot k_5800
+5900 shot k_5900
+6000 shot k_6000
+6100 shot k_6100
+6200 shot k_6200
+6300 shot k_6300
+6400 shot k_6400
+6400 shot k_6400
+6430 shot k_6430
+6460 shot k_6460
+6490 shot k_6490
+6520 shot k_6520
+6550 shot k_6550
+6580 shot k_6580
+6610 shot k_6610
+6640 shot k_6640
+6670 shot k_6670
+6700 shot k_6700
+6730 shot k_6730
+6760 shot k_6760
+6790 shot k_6790
+6820 shot k_6820
+6850 shot k_6850
+6880 shot k_6880
+6910 shot k_6910
+6940 shot k_6940
+6970 shot k_6970
+7000 shot k_7000
+7030 shot k_7030
+7060 shot k_7060
+7090 shot k_7090
+7120 shot k_7120
+7150 shot k_7150
+7180 shot k_7180
+7210 shot k_7210
+7240 shot k_7240
+7270 shot k_7270
+7300 shot k_7300
+7330 shot k_7330
+7360 shot k_7360
+7390 shot k_7390
+7420 shot k_7420
+7450 shot k_7450
+7480 shot k_7480
+7510 shot k_7510
+7540 shot k_7540
+7570 shot k_7570
+7600 shot k_7600
+7630 shot k_7630
+7660 shot k_7660
+7690 shot k_7690
+7720 shot k_7720
+7750 shot k_7750
+7780 shot k_7780
+6500 shot c_6500
+6510 shot c_6510
+6520 shot c_6520
+6530 shot c_6530
+6540 shot c_6540
+6550 shot c_6550
+6560 shot c_6560
+6570 shot c_6570
+6580 shot c_6580
+6590 shot c_6590
+6600 shot c_6600
+6610 shot c_6610
+6620 shot c_6620
+6630 shot c_6630
+6640 shot c_6640
+7800 quit

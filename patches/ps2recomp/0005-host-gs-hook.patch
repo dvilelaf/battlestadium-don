@@ -1,0 +1,608 @@
+Host GS hook: forward the GIF packets to a host GS instead of the runtime's own GS
+
+What it fixes: the runtime always drew with its own software GS. This adds an optional host GS
+(ps2xRuntime/include/runtime/gs/ps2_host_gs.h, PS2Runtime::setHostGs) so a program can plug in
+another GS (the DON port connects PCSX2's GS library). With a host installed, the GIF arbiter's
+drain() forwards each packet (paths 1, 2, 3) to gif_transfer, byte for byte; GS::writeRegister
+becomes an A+D packet on path 3 and GS::consumeLocalToHostBytes calls read_fifo; the native GIF
+fast paths of PS2Runtime that wrote straight into the internal GS are skipped; vsync receives the
+privileged registers at each VBlank; CSR.RESET (bit 9) now calls reset (the old code ignored it).
+A small per-path scanner (GifHostScanner) still tracks SIGNAL, FINISH and LABEL, and the five
+pseudo-registers 0x59..0x5C and 0x5F that the internal GS accepts as A+D writes, so the game's
+waits on CSR keep working. All callbacks run on the GameThread (EE scheduler executor), with
+optional thread_begin/thread_end. Without a host installed nothing changes.
+
+How it was verified: tests/runtime/host_gs_hook_test.cpp (fake host; scanner compared with the
+internal GS on the same stream at several chunk sizes, interleaved paths, forwarding on paths
+1/2/3, null host, reset ordering, GIF DMA and VIF1 DMA DIRECT through PS2Memory). Built from a
+tree with patches 0001-0003 plus this one: all checks passed. Not exercised: VU1 XGKICK, a real
+PS2Runtime (needs a window), a real GS library.
+
+Based on: original code; the CSR/SIGNAL/FINISH/LABEL semantics mirror this tree's gs_frontend.cpp.
+
+diff --git a/ps2xRuntime/include/ps2_runtime.h b/ps2xRuntime/include/ps2_runtime.h
+index 4b9242c..185cbe9 100644
+--- a/ps2xRuntime/include/ps2_runtime.h
++++ b/ps2xRuntime/include/ps2_runtime.h
+@@ -26,6 +26,7 @@
+ #include "ps2_log.h"
+ #include "runtime/ps2_address.h"
+ #include "runtime/gs/ps2_gif_arbiter.h"
++#include "runtime/gs/ps2_host_gs.h"
+ #include "runtime/ps2_memory.h"
+ #include "runtime/gs/gs_frontend.h"
+ #include "runtime/ps2_vu1.h"
+@@ -442,6 +443,13 @@ public:
+     inline const GS &gs() const { return m_gs; }
+     inline GifArbiter &gifArbiter() { return m_gifArbiter; }
+     inline const GifArbiter &gifArbiter() const { return m_gifArbiter; }
++
++    // Host GS (runtime/gs/ps2_host_gs.h). The struct is copied; nullptr (or a struct without
++    // gif_transfer) removes it. Call while the game thread is not running.
++    void setHostGs(const Ps2HostGs *host);
++    inline const Ps2HostGs *hostGs() const { return m_hostGs ? &m_hostGsStorage : nullptr; }
++    // Called by the EE scheduler at each vertical blank (game thread). Does nothing without a host GS.
++    void notifyHostGsVsync();
+     inline VU1Interpreter &vu0() { return m_vu0; }
+     inline const VU1Interpreter &vu0() const { return m_vu0; }
+     inline VU1Interpreter &vu1() { return m_vu1; }
+@@ -491,6 +499,8 @@ private:
+     PS2Memory m_memory;
+     GifArbiter m_gifArbiter;
+     GS m_gs;
++    Ps2HostGs m_hostGsStorage;
++    bool m_hostGs = false;
+     std::unique_ptr<PS2IopHostAdapter> m_iopHost;
+     std::unique_ptr<ps2x::iop::IopSubsystem> m_iopSubsystem;
+     PS2AudioBackend m_audioBackend;
+diff --git a/ps2xRuntime/include/runtime/gs/gs_frontend.h b/ps2xRuntime/include/runtime/gs/gs_frontend.h
+index 4c3f641..d48b2d1 100644
+--- a/ps2xRuntime/include/runtime/gs/gs_frontend.h
++++ b/ps2xRuntime/include/runtime/gs/gs_frontend.h
+@@ -96,6 +96,9 @@ struct GSDebugHistoryEntry
+     bool usedPreferred = false;
+ };
+ 
++struct Ps2HostGs;
++class GifArbiter;
++
+ class GS
+ {
+ public:
+@@ -141,6 +144,16 @@ public:
+     uint64_t nativeImageUploadCount() const { return m_nativeImageUploadCount; }
+     uint64_t nativePackedGIFPacketCount() const { return m_nativePackedGIFPacketCount; }
+ 
++    // Host GS (ps2_host_gs.h). With one installed, the direct entry points of this class that
++    // the sceGs* handlers use are redirected: writeRegister() becomes an A+D GIF packet on
++    // path 3 submitted through `arbiter`, and consumeLocalToHostBytes() calls the host's
++    // read_fifo. Everything else is unchanged. nullptr removes it.
++    void setHostGs(const Ps2HostGs *host, GifArbiter *arbiter)
++    {
++        m_hostGs = host;
++        m_hostArbiter = host ? arbiter : nullptr;
++    }
++
+     uint32_t consumeLocalToHostBytes(uint8_t *dst, uint32_t maxBytes);
+ 
+     void refreshDisplaySnapshot();
+@@ -231,6 +244,8 @@ private:
+     bool m_hasHostPresentationFrame = false;
+     uint64_t m_nativeImageUploadCount = 0;
+     uint64_t m_nativePackedGIFPacketCount = 0;
++    const Ps2HostGs *m_hostGs = nullptr;
++    GifArbiter *m_hostArbiter = nullptr;
+ 
+     static constexpr size_t kDebugHistoryCapacity = 512;
+     std::array<GSDebugHistoryEntry, kDebugHistoryCapacity> m_debugHistory{};
+diff --git a/ps2xRuntime/include/runtime/gs/ps2_gif_arbiter.h b/ps2xRuntime/include/runtime/gs/ps2_gif_arbiter.h
+index 2012083..d425657 100644
+--- a/ps2xRuntime/include/runtime/gs/ps2_gif_arbiter.h
++++ b/ps2xRuntime/include/runtime/gs/ps2_gif_arbiter.h
+@@ -20,6 +20,36 @@ struct GifArbiterPacket
+     std::vector<uint8_t> data;
+ };
+ 
++struct GSRegisters;
++struct Ps2HostGs;
++
++// With a host GS installed the packets are not decoded by the runtime's GS, but the three
++// registers a GS reports back to the program (SIGNAL, FINISH, LABEL: CSR bits 0..1 and
++// SIGLBLID) still have to be tracked, together with the five display registers that the
++// runtime's GS also accepts as A+D writes (0x59, 0x5A, 0x5B, 0x5C, 0x5F; sceGsResetGraph's
++// handler uses them). This scanner finds those writes with one pass over the GIF tags: it
++// skips the payload of every tag and looks only at the A+D quadwords of PACKED tags. It keeps
++// one parser state per GIF path, because a tag may be followed by its payload in a later
++// packet.
++class GifHostScanner
++{
++public:
++    void reset();
++    void feed(GifPathId pathId, const uint8_t *data, uint32_t sizeBytes, GSRegisters &regs);
++
++private:
++    struct PathState
++    {
++        uint32_t remaining = 0; // quadwords of payload still to skip
++        uint32_t position = 0;  // PACKED: index in the register list of the next quadword
++        uint8_t format = 0;
++        uint8_t nreg = 1;
++        bool hasAd = false;
++        uint8_t regs[16] = {};
++    };
++    PathState m_paths[3];
++};
++
+ class GifArbiter
+ {
+ public:
+@@ -30,6 +60,15 @@ public:
+ 
+     void setProcessPacketFn(ProcessPacketFn fn) { m_processFn = std::move(fn); }
+ 
++    // Installs (or, with nullptr, removes) the host GS. The pointed-to struct must outlive the
++    // arbiter or be removed first. privRegs receives the effects of SIGNAL/FINISH/LABEL.
++    void setHostGs(const Ps2HostGs *host, GSRegisters *privRegs);
++    const Ps2HostGs *hostGs() const { return m_hostGs; }
++
++    // CSR.RESET was written: with a host GS, flushes the queue, resets the scanner and calls
++    // the host's reset. Does nothing without a host GS.
++    void notifyGsReset();
++
+     void submit(GifPathId pathId, const uint8_t *data, uint32_t sizeBytes, bool path2DirectHl = false);
+ 
+     void drain();
+@@ -38,6 +77,9 @@ public:
+ private:
+     ProcessPacketFn m_processFn;
+     std::vector<GifArbiterPacket> m_queue;
++    const Ps2HostGs *m_hostGs = nullptr;
++    GSRegisters *m_privRegs = nullptr;
++    GifHostScanner m_scanner;
+ 
+     static bool isImagePacket(const uint8_t *data, uint32_t sizeBytes);
+     static uint8_t pathPriority(GifPathId id);
+diff --git a/ps2xRuntime/include/runtime/gs/ps2_host_gs.h b/ps2xRuntime/include/runtime/gs/ps2_host_gs.h
+new file mode 100644
+index 0000000..cd5dd24
+--- /dev/null
++++ b/ps2xRuntime/include/runtime/gs/ps2_host_gs.h
+@@ -0,0 +1,62 @@
++#ifndef PS2_HOST_GS_H
++#define PS2_HOST_GS_H
++
++#include <cstdint>
++
++// Host GS: an optional replacement for the runtime's own GS, installed by the program that
++// embeds the runtime with PS2Runtime::setHostGs().
++//
++// With a host GS installed, the runtime does not draw: every GIF packet that its arbiter hands
++// to the GS is forwarded to gif_transfer, byte for byte and in the order the arbiter delivers
++// them, and at each vertical blank vsync receives the privileged registers. The runtime keeps
++// parsing the packets only for the three registers that a GS (but not the PCSX2 GS library)
++// reports back to the program: SIGNAL, FINISH and LABEL, plus the CSR and SIGLBLID bits they
++// set. The argument meanings and units match src/gsbridge/don_gs.h of the DON repository
++// (don_gs_gif_transfer, don_gs_vsync, don_gs_reset, don_gs_read_fifo), so connecting them is
++// one line each.
++//
++// Threads: the runtime runs the guest program on one thread (the "GameThread" started by
++// PS2Runtime::run(), the EE scheduler's executor). gif_transfer, vsync, reset, read_fifo and
++// thread_begin/thread_end are all called on that thread and never concurrently. This is the
++// thread that must own a GS library that requires every call from the thread that opened it:
++// open it in thread_begin and close it in thread_end. install/uninstall (setHostGs) must be
++// called while the game thread is not running.
++//
++// Every callback except gif_transfer may be null. A null gif_transfer is treated as "no host
++// GS installed".
++
++// Number of 64-bit values in the privileged-register array passed to vsync, in this order:
++// PMODE, SMODE1, SMODE2, SRFSH, SYNCH1, SYNCH2, SYNCV, DISPFB1, DISPLAY1, DISPFB2, DISPLAY2,
++// EXTBUF, EXTDATA, EXTWRITE, BGCOLOR, CSR, IMR, BUSDIR, SIGLBLID.
++#define PS2_HOST_GS_PRIV_REG_COUNT 19
++
++struct Ps2HostGs
++{
++    // Passed back as the first argument of every callback.
++    void *user = nullptr;
++
++    // Called once on the game thread before the first guest instruction runs, and (thread_end)
++    // once after the guest scheduler returns, even if it ended with an error. Optional.
++    void (*thread_begin)(void *user) = nullptr;
++    void (*thread_end)(void *user) = nullptr;
++
++    // GIF data of one packet. path is the GIF path 1 (VU1 XGKICK), 2 (VIF1 DIRECT/DIRECTHL) or
++    // 3 (the GIF DMA channel, and the runtime's own register writes for the sceGs* handlers).
++    // bytes is a multiple of 16 (a trailing partial quadword is dropped); data is valid only
++    // during the call.
++    void (*gif_transfer)(void *user, int path, const uint8_t *data, uint32_t bytes) = nullptr;
++
++    // One call per vertical blank, after every packet queued before it has been forwarded.
++    // priv_regs: PS2_HOST_GS_PRIV_REG_COUNT values (CSR with the runtime's FIELD bit and its
++    // SIGNAL/FINISH bits as the game sees them). field: 0 or 1, CSR.FIELD of this blank.
++    void (*vsync)(void *user, const uint64_t priv_regs[PS2_HOST_GS_PRIV_REG_COUNT], int field) = nullptr;
++
++    // The game wrote CSR.RESET (bit 9). Called after the packets queued before the write.
++    void (*reset)(void *user) = nullptr;
++
++    // GS to host transfer (TRXDIR = 1): copy up to bytes bytes of the image selected by the
++    // transfer registers into dst and return the number of bytes written (0 = nothing to read).
++    uint32_t (*read_fifo)(void *user, uint8_t *dst, uint32_t bytes) = nullptr;
++};
++
++#endif
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index c5e31c4..56bf878 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -1877,6 +1877,7 @@ void EeScheduler::processEvent(const EeEvent &event)
+         {
+             m_runtime.memory().gs().csr.fetch_and(~0x2000ull, std::memory_order_acq_rel);
+         }
++        m_runtime.notifyHostGsVsync();
+         writeGuestU32(m_vsyncFlagAddress, 1u);
+         if (m_vsyncTickAddress != 0u)
+         {
+diff --git a/ps2xRuntime/src/lib/gs/gs_frontend.cpp b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
+index 5658928..3756b82 100644
+--- a/ps2xRuntime/src/lib/gs/gs_frontend.cpp
++++ b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
+@@ -1,5 +1,7 @@
+ #include "runtime/gs/gs_frontend.h"
+ #include "runtime/gs/gs_cpu_backend.h"
++#include "runtime/gs/ps2_gif_arbiter.h"
++#include "runtime/gs/ps2_host_gs.h"
+ #include "ps2_log.h"
+ #include "runtime/ps2_memory.h"
+ #include <atomic>
+@@ -1061,6 +1063,14 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
+ 
+ void GS::writeRegister(uint8_t regAddr, uint64_t value)
+ {
++    if (m_hostGs)
++    {
++        // One A+D GIF packet (tag: NLOOP=1, EOP=1, FLG=PACKED, NREG=1, REGS=A+D), path 3.
++        const uint64_t packet[4] = {1ull | (1ull << 15) | (1ull << 60), 0x0Eull, value, regAddr};
++        m_hostArbiter->submit(GifPathId::Path3, reinterpret_cast<const uint8_t *>(packet), sizeof(packet));
++        m_hostArbiter->drain();
++        return;
++    }
+     std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
+     writeRegisterUnlocked(regAddr, value);
+ }
+@@ -1628,6 +1638,13 @@ bool GS::clearActiveFramebuffer(uint32_t rgba)
+ 
+ uint32_t GS::consumeLocalToHostBytes(uint8_t *dst, uint32_t maxBytes)
+ {
++    if (m_hostGs)
++    {
++        m_hostArbiter->drain();
++        if (!dst || maxBytes == 0u || !m_hostGs->read_fifo)
++            return 0u;
++        return m_hostGs->read_fifo(m_hostGs->user, dst, maxBytes);
++    }
+     std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
+     return m_backend ? m_backend->ConsumeLocalToHostBytes(dst, maxBytes) : 0u;
+ }
+diff --git a/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp b/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
+index c289ba0..ad02b44 100644
+--- a/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
++++ b/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
+@@ -1,12 +1,162 @@
+ #include "runtime/gs/ps2_gif_arbiter.h"
++#include "runtime/gs/gs_types.h"
++#include "runtime/gs/ps2_host_gs.h"
++#include "runtime/ps2_memory.h"
+ #include <algorithm>
+ #include <cstring>
+ 
++namespace
++{
++    constexpr uint8_t kGifFmtPacked = 0;
++    constexpr uint8_t kGifFmtReglist = 1;
++    constexpr uint8_t kRegAd = 0x0E;
++
++    // The same effects as GS::writeRegisterUnlocked has for these registers (gs_frontend.cpp,
++    // cases GS_REG_SIGNAL, GS_REG_FINISH, GS_REG_LABEL, 0x59..0x5C, 0x5F), without the drawing
++    // state. Keep the two in step.
++    void applyStatusWrite(GSRegisters &regs, uint8_t reg, uint64_t value)
++    {
++        switch (reg)
++        {
++        case GS_REG_SIGNAL:
++        {
++            const uint32_t id = static_cast<uint32_t>(value & 0xFFFFFFFFu);
++            const uint32_t mask = static_cast<uint32_t>(value >> 32);
++            uint32_t lo = static_cast<uint32_t>(regs.siglblid & 0xFFFFFFFFu);
++            lo = (lo & ~mask) | (id & mask);
++            regs.siglblid = (regs.siglblid & 0xFFFFFFFF00000000ULL) | lo;
++            regs.csr.fetch_or(0x1);
++            break;
++        }
++        case GS_REG_FINISH:
++            regs.csr.fetch_or(0x2);
++            break;
++        case GS_REG_LABEL:
++        {
++            const uint32_t id = static_cast<uint32_t>(value & 0xFFFFFFFFu);
++            const uint32_t mask = static_cast<uint32_t>(value >> 32);
++            uint32_t hi = static_cast<uint32_t>(regs.siglblid >> 32);
++            hi = (hi & ~mask) | (id & mask);
++            regs.siglblid = (static_cast<uint64_t>(hi) << 32) | (regs.siglblid & 0xFFFFFFFFu);
++            break;
++        }
++        case 0x59:
++            regs.dispfb1 = value;
++            break;
++        case 0x5a:
++            regs.display1 = value;
++            break;
++        case 0x5b:
++            regs.dispfb2 = value;
++            break;
++        case 0x5c:
++            regs.display2 = value;
++            break;
++        case 0x5f:
++            regs.bgcolor = value;
++            break;
++        default:
++            break;
++        }
++    }
++}
++
++void GifHostScanner::reset()
++{
++    for (PathState &state : m_paths)
++        state = PathState{};
++}
++
++void GifHostScanner::feed(GifPathId pathId, const uint8_t *data, uint32_t sizeBytes, GSRegisters &regs)
++{
++    const uint32_t pathIndex = static_cast<uint32_t>(pathId) - 1u;
++    if (!data || pathIndex >= 3u)
++        return;
++    PathState &st = m_paths[pathIndex];
++
++    uint32_t offset = 0;
++    while (offset + 16u <= sizeBytes)
++    {
++        if (st.remaining == 0)
++        {
++            uint64_t tagLo = 0;
++            uint64_t tagHi = 0;
++            std::memcpy(&tagLo, data + offset, sizeof(tagLo));
++            std::memcpy(&tagHi, data + offset + 8, sizeof(tagHi));
++            offset += 16u;
++
++            const uint32_t nloop = static_cast<uint32_t>(tagLo & 0x7FFFu);
++            const uint8_t flg = static_cast<uint8_t>((tagLo >> 58) & 0x3u);
++            uint8_t nreg = static_cast<uint8_t>((tagLo >> 60) & 0xFu);
++            if (nreg == 0)
++                nreg = 16;
++
++            st.format = flg;
++            st.nreg = nreg;
++            st.position = 0;
++            st.hasAd = false;
++            for (uint32_t i = 0; i < nreg; ++i)
++            {
++                st.regs[i] = static_cast<uint8_t>((tagHi >> (i * 4u)) & 0xFu);
++                st.hasAd = st.hasAd || (st.regs[i] == kRegAd);
++            }
++
++            if (flg == kGifFmtPacked)
++                st.remaining = nloop * nreg;
++            else if (flg == kGifFmtReglist)
++                st.remaining = (nloop * nreg + 1u) / 2u;
++            else
++                st.remaining = nloop; // IMAGE, and the reserved value 3, which PCSX2 treats as IMAGE
++            continue;
++        }
++
++        const uint32_t available = (sizeBytes - offset) / 16u;
++        const uint32_t count = std::min(st.remaining, available);
++        if (st.format == kGifFmtPacked)
++        {
++            if (st.hasAd)
++            {
++                for (uint32_t i = 0; i < count; ++i)
++                {
++                    if (st.regs[(st.position + i) % st.nreg] != kRegAd)
++                        continue;
++                    uint64_t lo = 0;
++                    uint64_t hi = 0;
++                    std::memcpy(&lo, data + offset + i * 16u, sizeof(lo));
++                    std::memcpy(&hi, data + offset + i * 16u + 8u, sizeof(hi));
++                    applyStatusWrite(regs, static_cast<uint8_t>(hi & 0xFFu), lo);
++                }
++            }
++            st.position = (st.position + count) % st.nreg;
++        }
++        st.remaining -= count;
++        offset += count * 16u;
++    }
++}
++
+ GifArbiter::GifArbiter(ProcessPacketFn processFn)
+     : m_processFn(std::move(processFn))
+ {
+ }
+ 
++void GifArbiter::setHostGs(const Ps2HostGs *host, GSRegisters *privRegs)
++{
++    if (host && !host->gif_transfer)
++        host = nullptr;
++    m_hostGs = host;
++    m_privRegs = host ? privRegs : nullptr;
++    m_scanner.reset();
++}
++
++void GifArbiter::notifyGsReset()
++{
++    if (!m_hostGs)
++        return;
++    drain();
++    m_scanner.reset();
++    if (m_hostGs->reset)
++        m_hostGs->reset(m_hostGs->user);
++}
+ bool GifArbiter::isImagePacket(const uint8_t *data, uint32_t sizeBytes)
+ {
+     if (!data || sizeBytes < 16u)
+@@ -20,7 +170,7 @@ bool GifArbiter::isImagePacket(const uint8_t *data, uint32_t sizeBytes)
+ 
+ void GifArbiter::submit(GifPathId pathId, const uint8_t *data, uint32_t sizeBytes, bool path2DirectHl)
+ {
+-    if (!data || sizeBytes < 16 || !m_processFn)
++    if (!data || sizeBytes < 16 || (!m_processFn && !m_hostGs))
+         return;
+ 
+     GifArbiterPacket pkt;
+@@ -34,7 +184,7 @@ void GifArbiter::submit(GifPathId pathId, const uint8_t *data, uint32_t sizeByte
+ 
+ void GifArbiter::drain()
+ {
+-    if (!m_processFn)
++    if (!m_processFn && !m_hostGs)
+         return;
+ 
+     std::stable_sort(m_queue.begin(), m_queue.end(),
+@@ -54,7 +204,18 @@ void GifArbiter::drain()
+     for (size_t i = 0; i < m_queue.size(); ++i)
+     {
+         auto &pkt = m_queue[i];
+-        if (!pkt.data.empty())
++        if (m_hostGs)
++        {
++            // The host GS replaces the runtime's GS. A GIF qword is 16 bytes: drop a partial one.
++            const uint32_t bytes = static_cast<uint32_t>(pkt.data.size()) & ~15u;
++            if (bytes != 0)
++            {
++                if (m_privRegs)
++                    m_scanner.feed(pkt.pathId, pkt.data.data(), bytes, *m_privRegs);
++                m_hostGs->gif_transfer(m_hostGs->user, static_cast<int>(pkt.pathId), pkt.data.data(), bytes);
++            }
++        }
++        else if (!pkt.data.empty())
+         {
+             m_processFn(pkt.data.data(), static_cast<uint32_t>(pkt.data.size()));
+         }
+diff --git a/ps2xRuntime/src/lib/ps2_memory.cpp b/ps2xRuntime/src/lib/ps2_memory.cpp
+index 37b6a4d..559b959 100644
+--- a/ps2xRuntime/src/lib/ps2_memory.cpp
++++ b/ps2xRuntime/src/lib/ps2_memory.cpp
+@@ -98,6 +98,7 @@ namespace
+     }
+ 
+     constexpr uint32_t kGsCsrRegOffset = 0x1000u;
++    constexpr uint32_t kGsCsrResetBit = 0x200u; // CSR.RESET
+ 
+     // Atomically apply a 32-bit write to one half (off=0 low dword, off=4 high
+     // dword) of the GS CSR register. Bits 0..1 of the low dword (SIGNAL/FINISH) are
+@@ -960,6 +961,8 @@ void PS2Memory::write32(uint32_t address, uint32_t value)
+             // CSR: bits 0..1 of the low dword are write-one-to-clear status bits.
+             // Done as a single atomic RMW -- see writeCsrHalf's comment.
+             writeCsrHalf(gs_regs.csr, off, value);
++            if (off == 0u && (value & kGsCsrResetBit) != 0u && m_gifArbiter)
++                m_gifArbiter->notifyGsReset(); // host GS only
+         }
+         else if (uint64_t *reg = gsRegPtr(gs_regs, address))
+         {
+@@ -1019,6 +1022,8 @@ void PS2Memory::write64(uint32_t address, uint64_t value)
+             // CSR: bits 0..1 are write-one-to-clear status bits. Done as a single
+             // atomic RMW -- see writeCsrFull's comment.
+             writeCsrFull(gs_regs.csr, value);
++            if ((value & kGsCsrResetBit) != 0u && m_gifArbiter)
++                m_gifArbiter->notifyGsReset(); // host GS only
+         }
+         else if (uint64_t *reg = gsRegPtr(gs_regs, address))
+         {
+@@ -1169,6 +1174,8 @@ bool PS2Memory::writeIORegister(uint32_t address, uint32_t value)
+         if (regOff == kGsCsrRegOffset)
+         {
+             writeCsrHalf(gs_regs.csr, off, value);
++            if (off == 0u && (value & kGsCsrResetBit) != 0u && m_gifArbiter)
++                m_gifArbiter->notifyGsReset(); // host GS only
+         }
+         else if (uint64_t *reg = gsRegPtr(gs_regs, address))
+         {
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index 45cb9d2..bbe8adc 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -2165,12 +2165,14 @@ void PS2Runtime::kickGifDmaChainFromMMIO(uint8_t *rdram,
+     ps2TraceGuestWrite(rdram, GIF_TADR, 4u, tadr, 0u, "WRITE32", ctx);
+     m_memory.writeIORegister(GIF_TADR, tadr);
+     ps2TraceGuestWrite(rdram, GIF_CHCR, 4u, chcr, 0u, "WRITE32", ctx);
+-    if (m_memory.tryProcessNativeGifImageUploadChain(m_gs, tadr, chcr))
++    // The native chain paths write straight into the runtime's own GS, bypassing the GIF
++    // arbiter: they are not used with a host GS, which needs the packets themselves.
++    if (!m_hostGs && m_memory.tryProcessNativeGifImageUploadChain(m_gs, tadr, chcr))
+     {
+         drainCompletedDmacHandlers(rdram);
+         return;
+     }
+-    if (m_memory.tryProcessNativeGifPackedChain(m_gs, tadr, chcr))
++    if (!m_hostGs && m_memory.tryProcessNativeGifPackedChain(m_gs, tadr, chcr))
+     {
+         drainCompletedDmacHandlers(rdram);
+         return;
+@@ -2180,6 +2182,39 @@ void PS2Runtime::kickGifDmaChainFromMMIO(uint8_t *rdram,
+     drainCompletedDmacHandlers(rdram);
+ }
+ 
++void PS2Runtime::setHostGs(const Ps2HostGs *host)
++{
++    if (host && host->gif_transfer)
++    {
++        m_hostGsStorage = *host;
++        m_hostGs = true;
++    }
++    else
++    {
++        m_hostGsStorage = Ps2HostGs{};
++        m_hostGs = false;
++    }
++    const Ps2HostGs *installed = hostGs();
++    m_gifArbiter.setHostGs(installed, &m_memory.gs());
++    m_gs.setHostGs(installed, &m_gifArbiter);
++}
++
++void PS2Runtime::notifyHostGsVsync()
++{
++    if (!m_hostGs)
++        return;
++    m_gifArbiter.drain();
++    if (!m_hostGsStorage.vsync)
++        return;
++    GSRegisters &regs = m_memory.gs();
++    const uint64_t csr = regs.csr.load(std::memory_order_acquire);
++    const uint64_t privRegs[PS2_HOST_GS_PRIV_REG_COUNT] = {
++        regs.pmode, regs.smode1, regs.smode2, regs.srfsh, regs.synch1, regs.synch2, regs.syncv,
++        regs.dispfb1, regs.display1, regs.dispfb2, regs.display2, regs.extbuf, regs.extdata,
++        regs.extwrite, regs.bgcolor, csr, regs.imr, regs.busdir, regs.siglblid};
++    m_hostGsStorage.vsync(m_hostGsStorage.user, privRegs, static_cast<int>((csr >> 13) & 1u));
++}
++
+ void PS2Runtime::requestStop()
+ {
+     m_stopRequested.store(true, std::memory_order_relaxed);
+@@ -2367,6 +2402,8 @@ void PS2Runtime::run()
+     std::thread gameThread([&]()
+                            {
+         ThreadNaming::SetCurrentThreadName("GameThread");
++        if (m_hostGs && m_hostGsStorage.thread_begin)
++            m_hostGsStorage.thread_begin(m_hostGsStorage.user);
+         try
+         {
+             m_eeScheduler->reset(m_memory.getRDRAM(), m_cpuContext);
+@@ -2383,6 +2420,8 @@ void PS2Runtime::run()
+         {
+             std::cerr << "Error during program execution: unknown exception" << std::endl;
+         }
++        if (m_hostGs && m_hostGsStorage.thread_end)
++            m_hostGsStorage.thread_end(m_hostGsStorage.user);
+         gameThreadFinished.store(true, std::memory_order_release); });
+ 
+     uint64_t tick = 0;

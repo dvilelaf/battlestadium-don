@@ -1,0 +1,29 @@
+# T-510: a per-process name for the GS memory shared-memory object.
+#
+# What it fixes: two instances of the port on one PC that reach GSAllocateWrappedMemory at the
+# same instant collide on the fixed name "/GS.mem" (shm_open O_CREAT|O_EXCL): the loser gets
+# EEXIST, GSAllocateWrappedMemory returns nullptr and GSLocalMemory::GSLocalMemory asserts
+# ("Failed to open /GS.mem due to File exists"). The name now carries the process id, so it can
+# no longer collide between processes.
+# Verified: applies with `git apply --check` on the pinned tree (fd9d310c); builds in
+# tools/pipeline/build_gs.sh. The per-process name is observed on the host with strace, and two
+# instances started together run 60 s each without the startup abort (journal 040, T-510).
+#
+# Written for this project. License GPL-3.0-or-later.
+diff --git a/pcsx2/GS/GS.cpp b/pcsx2/GS/GS.cpp
+index 8291c3b..a60fb50 100644
+--- a/pcsx2/GS/GS.cpp
++++ b/pcsx2/GS/GS.cpp
+@@ -1001,7 +1001,11 @@ void* GSAllocateWrappedMemory(size_t size, size_t repeat)
+ {
+ 	pxAssert(s_shm_fd == -1);
+ 
+-	const char* file_name = "/GS.mem";
++	// A name per process: two instances on one PC reached shm_open at the same instant and the
++	// loser got EEXIST (the name is fixed for the whole machine), which made GSLocalMemory abort
++	// at startup. The process id makes the name unique so the O_EXCL open can no longer collide.
++	char file_name[64];
++	snprintf(file_name, sizeof(file_name), "/GS.mem.%d", (int)getpid());
+ 	s_shm_fd = shm_open(file_name, O_RDWR | O_CREAT | O_EXCL, 0600);
+ 	if (s_shm_fd != -1)
+ 	{

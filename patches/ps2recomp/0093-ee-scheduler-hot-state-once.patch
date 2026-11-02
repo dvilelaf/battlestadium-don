@@ -1,0 +1,94 @@
+# 0093: the EE scheduler's hot path reads DonHotState once per call (T-767).
+#
+# Fixes: on the owner's Windows PC the module build spends +0.37 ms per blank more than 63fc1b6 in the
+# EE scheduler (journal 062: EeScheduler::run +0.306, checkpointDue +0.272 as an out-of-line call,
+# accountCycles +0.166; accountCycles grew 75 -> 85 instructions and reloaded m_hot and the hot fields
+# around the opaque advanceEeTimers/flushIopDebt calls since patch 0087). Here: m_hot is read once per
+# call into a DonHotState reference, the fields the checkpoint tests (eeCycle, pending timer bits, the IOP
+# debt) live in locals and are stored once, and checkpointDue is always_inline (the attribute the repo uses
+# in src/game_module/don_guest_decls.h for memcpy). Same statements, same order, same values; the
+# flush path re-reads eeCycle and the timer bits after flushIopDebt. DonHotState layout, size 104 and the
+# module ABI are untouched.
+#
+# Verified: see docs/journal/ and work/t767 (state hash equal to main on the fight route; patch series
+# applies from clean). Original work, no other project.
+diff --git a/ps2xRuntime/include/runtime/ee_scheduler.h b/ps2xRuntime/include/runtime/ee_scheduler.h
+index 662414b..c14c69f 100644
+--- a/ps2xRuntime/include/runtime/ee_scheduler.h
++++ b/ps2xRuntime/include/runtime/ee_scheduler.h
+@@ -315,7 +315,8 @@ public:
+     void run();
+     void requestStop();
+     void postEvent(EeEvent event);
+-    [[nodiscard]] inline bool checkpointDue(uint32_t cycles = kGeneratedCheckpointCycles) noexcept;
++    // always_inline as src/game_module/don_guest_decls.h does for memcpy (patch 0093).
++    [[nodiscard]] __attribute__((always_inline)) inline bool checkpointDue(uint32_t cycles = kGeneratedCheckpointCycles) noexcept;
+     [[nodiscard]] bool checkpointDueSlow() noexcept;
+     // Patch 0054: true from the moment a checkpoint has answered "due" until the run loop is about to call
+     // a guest function again. While it is true the host stack is being unwound to the run loop and no
+@@ -325,6 +326,7 @@ public:
+     // of the idle path and of the vertical-blank wait); read by the host's DON_PACING_LOG diagnostic.
+     [[nodiscard]] uint64_t pacingWaitNs() const noexcept { return m_pacingWaitNs.load(std::memory_order_relaxed); }
+     inline void accountCycles(uint32_t cycles) noexcept;
++    __attribute__((always_inline)) inline uint64_t accountCycles(DonHotState &hot, uint32_t cycles) noexcept;
+     [[nodiscard]] bool isExecutingGuest() const noexcept;
+ 
+     // Hand the IOP every EE cycle it is owed (the batch debt) now, so that its state is current before the
+@@ -544,29 +546,46 @@ private:
+ // Patch 0077: the common path of every guest dispatch, inlined into its callers (the run loop, the
+ // branch dispatcher and the checkpoint the generated code calls). The statements and their order
+ // are those of the former out-of-line versions.
+-inline void EeScheduler::accountCycles(uint32_t cycles) noexcept
++// Patch 0093: the hot fields are reached through one local DonHotState pointer per call (m_hot is read
++// once; the compiler cannot keep a member pointer in a register across the opaque calls below) and the
++// fields the checkpoint tests are carried in locals instead of being reloaded. Same statements, same
++// order and same values as patch 0077. accountCycles returns the EE cycle after the account.
++inline uint64_t EeScheduler::accountCycles(DonHotState &hot, uint32_t cycles) noexcept
+ {
+     const uint64_t elapsed = cycles > 1u ? cycles : 1u;
+-    m_hot->eeCycle += elapsed;
+-    m_hot->pendingEeTimerInterrupts |= m_runtime.memory().advanceEeTimers(elapsed);
+-    m_hot->iopPendingEeCycles += elapsed;
+-    if (m_hot->iopPendingEeCycles >= m_hot->iopBatchEeCycles)
++    uint64_t eeCycle = hot.eeCycle + elapsed;
++    hot.eeCycle = eeCycle;
++    uint32_t pendingTimers = hot.pendingEeTimerInterrupts | m_runtime.memory().advanceEeTimers(elapsed);
++    hot.pendingEeTimerInterrupts = pendingTimers;
++    const uint64_t debt = hot.iopPendingEeCycles + elapsed;
++    hot.iopPendingEeCycles = debt;
++    if (debt >= hot.iopBatchEeCycles)
+     {
+         flushIopDebt();
++        // The flush runs the IOP and moves the fast-path boundary: read both fields again.
++        eeCycle = hot.eeCycle;
++        pendingTimers = hot.pendingEeTimerInterrupts;
+     }
+-    if (m_hot->pendingEeTimerInterrupts != 0u)
++    if (pendingTimers != 0u)
+     {
+-        m_hot->checkpointPending.store(true, std::memory_order_release);
++        hot.checkpointPending.store(true, std::memory_order_release);
+     }
++    return eeCycle;
++}
++
++inline void EeScheduler::accountCycles(uint32_t cycles) noexcept
++{
++    accountCycles(*m_hot, cycles);
+ }
+ 
+ inline bool EeScheduler::checkpointDue(uint32_t cycles) noexcept
+ {
+-    accountCycles(cycles);
+-    ++m_hot->dispatchCount;
+-    if (!m_hot->checkpointPending.load(std::memory_order_relaxed) && m_hot->eeCycle < m_hot->nextFastPathCycle)
++    DonHotState &hot = *m_hot;
++    const uint64_t eeCycle = accountCycles(hot, cycles);
++    ++hot.dispatchCount;
++    if (!hot.checkpointPending.load(std::memory_order_relaxed) && eeCycle < hot.nextFastPathCycle)
+     {
+-        ++m_hot->fastPathCount;
++        ++hot.fastPathCount;
+         return false;
+     }
+     return checkpointDueSlow();

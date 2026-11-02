@@ -1,0 +1,37 @@
+# 0061-pad-get-state-not-open: scePadGetState answers 99 for a (port, slot) that is not open
+#
+# What it fixes: the stub answered 0 (disconnected) for a pad that had not been opened. The SDK's function
+# (the game's own copy at 0x118EB0, read by decompiling it) answers 99 ('c') when its open table has no entry for
+# the (port, slot), and the game depends on it: the pad poll 0x138FB0, in its multitap branch (the connection query
+# says port 0 has a multitap), closes slots 0 of ports 0 and 1 and opens slots 0 to 3 of port 0 only for the
+# (port, slot) whose GetState is 99. With 0 nothing was reopened and the game saw no pad at all in four-player mode.
+# (T-306.) The two-player mode never queries an unopened pad.
+# Verified: tests/runtime/host_pad_source_test (GetState of the four slots of a multitap port before they are opened);
+# the four-player runs and the regression suite of T-306 (docs/journal/026).
+#
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
+@@ -13,6 +13,10 @@
+         constexpr int32_t kPadStateDisconnected = 0;
+         constexpr int32_t kPadStateExecCmd = 5;
+         constexpr int32_t kPadStateStable = 6;
++        // What the SDK's scePadGetState returns for a (port, slot) that was not opened with scePadPortOpen. Read from
++        // the game's own copy of the function (0x118EB0: its open-table entry is 0 -> 'c' = 99), which the game
++        // relies on: its pad poll opens a slot only while GetState says 99 (0x138FB0, the multitap branch).
++        constexpr int32_t kPadStateNotOpen = 99;
+         // Capacity of the pad table (a PS2 has two ports, a multitap gives a port up to four slots)...
+         constexpr size_t kPadPortCount = PS2_HOST_PAD_MAX_PORTS;
+         constexpr size_t kPadMaxSlotCount = PS2_HOST_PAD_MAX_SLOTS;
+@@ -532,7 +536,11 @@
+         PadPortState *portState = lookupPadPortStateLocked(static_cast<int>(getRegU32(ctx, 4)),
+                                                            static_cast<int>(getRegU32(ctx, 5)));
+         int32_t state = kPadStateDisconnected;
+-        if (portState && portState->open &&
++        if (portState && !portState->open)
++        {
++            state = kPadStateNotOpen;
++        }
++        else if (portState && portState->open &&
+             padConnected(runtime, static_cast<int>(getRegU32(ctx, 4)), static_cast<int>(getRegU32(ctx, 5))))
+         {
+             if (portState->transientState != 0u)

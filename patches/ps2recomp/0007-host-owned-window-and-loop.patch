@@ -1,0 +1,299 @@
+Host-owned window and loop: the runtime creates no window or audio device and the host drives the game thread
+
+What it fixes: PS2Runtime::initialize() always opened a raylib window, an audio device and capped the
+frame rate at 60, and run() was one monolithic function (window loop + game thread). A program that
+embeds the runtime and does its own windowing, input, sound and presentation (the DON port: SDL3 and
+the PCSX2 GS) could not do that. Adds, in ps2xRuntime/include/ps2_runtime.h and src/lib/ps2_runtime.cpp:
+
+  setHostOwnsWindow(bool) / hostOwnsWindow()   before initialize(): no SetConfigFlags, InitWindow,
+        InitAudioDevice, SetTargetFPS, no debug UI init; the runtime's own sound playback is left
+        "not ready" so it never reaches raylib.
+  startGameThread()      the head of the old run() (reset of SIF/IOP/audio/MPEG stub state, kernel state,
+        registers) plus the std::thread; returns at once. false if already started.
+  isGameThreadRunning(), gameThreadFailed()   running until the EE scheduler has returned; failed if the
+        game thread ended with an exception (it is printed as before).
+  stopGameThread()       requestStop() and join; safe when not started and repeated. The destructor calls
+        it (a joinable std::thread must not be destroyed).
+  run()                  unchanged for the runtime's own executable (it is now startGameThread() + the same
+        raylib loop + stopGameThread()). With setHostOwnsWindow(true) it only waits, without drawing, for
+        the game thread to end or requestStop().
+
+raylib call sites and what happens to them with the host owning the window (none is reached, on any thread):
+  initialize(): SetConfigFlags, InitWindow, InitAudioDevice, IsAudioDeviceReady, SetTargetFPS -> skipped;
+  run(): GenImageColor, LoadTextureFromImage, UnloadImage, UploadFrame (UpdateTexture), BeginDrawing,
+        ClearBackground, GetScreenWidth/Height, DrawTexturePro, EndDrawing, WindowShouldClose,
+        UnloadTexture, CloseWindow -> only in the branch of a runtime that owns its window;
+  ~PS2Runtime(): IsAudioDeviceReady, CloseAudioDevice, IsWindowReady, CloseWindow -> guarded by the flag;
+  ps2_audio.cpp (Load/Play/Stop/Unload Sound, IsSoundPlaying): only reached through playDecodedSample,
+        which returns first while the audio is "not ready" (always the case here); stopAll/prune iterate
+        an empty list;
+  the pad reads (ps2_pad.cpp, Kernel/Stubs/Pad.cpp: IsKeyDown, IsGamepad*, GetGamepadAxisMovement) run on
+        the game thread and are handled by patch 0008.
+A fix inside startGameThread(): EeScheduler::reset() clears the scheduler's stop flag, so a stop
+requested between start and that reset (a host calling stopGameThread() right after startGameThread())
+was lost and the join hung; the thread now re-applies a pending stop after reset(). The old run() had the
+same window, only much narrower.
+
+How it was verified: tests/runtime/host_loop_test.cpp, with DISPLAY unset: a PS2Runtime with host
+functions registered as the guest and a fake host GS; 131 vsyncs in 2.2 s (60.00 Hz), thread_begin,
+vsyncs, thread_end in order and on one thread that is the guest's thread and not the caller's; start and
+stop return; stop right after start 20 times; run() of a host-owned runtime returns on requestStop();
+every raylib function the library references is replaced in the test by a recorder: 0 calls with the
+host owning the window, and a runtime that does not own it records SetConfigFlags, InitWindow,
+InitAudioDevice, SetTargetFPS (positive control). Not exercised: the runtime's own raylib loop (needs a
+display) and the game's generated code.
+
+Based on: original work for this project against PS2Recomp commit
+2c5fbb9389e11dd95693385969490c9e8e6f57b4, on top of patches 0001 to 0006.
+
+diff --git a/ps2xRuntime/include/ps2_runtime.h b/ps2xRuntime/include/ps2_runtime.h
+index 185cbe9..c4a3dd4 100644
+--- a/ps2xRuntime/include/ps2_runtime.h
++++ b/ps2xRuntime/include/ps2_runtime.h
+@@ -16,6 +16,7 @@
+ #include <smmintrin.h> // For SSE4.1 instructions
+ #endif
+ #include <atomic>
++#include <thread>
+ #include <array>
+ #include <mutex>
+ #include <filesystem>
+@@ -286,11 +287,40 @@ public:
+     PS2Runtime();
+     ~PS2Runtime();
+ 
++    // Host-owned window, audio device and loop (for a program that embeds the runtime and does its
++    // own windowing, input and sound). Call before initialize(). With it set, initialize() creates
++    // no window and no audio device and sets no frame cap, and no code of the runtime calls the
++    // window/drawing/texture/audio/input API of raylib on any thread: presentation is the host's
++    // business (it receives the picture from its host GS, see setHostGs/Ps2HostGs::vsync).
++    // The runtime's own executable leaves this off and keeps its raylib window.
++    void setHostOwnsWindow(bool owns);
++    inline bool hostOwnsWindow() const { return m_hostOwnsWindow; }
++
+     bool initialize(const char *title = "PS2 Game");
+     bool syncCoreSubsystems();
+     bool loadELF(const std::string &elfPath);
++
++    // The runtime's own loop: starts the game thread, then (raylib window) presents frames until
++    // the game ends or the window closes, then stops and joins. With setHostOwnsWindow(true) it
++    // only waits (no drawing) until the game thread ends or requestStop() is called.
+     void run();
+ 
++    // The host's loop, for setHostOwnsWindow(true) (also usable without it, with the game thread
++    // running next to the caller's own loop):
++    //   startGameThread()  prepares the guest state as run() does and starts the game thread
++    //                      (the EE scheduler's executor; Ps2HostGs thread_begin/thread_end and every
++    //                      callback of the host GS run on it). Returns at once. false if already
++    //                      started and not stopped.
++    //   isGameThreadRunning()  true from startGameThread() until the guest scheduler has returned
++    //                      (stop requested, or the guest ended, or an exception ended it).
++    //   gameThreadFailed() true if the game thread ended with an exception (it has been printed).
++    //   stopGameThread()   requestStop(), then joins. Safe to call when not started and more than
++    //                      once. Blocks until thread_end of the host GS has returned.
++    bool startGameThread();
++    bool isGameThreadRunning() const;
++    bool gameThreadFailed() const;
++    void stopGameThread();
++
+     [[nodiscard]] ps2x::iop::ModuleLoadResult loadIopModule(std::string_view path, const void *arguments = nullptr, uint32_t argumentSize = 0);
+     [[nodiscard]] ps2x::iop::ModuleLoadResult loadIopModuleBuffer(uint32_t guestAddress, const void *arguments = nullptr, uint32_t argumentSize = 0);
+     [[nodiscard]] bool stopIopModule(int32_t moduleId, int32_t *result = nullptr);
+@@ -501,6 +531,10 @@ private:
+     GS m_gs;
+     Ps2HostGs m_hostGsStorage;
+     bool m_hostGs = false;
++    bool m_hostOwnsWindow = false;
++    std::thread m_gameThread;
++    std::atomic<bool> m_gameThreadFinished{true};
++    std::atomic<bool> m_gameThreadFailed{false};
+     std::unique_ptr<PS2IopHostAdapter> m_iopHost;
+     std::unique_ptr<ps2x::iop::IopSubsystem> m_iopSubsystem;
+     PS2AudioBackend m_audioBackend;
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index bbe8adc..cdc5659 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -528,14 +528,15 @@ PS2Runtime::~PS2Runtime()
+ {
+     try
+     {
+-        requestStop();
++        stopGameThread(); // never destroy a joinable std::thread (also requests the stop)
+         m_iopSubsystem.reset();
+         m_iopHost.reset();
+ #if defined(PLATFORM_VITA)
+         m_audioBackend.stopAll();
+         m_audioBackend.setAudioReady(false);
+ #else
+-        if (IsAudioDeviceReady())
++        // A host-owned window/audio device is not ours to query or close (and raylib is not called).
++        if (!m_hostOwnsWindow && IsAudioDeviceReady())
+         {
+             CloseAudioDevice();
+             m_audioBackend.setAudioReady(false);
+@@ -547,7 +548,7 @@ PS2Runtime::~PS2Runtime()
+             m_debugUiInitialized = false;
+         }
+ 
+-        if (IsWindowReady())
++        if (!m_hostOwnsWindow && IsWindowReady())
+         {
+             CloseWindow();
+         }
+@@ -713,6 +714,11 @@ bool PS2Runtime::syncCoreSubsystems()
+     return true;
+ }
+ 
++void PS2Runtime::setHostOwnsWindow(bool owns)
++{
++    m_hostOwnsWindow = owns;
++}
++
+ bool PS2Runtime::initialize(const char *title)
+ {
+     try
+@@ -728,6 +734,13 @@ bool PS2Runtime::initialize(const char *title)
+             std::cerr << "Failed to bind runtime core subsystems" << std::endl;
+             return false;
+         }
++        if (m_hostOwnsWindow)
++        {
++            // The host owns the window, the audio device and the frame pacing: no raylib call.
++            // The runtime's own sound playback stays "not ready", so it never reaches raylib.
++            m_audioBackend.setAudioReady(false);
++            return true;
++        }
+ #if defined(PLATFORM_VITA)
+         InitWindow(HOST_WINDOW_WIDTH, HOST_WINDOW_HEIGHT, title); // raylib vita does not support audio
+ #else
+@@ -2374,8 +2387,13 @@ void PS2Runtime::HandleIntegerOverflow(R5900Context *ctx)
+     raiseCop0Exception(ctx, EXCEPTION_INTEGER_OVERFLOW);
+ }
+ 
+-void PS2Runtime::run()
++bool PS2Runtime::startGameThread()
+ {
++    if (m_gameThread.joinable())
++    {
++        return false; // started and not yet stopped (stopGameThread() joins)
++    }
++    m_gameThreadFailed.store(false, std::memory_order_relaxed);
+     m_stopRequested.store(false, std::memory_order_relaxed);
+     ps2_stubs::resetSifState();
+     resetIop();
+@@ -2392,14 +2410,9 @@ void PS2Runtime::run()
+ 
+     RUNTIME_LOG("Starting execution at address 0x" << std::hex << m_cpuContext.pc << std::dec);
+ 
+-    // A blank image to use as a framebuffer
+-    Image blank = GenImageColor(FB_WIDTH, FB_HEIGHT, BLANK);
+-    Texture2D frameTex = LoadTextureFromImage(blank);
+-    UnloadImage(blank);
+-
+-    std::atomic<bool> gameThreadFinished{false};
++    m_gameThreadFinished.store(false, std::memory_order_release);
+ 
+-    std::thread gameThread([&]()
++    m_gameThread = std::thread([this]()
+                            {
+         ThreadNaming::SetCurrentThreadName("GameThread");
+         if (m_hostGs && m_hostGsStorage.thread_begin)
+@@ -2407,6 +2420,12 @@ void PS2Runtime::run()
+         try
+         {
+             m_eeScheduler->reset(m_memory.getRDRAM(), m_cpuContext);
++            if (isStopRequested())
++            {
++                // reset() clears the scheduler's stop flag; a stop asked before this point (host
++                // loop calling stopGameThread() right after startGameThread()) must not be lost.
++                m_eeScheduler->requestStop();
++            }
+             m_eeScheduler->run();
+             uint32_t pc = m_debugPc.load(std::memory_order_relaxed);
+             RUNTIME_LOG("Game thread returned. PC=0x" << std::hex << pc
+@@ -2415,17 +2434,69 @@ void PS2Runtime::run()
+         catch (const std::exception &e)
+         {
+             std::cerr << "Error during program execution: " << e.what() << std::endl;
++            m_gameThreadFailed.store(true, std::memory_order_release);
+         }
+         catch (...)
+         {
+             std::cerr << "Error during program execution: unknown exception" << std::endl;
++            m_gameThreadFailed.store(true, std::memory_order_release);
+         }
+         if (m_hostGs && m_hostGsStorage.thread_end)
+             m_hostGsStorage.thread_end(m_hostGsStorage.user);
+-        gameThreadFinished.store(true, std::memory_order_release); });
++        m_gameThreadFinished.store(true, std::memory_order_release); });
++    return true;
++}
++
++bool PS2Runtime::isGameThreadRunning() const
++{
++    return m_gameThread.joinable() && !m_gameThreadFinished.load(std::memory_order_acquire);
++}
++
++bool PS2Runtime::gameThreadFailed() const
++{
++    return m_gameThreadFailed.load(std::memory_order_acquire);
++}
++
++void PS2Runtime::stopGameThread()
++{
++    requestStop();
++    if (m_gameThread.joinable())
++    {
++        m_gameThread.join();
++    }
++}
++
++void PS2Runtime::run()
++{
++    if (m_hostOwnsWindow)
++    {
++        // No window, no drawing: wait for the game thread (the host's own executable normally
++        // calls startGameThread()/stopGameThread() from its own loop instead).
++        if (!startGameThread())
++        {
++            return;
++        }
++        while (!isStopRequested() && isGameThreadRunning())
++        {
++            std::this_thread::sleep_for(std::chrono::milliseconds(5));
++        }
++        stopGameThread();
++        return;
++    }
++
++    // A blank image to use as a framebuffer
++    Image blank = GenImageColor(FB_WIDTH, FB_HEIGHT, BLANK);
++    Texture2D frameTex = LoadTextureFromImage(blank);
++    UnloadImage(blank);
++
++    if (!startGameThread())
++    {
++        UnloadTexture(frameTex);
++        return;
++    }
+ 
+     uint64_t tick = 0;
+-    while (!isStopRequested() && !gameThreadFinished.load(std::memory_order_acquire))
++    while (!isStopRequested() && !m_gameThreadFinished.load(std::memory_order_acquire))
+     {
+         PS2_IF_AGRESSIVE_LOGS({
+             tick++;
+@@ -2493,11 +2564,7 @@ void PS2Runtime::run()
+         }
+     }
+ 
+-    requestStop();
+-    if (gameThread.joinable())
+-    {
+-        gameThread.join();
+-    }
++    stopGameThread();
+ 
+     if (m_debugUiInitialized && m_debugUiShutdownCallback)
+     {

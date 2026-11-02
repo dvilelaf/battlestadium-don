@@ -1,0 +1,215 @@
+Patch 0081: the common case of dispatchGuestBranch is inline.
+What: PS2Runtime::dispatchGuestBranch (every inter-function transfer of the recompiled code) was an out-of-line call; its
+common case (the EE checkpoint says "not due", the transfer is a call, and the target is in the function table) is now an
+inline function (runtime/ps2_dispatch_inline.h, included at the end of ee_scheduler.h). Everything else is in
+dispatchGuestBranchTail(), which holds the old body after the checkpoint. The 8-cycle charge, the checkpoint point and the
+dispatch history (DON_DISPATCH_HISTORY, now a plain bool read per call) behave as before.
+Verified: perf_fight.py (4-player fight, blanks 6000-7800): state hash a71d52ac6fe9b90e639d4e7d33808bbd6ecd50e0d1c28f1c8e67fac6b07906e5,
+equal to the reference, with this patch in the binary; the linux-dev build passes.
+Original work, GPL-3.0.
+--- a/ps2xRuntime/include/ps2_runtime.h
++++ b/ps2xRuntime/include/ps2_runtime.h
+@@ -389,13 +389,24 @@
+     // function; records the dispatch in the diagnostic history when it has (as lookupFunction does).
+     RecompiledFunction findFunction(uint32_t address);
+     bool hasFunction(uint32_t address) const;
+-    bool dispatchGuestBranch(uint8_t *rdram,
+-                             R5900Context *ctx,
+-                             uint32_t targetPc,
+-                             uint32_t sourcePc,
+-                             uint32_t fallthroughPc,
+-                             GuestBranchKind kind,
+-                             const char *debugName);
++    // Piece 1 of the direct-call work: the common case (a call to a function in the table) is inline,
++    // defined in runtime/ps2_dispatch_inline.h (included at the end of ee_scheduler.h, which this header
++    // includes at its end). The cases that are not the common one are in dispatchGuestBranchTail().
++    inline bool dispatchGuestBranch(uint8_t *rdram,
++                                    R5900Context *ctx,
++                                    uint32_t targetPc,
++                                    uint32_t sourcePc,
++                                    uint32_t fallthroughPc,
++                                    GuestBranchKind kind,
++                                    const char *debugName);
++    // Everything dispatchGuestBranch does after its checkpoint (which has already answered "not due").
++    bool dispatchGuestBranchTail(uint8_t *rdram,
++                                 R5900Context *ctx,
++                                 uint32_t targetPc,
++                                 uint32_t sourcePc,
++                                 uint32_t fallthroughPc,
++                                 GuestBranchKind kind,
++                                 const char *debugName);
+     void reportMissingFunction(uint8_t *rdram,
+                                R5900Context *ctx,
+                                uint32_t targetPc,
+@@ -656,4 +667,11 @@
+ extern const uint32_t g_ps2RecompiledFunctionTableSlotCount;
+ extern PS2Runtime::RecompiledFunction g_ps2RecompiledFunctionTable[];
+ 
++// Whether the last 64 dispatched guest addresses are recorded (DON_DISPATCH_HISTORY=1; they only appear in the
++// missing-function report). Read once at start-up; plain bool so the dispatch fast path pays one load.
++extern bool g_ps2DispatchHistoryEnabled;
++void ps2PushDispatchPc(uint32_t pc);
++
++#include "runtime/ee_scheduler.h"
++
+ #endif // PS2_RUNTIME_H
+--- a/ps2xRuntime/include/runtime/ee_scheduler.h
++++ b/ps2xRuntime/include/runtime/ee_scheduler.h
+@@ -578,3 +578,5 @@
+     }
+     return checkpointDueSlow();
+ }
++
++#include "runtime/ps2_dispatch_inline.h"
+--- a/ps2xRuntime/include/runtime/ps2_dispatch_inline.h
++++ b/ps2xRuntime/include/runtime/ps2_dispatch_inline.h
+@@ -0,0 +1,65 @@
++#pragma once
++
++// Piece 1 of the direct-call work: the inline fast path of PS2Runtime::dispatchGuestBranch. Included only
++// from the end of ee_scheduler.h, where EeScheduler is complete (ps2_runtime.h includes that header at its
++// end, so every file that sees PS2Runtime sees this).
++#include "ps2_runtime.h"
++#include "runtime/ee_scheduler.h"
++
++inline bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
++                                            R5900Context *ctx,
++                                            uint32_t targetPc,
++                                            uint32_t sourcePc,
++                                            uint32_t fallthroughPc,
++                                            GuestBranchKind kind,
++                                            const char *debugName)
++{
++    ctx->pc = targetPc;
++
++    // Every inter-function transfer is also a deterministic EE safe point (the same 8-cycle charge, at the
++    // same point, as the out-of-line version had).
++    if (m_eeScheduler && m_eeScheduler->checkpointDue(EeScheduler::kGuestDispatchCycles))
++    {
++        return false;
++    }
++
++    if ((kind == GuestBranchKind::DirectCall || kind == GuestBranchKind::IndirectCall) &&
++        (targetPc & 3u) == 0u && targetPc >= g_ps2RecompiledFunctionTableBase &&
++        targetPc < g_ps2RecompiledFunctionTableEnd &&
++        ((targetPc - g_ps2RecompiledFunctionTableBase) >> 2) < g_ps2RecompiledFunctionTableSlotCount)
++    {
++        const RecompiledFunction targetFn =
++            g_ps2RecompiledFunctionTable[(targetPc - g_ps2RecompiledFunctionTableBase) >> 2];
++        if (targetFn != nullptr)
++        {
++            if (g_ps2DispatchHistoryEnabled)
++            {
++                ps2PushDispatchPc(targetPc);
++            }
++
++            targetFn(rdram, ctx, this);
++
++            if (isStopRequested() || ctx->pc == 0u)
++            {
++                return false;
++            }
++
++            // Patch 0054: a checkpoint answered "due" somewhere below: ctx->pc is where the guest resumes,
++            // not the callee's return, even when it equals this callee's entry (a recursive call being
++            // unwound).
++            if (m_eeScheduler && m_eeScheduler->unwinding())
++            {
++                return false;
++            }
++
++            if (ctx->pc == targetPc)
++            {
++                ctx->pc = fallthroughPc;
++            }
++
++            return ctx->pc == fallthroughPc;
++        }
++    }
++
++    return dispatchGuestBranchTail(rdram, ctx, targetPc, sourcePc, fallthroughPc, kind, debugName);
++}
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -1,3 +1,4 @@
++#include <cstdlib>
+ #include "ps2_runtime.h"
+ #include "ps2_log.h"
+ #include "ps2_stubs.h"
+@@ -1369,6 +1370,17 @@
+     }
+ }
+ 
++bool g_ps2DispatchHistoryEnabled = []
++{
++    const char *value = std::getenv("DON_DISPATCH_HISTORY");
++    return value != nullptr && value[0] != '\0' && value[0] != '0';
++}();
++
++void ps2PushDispatchPc(uint32_t pc)
++{
++    pushDispatchPc(pc);
++}
++
+ PS2Runtime::RecompiledFunction PS2Runtime::findFunction(uint32_t address)
+ {
+     uint32_t slot = 0u;
+@@ -1377,7 +1389,10 @@
+         RecompiledFunction fn = g_ps2RecompiledFunctionTable[slot];
+         if (fn != nullptr)
+         {
+-            pushDispatchPc(address);
++            if (g_ps2DispatchHistoryEnabled)
++            {
++                pushDispatchPc(address);
++            }
+             return fn;
+         }
+     }
+@@ -1386,7 +1401,10 @@
+ 
+ PS2Runtime::RecompiledFunction PS2Runtime::lookupFunction(uint32_t address)
+ {
+-    pushDispatchPc(address);
++    if (g_ps2DispatchHistoryEnabled)
++    {
++        pushDispatchPc(address);
++    }
+ 
+     uint32_t slot = 0u;
+     if (generatedFunctionTableSlot(address, slot))
+@@ -1592,25 +1610,18 @@
+     }
+ }
+ 
+-bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
+-                                     R5900Context *ctx,
+-                                     uint32_t targetPc,
+-                                     uint32_t sourcePc,
+-                                     uint32_t fallthroughPc,
+-                                     GuestBranchKind kind,
+-                                     const char *debugName)
++// What dispatchGuestBranch (inline, runtime/ps2_dispatch_inline.h) does after its checkpoint, for every case
++// but a call to a function in the table: a jump or return, a missing target, a target outside the table.
++bool PS2Runtime::dispatchGuestBranchTail(uint8_t *rdram,
++                                         R5900Context *ctx,
++                                         uint32_t targetPc,
++                                         uint32_t sourcePc,
++                                         uint32_t fallthroughPc,
++                                         GuestBranchKind kind,
++                                         const char *debugName)
+ {
+-    ctx->pc = targetPc;
+     const bool isCall = (kind == GuestBranchKind::DirectCall || kind == GuestBranchKind::IndirectCall);
+ 
+-    // Every inter-function transfer is also a deterministic EE safe point.
+-    // Backward edges inside generated functions use eeCheckpointDue(), while
+-    // this charge bounds straight-line call chains that have no local loop.
+-    if (m_eeScheduler && m_eeScheduler->checkpointDue(EeScheduler::kGuestDispatchCycles))
+-    {
+-        return false;
+-    }
+-
+     if (!isCall)
+     {
+         if (!hasFunction(targetPc))

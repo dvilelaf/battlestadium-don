@@ -1,0 +1,18 @@
+# Guest addresses that the port replaces at run time with native code (PS2Runtime::replaceFunction in
+# src/game/don_overrides.cpp). One address per line; '#' starts a comment.
+#
+# tools/pipeline/make_config.py passes this list to the recompiler (native_overrides in the generated TOML), and a
+# direct C++ call between recompiled functions must never be emitted to one of these addresses: the call has to keep
+# going through the dispatcher or the replacement would be bypassed. The game checks at startup that every
+# replaceFunction target is listed (a dev build exits with code 2 if one is missing; src/game/don_overrides.cpp).
+#
+# Add an address here in the same change that adds a replaceFunction call for it.
+0x0010C868  # donWrite: the game's write(), traced
+0x00138B00  # donFrameCounter: the frame loop counter (only with DON_TRACE_FRAMES/THREADS/IOP/STATE)
+0x00138EE0  # donVblankHandler: the vblank handler (same condition)
+0x00255CA0  # donMtapInit: the multitap init
+0x00255DC0  # donMtapPortOpen: the multitap port open
+0x00255E30  # donMtapPortClose: the multitap port close
+0x00255EA0  # donMtapGetConnection: the multitap connection query
+0x0011A7A8  # sceCdSearchFile handler (kHandlerBindings)
+0x001146C8  # sceSifFreeIopHeap handler (kHandlerBindings)

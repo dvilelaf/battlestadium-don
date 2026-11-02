@@ -1,0 +1,42 @@
+# 0075: video decode independent of the host CPU (bit-exact).
+# The MPEG-2 pictures decoded by FFmpeg are written into guest RAM and online play compares state
+# hashes. FFmpeg picks SIMD variants per CPU (SSE2/AVX2/AVX-512 IDCT, put/avg pixels, swscale YUV->RGBA)
+# whose output differs in the last bit, so ramHash diverged between an Intel i5-9600K and a Ryzen 7700X
+# from the first movie on (identical eeCycle/iopCycles). Fix: av_force_cpu_flags(0) before the decoder
+# opens (C code paths only), AV_CODEC_FLAG_BITEXACT, idct_algo FF_IDCT_SIMPLE, and SWS_BITEXACT |
+# SWS_ACCURATE_RND in the scaler.
+# Verified: 4-player fight with videos, 129 state lines identical in 2 runs, and identical when forcing the native CPU flags (AVX-512) or SSE2 only. Cost: ~0.8 ms per packet in C vs ~0.4 ms native (loaded machine).
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+@@ -11,6 +11,7 @@
+ {
+ #include <libavcodec/avcodec.h>
+ #include <libavutil/error.h>
++#include <libavutil/cpu.h>
+ #include <libavutil/log.h>
+ #include <libswscale/swscale.h>
+ }
+@@ -263,7 +264,13 @@
+                     return false;
+                 }
+ 
++                // The decoded pixels end up in guest RAM and online play compares
++                // state hashes, so the decode must not depend on the host CPU:
++                // C code paths only (no SSE/AVX variants) and bit-exact algorithms.
++                av_force_cpu_flags(0);
+                 m_codecCtx->thread_count = 1;
++                m_codecCtx->flags |= AV_CODEC_FLAG_BITEXACT;
++                m_codecCtx->idct_algo = FF_IDCT_SIMPLE;
+                 m_codecCtx->pkt_timebase = AVRational{1, 90000};
+                 // feedElementaryStream() does not create the decoder until a valid
+                 // MPEG sequence header has been found.  Dropping non-key pictures
+@@ -389,7 +396,7 @@
+                         width,
+                         height,
+                         AV_PIX_FMT_RGBA,
+-                        SWS_BILINEAR,
++                        SWS_BILINEAR | SWS_BITEXACT | SWS_ACCURATE_RND,
+                         nullptr,
+                         nullptr,
+                         nullptr);

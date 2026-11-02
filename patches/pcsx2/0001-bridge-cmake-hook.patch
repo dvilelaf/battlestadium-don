@@ -1,0 +1,26 @@
+# T-105: CMake hook that builds an external bridge directory against PCSX2's internal targets.
+#
+# What it fixes: PCSX2's targets (PCSX2, PCSX2_FLAGS) are only visible inside its CMake project,
+# so a library that reuses the GS has to be added from within it. When DON_GS_BRIDGE_SOURCE_DIR
+# is defined, the top-level CMakeLists adds that directory after `add_subdirectory(pcsx2)`.
+# Verified: configure and build of src/gsbridge with tools/pipeline/build_gs.sh (T-105).
+#
+# Based on: Fukami (https://github.com/danisandoval/fukami), commit
+# e8818121566cfaf3d361e38745860b0a9438e27b, tools/patches/pcsx2/0001-bridge-target-and-local-memory-entry-points.patch
+# (only the CMake hook; variable renamed, no C-scanline option). License GPL-3.0-or-later.
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index b0c3945..add0072 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -48,6 +48,11 @@ add_subdirectory(common)
+ # make pcsx2
+ add_subdirectory(pcsx2)
+ 
++# Out-of-tree bridge library built against the internal targets (PCSX2, PCSX2_FLAGS).
++if(DEFINED DON_GS_BRIDGE_SOURCE_DIR)
++	add_subdirectory("${DON_GS_BRIDGE_SOURCE_DIR}" don-gs-bridge)
++endif()
++
+ if(ENABLE_QT_UI)
+ 	add_subdirectory(pcsx2-qt)
+ endif()

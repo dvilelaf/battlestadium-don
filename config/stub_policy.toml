@@ -1,0 +1,259 @@
+# Policy for the SDK functions that the analyzer proposes to replace with runtime handlers.
+# Written by T-020; see docs/knowledge/11-stub-policy.md for the reasons and the open questions.
+# stub = replaced by the runtime handler; recompile = original code kept; review = undecided (resolved by the orchestrator).
+# The 24 entries that T-020 left as review were decided on 2026-10-11: see "Review" in the document.
+# T-011 (tools/pipeline/make_config.py) only passes the names marked "stub".
+
+default = "recompile"
+
+[policy]
+
+# GS: registers, display and vsync
+# sceGsSyncV and sceGsSyncVCallback wait on / hook the vertical blank through the EE scheduler: stub.
+# The other 15 write through runtime->gs() (the PS2Recomp GS, which D4 does not use) and share host-side
+# state (g_gparam) with the sceGsSetDef* builders, so they have to be decided together: see Review Q-GS.
+sceGsSyncV = "stub"
+sceGsSyncVCallback = "stub"
+sceGsResetGraph = "stub"  # was review (Q-GS); decided by the orchestrator on 2026-10-11
+sceGsResetPath = "stub"  # was review (Q-GS); decided by the orchestrator on 2026-10-11
+sceGsSetDefDispEnv = "stub"  # was review (Q-GS); decided by the orchestrator on 2026-10-11
+sceGsPutDispEnv = "stub"  # was review (Q-GS); decided by the orchestrator on 2026-10-11
+sceGszbufaddr = "stub"  # was review (Q-GS); decided by the orchestrator on 2026-10-11
+sceGsSetDefDrawEnv = "stub"  # was review (Q-GS); decided by the orchestrator on 2026-10-11
+sceGsSetDefClear = "stub"  # was review (Q-GS); decided by the orchestrator on 2026-10-11
+sceGsPutDrawEnv = "stub"  # was review (Q-GS); decided by the orchestrator on 2026-10-11
+sceGsSetDefDBuff = "stub"  # was review (Q-GS); decided by the orchestrator on 2026-10-11
+sceGsSwapDBuff = "stub"  # was review (Q-GS); decided by the orchestrator on 2026-10-11
+sceGsSyncPath = "stub"  # was review (Q-GS); decided by the orchestrator on 2026-10-11
+sceGsSetDefStoreImage = "stub"  # was review (Q-GS); decided by the orchestrator on 2026-10-11
+sceGsExecStoreImage = "stub"  # was review (Q-GS); decided by the orchestrator on 2026-10-11
+sceGsSetDefDrawEnv2 = "stub"  # was review (Q-GS); decided by the orchestrator on 2026-10-11
+sceGsSwapDBuffDc = "stub"  # was review (Q-GS); decided by the orchestrator on 2026-10-11
+
+# GIF/VIF1 packet builders
+# Pure memory writes into the game's own packet-builder state; the rest of the sceGifPk*/sceVif1Pk* family is not in the stubs list and keeps its original code, so replacing four members would mix two state layouts.
+sceGifPkCloseGifTag = "recompile"
+sceGifPkAddGsAD = "recompile"
+sceVif1PkOpenDirectCode = "recompile"
+sceVif1PkCloseGifTag = "recompile"
+
+# libc (pure computation)
+# Handlers use host libc/libm (floorf, log10f, sinf, std::rand): not bit-identical to the PS2 code, and the float behaviour of the game depends on the original code. Original code is pure computation and runs recompiled.
+memclr = "recompile"
+memcmp = "recompile"
+rand = "recompile"
+floor = "recompile"
+log10 = "recompile"
+__kernel_sinf = "recompile"
+__kernel_cosf = "recompile"
+__ieee754_rem_pio2f = "recompile"
+__divdi3 = "recompile"
+
+# DMA (libdma)
+# Handlers drive the DMAC registers the runtime models. Recv*/Watch are TODO_NAMED-only and have no callers in the game (recompile). sceDmaPause is TODO_NAMED-only but is called by WaitDma/WatchDma: review.
+sceDmaGetChan = "stub"
+sceDmaReset = "stub"
+sceDmaPutEnv = "stub"
+sceDmaGetEnv = "stub"
+sceDmaSend = "stub"
+sceDmaSendN = "stub"
+sceDmaSendI = "stub"
+sceDmaSync = "stub"
+sceDevVif0Reset = "stub"
+sceDmaRecv = "recompile"
+sceDmaRecvN = "recompile"
+sceDmaRecvI = "recompile"
+sceDmaWatch = "recompile"
+sceDmaPause = "recompile"  # was review (Q-DMAPAUSE); decided by the orchestrator on 2026-10-11
+
+# MPEG / IPU (libmpeg, libipu)
+# The IPU is not modelled by the runtime; its libmpeg/libipu handlers (FFmpeg or blank frames) are the only way to run video short of emulating the IPU (docs/knowledge/05, options 2 and 1). If option 3 is chosen this whole group becomes recompile. RAW8 variants are TODO_NAMED-only.
+sceMpegCreate = "stub"
+sceMpegInit = "stub"
+sceMpegAddBs = "stub"
+sceMpegGetPicture = "stub"
+sceMpegReset = "stub"
+sceMpegGetDecodeMode = "stub"
+sceMpegAddCallback = "stub"
+sceMpegClearRefBuff = "stub"
+sceIpuStopDMA = "stub"
+sceIpuRestartDMA = "stub"
+sceIpuSync = "stub"
+sceIpuInit = "stub"
+sceMpegGetPictureRAW8 = "stub"  # was review (Q-RAW8); decided by the orchestrator on 2026-10-11
+sceMpegGetPictureRAW8xy = "recompile"
+_sceMpegFlush = "recompile"
+
+# libc stdio shims over TTY (read/write)
+# At 0x10C868/0x10C8E8 these are write(fd 1|2) -> sceTtyWrite and read(fd 0) -> sceTtyRead, not file I/O; the runtime handlers are fioWrite/fioRead.
+write = "recompile"  # was review (Q-TTYIO); decided by the orchestrator on 2026-10-11
+read = "recompile"  # was review (Q-TTYIO); decided by the orchestrator on 2026-10-11
+
+# Cache
+# Cache-index writeback loop (cacheOp); no handler; config patch_cache = true makes the recompiled code harmless.
+_sceSDC = "recompile"
+_sceIDC = "recompile"
+
+# Kernel: thread library (libkernel top thread)
+# These are libkernel's interrupt-safe wrappers: InitThread (0x10D078) creates 'SceKerneltopThread' (not a kernel patch installer) and iWakeupThread/iRotateThreadReadyQueue queue requests for it. See Review Q-THREAD.
+iWakeupThread = "stub"
+iRotateThreadReadyQueue = "stub"
+StartThread = "stub"
+InitThread = "stub"  # was review (Q-THREAD); decided by the orchestrator on 2026-10-11
+
+# Kernel patch installers
+# InitTLB (0x115DB8) and InitAlarm (0x116AF8) copy code into kernel memory (0x80075000..0x80076740) and hook it with SetSyscall; the runtime replaces the kernel.
+InitTLB = "stub"
+InitAlarm = "stub"
+
+# DECI2 and TTY (debug console)
+# Devkit debugger protocol. All handlers are TODO_NAMED-only (log, return -1). Justified: the only callers are sceTtyInit/sceTtyHandler and the write/read shims.
+sceDeci2Open = "stub"
+sceDeci2Close = "stub"
+sceDeci2ReqSend = "stub"
+sceDeci2Poll = "stub"
+sceDeci2ExRecv = "stub"
+sceDeci2ExSend = "stub"
+sceDeci2ExReqSend = "stub"
+sceDeci2ExLock = "stub"
+sceDeci2ExUnLock = "stub"
+sceTtyHandler = "stub"
+sceTtyWrite = "stub"
+sceTtyRead = "stub"
+sceTtyInit = "stub"
+
+# SIF command layer and SIF RPC
+# Bind/Call/CheckStat route into PS2IopTransport (the IOP emulator): stub is required for IOP RPC to work. Internal helpers (underscore names) have no handler and are reachable only from stubbed functions: recompile.
+sceSifInitCmd = "stub"
+sceSifExitCmd = "stub"
+sceSifAddCmdHandler = "stub"
+sceSifRemoveCmdHandler = "stub"
+sceSifSendCmd = "stub"
+sceSifWriteBackDCache = "stub"
+sceSifInitRpc = "stub"
+sceSifGetOtherData = "stub"
+sceSifBindRpc = "stub"
+sceSifCallRpc = "stub"
+sceSifCheckStatRpc = "stub"
+sceSifSetRpcQueue = "stub"
+sceSifRegisterRpc = "stub"
+sceSifRemoveRpc = "stub"
+sceSifRemoveRpcQueue = "stub"
+sceSifGetNextRequest = "stub"
+sceSifExecRequest = "stub"
+sceSifRpcLoop = "stub"  # was review (Q-RPCLOOP); decided by the orchestrator on 2026-10-11
+_sceSifSendCmd = "recompile"
+_sceSifCmdIntrHdlr = "recompile"
+_sceRpcGetFPacket = "recompile"
+_sceRpcGetFPacket2 = "recompile"
+
+# SIF IOP control, heap and module loading
+# Reset/reboot/sync go to PS2IopTransport::reset. The _sceSifLoad* internals are what the game's module loader reaches; the transport does not serve the LOADFILE SID (0x80000006): see Review Q-LOAD.
+sceSifInitIopHeap = "stub"
+sceSifAllocIopHeap = "stub"
+sceSifAllocSysMemory = "stub"
+sceSifLoadFileReset = "stub"
+sceSifLoadElf = "stub"
+sceSifGetIopAddr = "stub"
+sceSifSetIopAddr = "stub"
+sceSifResetIop = "stub"
+sceSifIsAliveIop = "stub"
+sceSifSyncIop = "stub"
+sceSifRebootIop = "stub"
+sceSifLoadIopHeap = "recompile"
+_sceSifLoadModuleBuffer = "stub"  # was review (Q-LOAD); decided by the orchestrator on 2026-10-11
+_sceSifLoadModule = "stub"  # was review (Q-LOAD); decided by the orchestrator on 2026-10-11
+_sceSifLoadElfPart = "stub"  # was review (Q-LOAD); decided by the orchestrator on 2026-10-11
+
+# sceFs / sceOpen (fileio RPC, SID 0x80000001)
+# The game calls these (0x100574, 0x13xxxx). The fileio module is part of the console BIOS, not of the game's module set; the runtime serves them with host file I/O.
+sceFsInit = "stub"
+sceFsReset = "stub"
+sceOpen = "stub"
+sceClose = "stub"
+sceLseek = "stub"
+sceRead = "stub"
+sceWrite = "stub"
+sceIoctl = "stub"
+_sceFsSemInit = "recompile"
+
+# Gamepad (libpad)
+# Resolved on the main CPU without padman (docs/knowledge/05). Handlers read raylib input directly (Pad.cpp:89-160): input source must be redirected to SDL3 (D9).
+scePadInit = "stub"
+scePadInit2 = "stub"
+scePadEnd = "stub"
+scePadPortOpen = "stub"
+scePadPortClose = "stub"
+scePadGetDmaStr = "stub"
+scePadGetFrameCount = "stub"
+scePadRead = "stub"
+scePadGetState = "stub"
+scePadStateIntToStr = "stub"
+scePadSetReqState = "stub"
+scePadGetReqState = "stub"
+scePadInfoAct = "stub"
+scePadInfoComb = "stub"
+scePadInfoMode = "stub"
+scePadSetMainMode = "stub"
+scePadSetActDirect = "stub"
+scePadSetActAlign = "stub"
+scePadGetButtonMask = "stub"
+scePadSetButtonInfo = "stub"
+scePadInfoPressMode = "stub"
+scePadEnterPressMode = "stub"
+scePadExitPressMode = "stub"
+scePadSetVrefParam = "stub"
+scePadGetPortMax = "stub"
+scePadGetSlotMax = "stub"
+scePadGetModVersion = "stub"
+scePadSetWarningLevel = "stub"
+
+# Sound (libsd remote)
+# D6: sound goes through the real sdrdrv/libsd/modhsyn modules. sceSdRemote's handler only does bookkeeping (Audio.cpp:77-195) and never reaches the IOP; sceSdTransToIOP is TODO_NAMED-only.
+sceSdRemoteInit = "recompile"
+sceSdTransToIOP = "recompile"
+sceSdRemote = "recompile"
+
+# CD/DVD (libcdvd)
+# No game-supplied IOP module serves the cdvdman SIDs (cdvdman is BIOS); the handlers read from the disc image/VFS.
+sceCdCallback = "stub"
+sceCdInitEeCB = "stub"
+sceCdNcmdDiskReady = "stub"
+sceCdSync = "stub"
+sceCdSyncS = "stub"
+sceCdInit = "stub"
+sceCdDiskReady = "stub"
+sceCdRead = "stub"
+sceCdSeek = "stub"
+sceCdStandby = "stub"
+sceCdGetError = "stub"
+sceCdBreak = "stub"
+sceCdMmode = "stub"
+sceCdReadClock = "stub"
+
+# Memory card (libmc)
+# Handlers store the card as a host folder (mc0/), Declared in docs/knowledge/05. mceIntrReadFixAlign/mceGetInfoApdx/mceStorePwd are libmc internals; replaced together with the public API.
+sceMcInit = "stub"
+sceMcEnd = "stub"
+sceMcChangeThreadPriority = "stub"
+sceMcGetSlotMax = "stub"
+sceMcOpen = "stub"
+sceMcMkdir = "stub"
+sceMcClose = "stub"
+sceMcSeek = "stub"
+mceIntrReadFixAlign = "stub"
+sceMcRead = "stub"
+sceMcWrite = "stub"
+sceMcSync = "stub"
+mceGetInfoApdx = "stub"
+sceMcGetInfo = "stub"
+sceMcGetDir = "stub"
+mceStorePwd = "stub"
+sceMcChdir = "stub"
+sceMcFormat = "stub"
+sceMcDelete = "stub"
+sceMcFlush = "stub"
+sceMcSetFileInfo = "stub"
+sceMcRename = "stub"
+sceMcUnformat = "stub"
+sceMcGetEntSpace = "stub"

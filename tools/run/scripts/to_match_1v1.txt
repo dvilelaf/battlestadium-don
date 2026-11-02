@@ -1,0 +1,43 @@
+# From power-on of the game to the first single-player match (Naruto vs Com on the ship's deck).
+#
+# The first part is tools/run/scripts/to_main_menu.txt (the route that answers the memory-card dialog,
+# skips the opening video with one Start tap and reaches the main menu). From the menu it follows
+# tools/ref/route.txt, the route of the reference emulator, for the single-player character select:
+# Circle on "ひとりでバトスタ", Cross back to the menu, Down twice to "プラクティス", Circle, then
+# Circle twice to confirm 1P (Naruto) and Com (Sasuke), the stage list, Circle on the stage.
+#
+# Frames are presented frames (vertical blanks, 60 per second of the console). The reference route waits
+# for screens ("wait_screen"); here the wait has to be a number, so each press that changes screen is
+# followed by 480 frames (8 s) of margin before the next one, and the screens are shot to check it.
+# A button pressed while a screen is still loading is lost: if a shot below does not show what its name
+# says, the wait before it is too short. Relative frames (`+N`) keep the route editable.
+240   shot  memcard_prompt
++30   tap   LEFT    6
++60   tap   CIRCLE  6        # 330: answer "yes" to the memory-card dialog
+
+2400  tap   START   6        # skip the opening video
++360  tap   START   6        # 2760: leave the title for the menu
++300  shot  main_menu        # 3060: the menu is up (the cursor is on ひとりでバトスタ)
+
++60   tap   CIRCLE  6        # 3120: single-player character select
++480  shot  charselect       # 3600
+
++60   tap   CROSS   6        # 3660: back to the menu
++480  shot  menu_again       # 4140
++60   tap   DOWN    4        # 4200: サバイバルチャレンジ
++240  tap   DOWN    4        # 4440: プラクティス
++60   tap   CIRCLE  6        # 4500
++480  shot  charselect_practice  # 4980
+
++120  tap   CIRCLE  6        # 5100: confirm 1P (Naruto)
++300  tap   CIRCLE  6        # 5400: confirm Com (Sasuke), then the stage list
++480  shot  stage_select     # 5880
+
++60   tap   CIRCLE  6        # 5940: the stage is confirmed; the match loads and starts
++300  shot  match_load_1     # 6240
++300  shot  match_load_2     # 6540
++300  shot  match_intro      # 6840
++300  shot  match_1v1        # 7140: 1200 frames (20 s) after the stage was confirmed
++300  shot  match_2          # 7440
++300  shot  match_3          # 7740
++60   quit                   # 7800

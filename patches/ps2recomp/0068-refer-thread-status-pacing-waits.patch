@@ -1,0 +1,37 @@
+# 0068-refer-thread-status-pacing-waits: a wait the runtime makes up is not reported as a kernel wait
+#
+# What it fixes: the opening movie's Start (journal 034 follow-up 13). The game's CRI library reads its server thread's
+# status with ReferThreadStatus and calls WakeupThread when it sees a wait (0x314AB0: status 4 or 0xC). The runtime paces
+# sceMpegGetPicture (and the CD stream) with a vertical-sync wait inside that thread, so the thread read as WAIT, every
+# wakeup was only counted (wakeup count 157 by the time of Start; the console's is 0 in every saved state) and each later
+# SleepThread returned at once: the server ran extra steps and, with the stop's flush, ended spinning at priority 1.
+# Now a wait of reason VSync, Mpeg or External is reported as READY (SUSPEND if also suspended), as the code it stands for.
+# Verified: Start-tap route work/t305/stall/s.txt, DON_PLAY_MOVIES=1: wake=0 in the thread table throughout, thread 5 asleep and
+# suspended at priority 25 at Start (the console's state), 0x55A860 = 0 and 0x3D9C10 = 18 at blank 2740 (console: player gone, 24 then 18).
+# Test: tests/runtime/thread_status_pacing_wait_test.cpp fails without the patch (2 checks: 4 and 12) and passes with it.
+#
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/Thread.cpp b/ps2xRuntime/src/lib/Kernel/Syscalls/Thread.cpp
+index 51151a7..9af1a42 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/Thread.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/Thread.cpp
+@@ -372,7 +372,19 @@ namespace ps2_syscalls
+             return;
+         }
+         *status = {};
+-        status->status = rawThreadStatus(thread->status);
++        // A wait the runtime makes up (picture pacing in sceMpegGetPicture, CD stream timing: VSync, Mpeg,
++        // External) is time the console spends running code, not a kernel wait. The game's CRI library reads
++        // the status of its server thread and calls WakeupThread when it sees a wait (0x314AB0); the thread
++        // looked asleep, the wakeups were counted (157 by the Start in the opening movie, the console's
++        // count is always 0) and each later SleepThread returned at once.
++        int rawStatus = rawThreadStatus(thread->status);
++        if ((thread->status == EeThreadStatus::Waiting || thread->status == EeThreadStatus::WaitingSuspended) &&
++            (thread->wait.reason == EeWaitReason::VSync || thread->wait.reason == EeWaitReason::Mpeg ||
++             thread->wait.reason == EeWaitReason::External))
++        {
++            rawStatus = thread->status == EeThreadStatus::Waiting ? THS_READY : THS_SUSPEND;
++        }
++        status->status = rawStatus;
+         status->func = thread->entry;
+         status->stack = thread->stack;
+         status->stack_size = static_cast<int>(thread->stackSize);

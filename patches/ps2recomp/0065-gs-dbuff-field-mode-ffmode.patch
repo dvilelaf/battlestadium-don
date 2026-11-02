@@ -1,0 +1,52 @@
+sceGsSetDefDBuff / sceGszbufaddr: the z-buffer page count follows the game's SDK code (field mode is interlace 1 AND ffmode 0).
+
+What it fixes: the replaced handlers (patch 0021) treated ffmode != 0 as field mode, the inverse of the
+SDK code (guest 0x100A40, 0x100EE0), which keeps the page count of one frame only when interlace == 1
+and ffmode == 0 and doubles it otherwise. The movie player calls sceGsResetGraph(0, 1, NTSC, ffmode=1)
+and sceGsSetDefDBuff(640x224): the second buffer's frame page must be 70 (the reference console writes
+FRAME_1 = 0xA0046) and was 35, so the two 640x224 field buffers overlapped in GS memory and the movie
+reached the screen scrambled (only the first 16 macroblocks of each 16-pixel column were right).
+Boot mode (ffmode 0) is unchanged for the display registers (the second frame page stays 0); only the
+z-buffer page count for ffmode 0 now matches the game's code. Other games of this runtime that call
+sceGsSetDefDBuff after sceGsResetGraph with ffmode 1 got a wrong second-buffer page before.
+
+How it was verified: tests/runtime/gs_dbuff_frame_mode_test.cpp fails on the unpatched tree (page 35,
+2 checks) and passes with the patch; tests/runtime/host_gs_display_test.cpp still passes. Forcing the
+page to 70 in the game gave 0 bad blocks of 2240 sampled. Depends on patch 0021. Original work; no outside source.
+
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
+index 519d4cd..4d89cd9 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
+@@ -1439,7 +1439,8 @@ namespace ps2_stubs
+         if (gsHostMode(runtime))
+         {
+             // The game's own code (guest 0x100A40) reads the mode values as 16-bit fields of the guest
+-            // gparam block (interlace at +0, ffmode at +4) and tests both for 1; the runtime keeps g_gparam
++            // gparam block (interlace at +0, ffmode at +4) and keeps the page count of a frame only for field
++            // mode (interlace == 1 and ffmode == 0), doubling it otherwise; the runtime keeps g_gparam
+             // as 8-bit fields (interlace, omode, ffmode, revision) and the copy in the scratchpad therefore
+             // packs interlace and omode into one 16-bit field, so the read below would never match. Use the
+             // runtime's own fields. psm arrives in a1 (every caller of this handler passes its psm there:
+@@ -1448,7 +1449,7 @@ namespace ps2_stubs
+             const uint32_t psm = getRegU32(ctx, 5);
+             const int32_t w = static_cast<int32_t>(static_cast<int16_t>(getRegU32(ctx, 6) & 0xFFFF));
+             const int32_t h = static_cast<int32_t>(static_cast<int16_t>(getRegU32(ctx, 7) & 0xFFFF));
+-            const bool interlaceField = g_gparam.interlace != 0u && g_gparam.ffmode != 0u;
++            const bool interlaceField = g_gparam.interlace != 0u && g_gparam.ffmode == 0u;
+             setReturnS32(ctx, static_cast<int32_t>(gsSdkZbufPages(psm, w, h, interlaceField)));
+             return;
+         }
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h b/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
+index a9cb54d..b0722a9 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
+@@ -1974,7 +1974,7 @@ namespace
+         if (!makeGsSdkDispEnv(gp, psm, w, h, 0, 0, out.disp[0]))
+             return false;
+         out.disp[1] = out.disp[0];
+-        out.zbufPages = gsSdkZbufPages(psm, w, h, gp.interlace != 0u && gp.ffmode != 0u);
++        out.zbufPages = gsSdkZbufPages(psm, w, h, gp.interlace != 0u && gp.ffmode == 0u);
+         out.dthe = (psm & 2u) != 0u;
+         if (gp.interlace == 0u || gp.ffmode != 0u)
+             out.fbp1 = (out.zbufPages >> 1) & 0x1FFu;

@@ -1,0 +1,54 @@
+# The shift-amount register (SA) is kept in bytes, as in the reference (R5900OpcodeImpl.cpp MFSA/MTSA/MTSAB/MTSAH,
+# MMI.cpp QFSRV, which shifts by sa << 3). The port kept bits: mtsab/mtsah stored 8x/16x the byte count, mfsa returned
+# bits and mtsa stored the value masked to 7 bits.
+# Recompiler patch (emitted text): special_translator.cpp, regimm_translator.cpp, mmi_translation_helpers.cpp.
+# Verified with tests/conformance (family mmi): mfsa, mtsa, mtsab, mtsah, qfsrv are equal to the reference with this
+# patch and differ without it. The game cannot see the difference: its 3 sites that read/write SA (0x1160ac, 0x1162ec
+# mfsa; 0x11619c mtsa) are interrupt-handler context save/restore, which hands the value back unchanged.
+# Not in the series (T-210 piece 4).
+# Regenerated 2026-10-13 on top of 0044: the context of the special_translator.cpp hunk named the movz/movn lines that 0044 changes.
+diff --git a/ps2xRecomp/src/lib/mmi_translation_helpers.cpp b/ps2xRecomp/src/lib/mmi_translation_helpers.cpp
+index a2bcb77..b9fef0a 100644
+--- a/ps2xRecomp/src/lib/mmi_translation_helpers.cpp
++++ b/ps2xRecomp/src/lib/mmi_translation_helpers.cpp
+@@ -601,7 +601,7 @@ namespace ps2recomp
+         uint8_t rs = inst.rs;
+         uint8_t rt = inst.rt;
+         // QFSRV semantics are centralized in runtime macro helpers.
+-        return fmt::format("SET_GPR_VEC(ctx, {}, PS2_QFSRV(GPR_VEC(ctx, {}), GPR_VEC(ctx, {}), ctx->sa & 0x7F));",
++        return fmt::format("SET_GPR_VEC(ctx, {}, PS2_QFSRV(GPR_VEC(ctx, {}), GPR_VEC(ctx, {}), (ctx->sa << 3) & 0x7F));",
+                            rd, rs, rt);
+     }
+ 
+diff --git a/ps2xRecomp/src/lib/regimm_translator.cpp b/ps2xRecomp/src/lib/regimm_translator.cpp
+index 8d8e09f..570f7d6 100644
+--- a/ps2xRecomp/src/lib/regimm_translator.cpp
++++ b/ps2xRecomp/src/lib/regimm_translator.cpp
+@@ -34,9 +34,9 @@ namespace ps2recomp
+             return fmt::format("// REGIMM branch instruction to 0x{:X} - Handled by branch logic", target);
+         }
+         case REGIMM_MTSAB:
+-            return fmt::format("ctx->sa = ((GPR_U32(ctx, {}) ^ (uint32_t){}) & 0xF) << 3;", inst.rs, inst.simmediate);
++            return fmt::format("ctx->sa = (GPR_U32(ctx, {}) ^ (uint32_t){}) & 0xF;", inst.rs, inst.simmediate);
+         case REGIMM_MTSAH:
+-            return fmt::format("ctx->sa = ((GPR_U32(ctx, {}) ^ (uint32_t){}) & 0x7) << 4;", inst.rs, inst.simmediate);
++            return fmt::format("ctx->sa = ((GPR_U32(ctx, {}) ^ (uint32_t){}) & 0x7) << 1;", inst.rs, inst.simmediate);
+         case REGIMM_TGEI:
+             return fmt::format("if (GPR_S64(ctx, {}) >= (int64_t)(int32_t){}) {{ runtime->handleTrap(rdram, ctx); }}", inst.rs, inst.simmediate);
+         case REGIMM_TGEIU:
+diff --git a/ps2xRecomp/src/lib/special_translator.cpp b/ps2xRecomp/src/lib/special_translator.cpp
+index e119f65..7dca6c4 100644
+--- a/ps2xRecomp/src/lib/special_translator.cpp
++++ b/ps2xRecomp/src/lib/special_translator.cpp
+@@ -125,9 +125,9 @@ namespace ps2recomp
+         case SPECIAL_MOVN:
+             return fmt::format("if (GPR_U64(ctx, {}) != 0) SET_GPR_U64(ctx, {}, GPR_U64(ctx, {}));", inst.rt, inst.rd, inst.rs);
+         case SPECIAL_MFSA:
+-            return fmt::format("SET_GPR_U32(ctx, {}, ctx->sa);", inst.rd);
++            return fmt::format("SET_GPR_U64(ctx, {}, (uint64_t)ctx->sa);", inst.rd);
+         case SPECIAL_MTSA:
+-            return fmt::format("ctx->sa = GPR_U32(ctx, {}) & 0x7F;", inst.rs);
++            return fmt::format("ctx->sa = GPR_U32(ctx, {});", inst.rs);
+         case SPECIAL_DADD:
+             return fmt::format(
+                 "{{ int64_t a = (int64_t)GPR_S64(ctx, {}); "

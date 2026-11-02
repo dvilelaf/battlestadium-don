@@ -1,0 +1,1725 @@
+# Frozen PS2Recomp configuration for Battle Stadium D.O.N (tools/pipeline/freeze_recomp_config.py).
+# Only addresses, sizes, names and options. Placeholders, filled in by `freeze_recomp_config.py --render`:
+#   {disc}  the program file of the disc (SLPS_256.75)
+#   {out}   the folder the recompiler writes the generated sources into
+#   {repo}  the root of this repository
+
+[general]
+input = "{disc}"
+ghidra_output = "{repo}/config/recomp/functions.filtered.csv"
+resume_owners = "{repo}/config/recomp/resume_owners.csv"
+output = "{out}/"
+single_file_output = false
+patch_syscalls = false
+patch_cop0 = true
+patch_cache = true
+stubs = [
+  "sceGsResetGraph@0x00100350",
+  "sceGsResetPath@0x001004F0",
+  "sceGsSetDefDispEnv@0x00100608",
+  "sceGsPutDispEnv@0x00100980",
+  "sceGszbufaddr@0x00100A40",
+  "sceGsSetDefDrawEnv@0x00100B08",
+  "sceGsSetDefClear@0x00100CF0",
+  "sceGsPutDrawEnv@0x00100DF8",
+  "sceGsSetDefDBuff@0x00100EE0",
+  "sceGsSwapDBuff@0x00101178",
+  "sceGsSyncV@0x001011D8",
+  "sceGsSyncPath@0x00101270",
+  "sceGsSetDefStoreImage@0x001015E8",
+  "sceGsExecStoreImage@0x00101728",
+  "sceGsSyncVCallback@0x00101DB8",
+  "sceGsSetDefDrawEnv2@0x00101EE0",
+  "sceGsSwapDBuffDc@0x001020C0",
+  "sceDmaGetChan@0x00102278",
+  "sceDmaReset@0x001022A0",
+  "sceDmaPutEnv@0x00102380",
+  "sceDmaGetEnv@0x00102558",
+  "sceDmaSend@0x001025A8",
+  "sceDmaSendN@0x00102610",
+  "sceDmaSendI@0x00102688",
+  "sceDmaSync@0x00102848",
+  "sceDevVif0Reset@0x00103358",
+  "sceMpegCreate@0x00108FA8",
+  "sceMpegInit@0x00109B50",
+  "sceMpegAddBs@0x00109C08",
+  "sceMpegGetPicture@0x00109C48",
+  "sceMpegGetPictureRAW8@0x00109C90",
+  "sceMpegReset@0x00109CE8",
+  "sceMpegGetDecodeMode@0x00109DA0",
+  "sceMpegAddCallback@0x00109DC0",
+  "sceMpegClearRefBuff@0x00109F78",
+  "sceIpuStopDMA@0x0010B920",
+  "sceIpuRestartDMA@0x0010BA08",
+  "sceIpuSync@0x0010BB58",
+  "sceIpuInit@0x0010BC38",
+  "InitThread@0x0010D078",
+  "iWakeupThread@0x0010D168",
+  "iRotateThreadReadyQueue@0x0010D200",
+  "StartThread@0x0010D3E0",
+  "sceDeci2Open@0x0010D580",
+  "sceDeci2Close@0x0010D5C8",
+  "sceDeci2ReqSend@0x0010D5F0",
+  "sceDeci2Poll@0x0010D620",
+  "sceDeci2ExRecv@0x0010D6A0",
+  "sceDeci2ExSend@0x0010D6D8",
+  "sceDeci2ExReqSend@0x0010D710",
+  "sceDeci2ExLock@0x0010D740",
+  "sceDeci2ExUnLock@0x0010D768",
+  "sceTtyHandler@0x0010D860",
+  "sceTtyWrite@0x0010D9F8",
+  "sceTtyRead@0x0010DB70",
+  "sceTtyInit@0x0010DC40",
+  "sceSifInitCmd@0x0010F100",
+  "sceSifExitCmd@0x0010F380",
+  "sceSifAddCmdHandler@0x0010F3E8",
+  "sceSifRemoveCmdHandler@0x0010F460",
+  "sceSifSendCmd@0x0010F5E8",
+  "sceSifWriteBackDCache@0x0010F7B0",
+  "sceSifInitRpc@0x0010F860",
+  "sceSifGetOtherData@0x0010FD40",
+  "sceSifBindRpc@0x00110008",
+  "sceSifCallRpc@0x001101E8",
+  "sceSifCheckStatRpc@0x001103E8",
+  "sceSifSetRpcQueue@0x00110428",
+  "sceSifRegisterRpc@0x001104C0",
+  "sceSifRemoveRpc@0x00110590",
+  "sceSifRemoveRpcQueue@0x00110628",
+  "sceSifGetNextRequest@0x001106B8",
+  "sceSifExecRequest@0x00110710",
+  "sceSifRpcLoop@0x001108D8",
+  "sceFsInit@0x00111128",
+  "sceFsReset@0x001113C0",
+  "sceOpen@0x00111628",
+  "sceClose@0x001118B8",
+  "sceLseek@0x00111A30",
+  "sceRead@0x00111C70",
+  "sceWrite@0x00111EE0",
+  "sceIoctl@0x001121A0",
+  "sceSifInitIopHeap@0x00114550",
+  "sceSifAllocIopHeap@0x001145D8",
+  "sceSifAllocSysMemory@0x00114648",
+  "sceSifLoadFileReset@0x00114C30",
+  "_sceSifLoadModuleBuffer@0x00114C68",
+  "_sceSifLoadModule@0x00115278",
+  "_sceSifLoadElfPart@0x001154E0",
+  "sceSifLoadElf@0x00115608",
+  "sceSifGetIopAddr@0x00115630",
+  "sceSifSetIopAddr@0x00115720",
+  "sceSifResetIop@0x00115800",
+  "sceSifIsAliveIop@0x00115958",
+  "sceSifSyncIop@0x00115980",
+  "sceSifRebootIop@0x001159D0",
+  "InitTLB@0x00115DB8",
+  "InitAlarm@0x00116AF8",
+  "scePadInit@0x00118590",
+  "scePadInit2@0x00118728",
+  "scePadEnd@0x00118820",
+  "scePadPortOpen@0x001189E8",
+  "scePadPortClose@0x00118BD0",
+  "scePadGetDmaStr@0x00118C88",
+  "scePadGetFrameCount@0x00118DE0",
+  "scePadRead@0x00118E38",
+  "scePadGetState@0x00118EB0",
+  "scePadStateIntToStr@0x00118F28",
+  "scePadSetReqState@0x00118F60",
+  "scePadGetReqState@0x00119018",
+  "scePadInfoAct@0x001190A8",
+  "scePadInfoComb@0x001191C0",
+  "scePadInfoMode@0x001192D8",
+  "scePadSetMainMode@0x00119410",
+  "scePadSetActDirect@0x001194C8",
+  "scePadSetActAlign@0x00119590",
+  "scePadGetButtonMask@0x00119668",
+  "scePadSetButtonInfo@0x00119718",
+  "scePadInfoPressMode@0x001197C8",
+  "scePadEnterPressMode@0x00119848",
+  "scePadExitPressMode@0x001198A0",
+  "scePadSetVrefParam@0x001198F8",
+  "scePadGetPortMax@0x001199C8",
+  "scePadGetSlotMax@0x00119A30",
+  "scePadGetModVersion@0x00119A98",
+  "scePadSetWarningLevel@0x00119B00",
+  "sceCdCallback@0x0011A1A0",
+  "sceCdInitEeCB@0x0011A378",
+  "sceCdNcmdDiskReady@0x0011AC20",
+  "sceCdSync@0x0011ACB8",
+  "sceCdSyncS@0x0011AD58",
+  "sceCdInit@0x0011AFD0",
+  "sceCdDiskReady@0x0011B4D0",
+  "sceCdRead@0x0011B6F0",
+  "sceCdSeek@0x0011B8D0",
+  "sceCdStandby@0x0011B9A0",
+  "sceCdGetError@0x0011BA50",
+  "sceCdBreak@0x0011BAE8",
+  "sceCdMmode@0x0011BBA0",
+  "sceCdReadClock@0x0011BC98",
+  "sceMcInit@0x0011BD58",
+  "sceMcEnd@0x0011BFF0",
+  "sceMcChangeThreadPriority@0x0011C0B0",
+  "sceMcGetSlotMax@0x0011C170",
+  "sceMcOpen@0x0011C230",
+  "sceMcMkdir@0x0011C358",
+  "sceMcClose@0x0011C390",
+  "sceMcSeek@0x0011C450",
+  "mceIntrReadFixAlign@0x0011C530",
+  "sceMcRead@0x0011C5E0",
+  "sceMcWrite@0x0011C6F8",
+  "sceMcSync@0x0011C870",
+  "mceGetInfoApdx@0x0011C938",
+  "sceMcGetInfo@0x0011C990",
+  "sceMcGetDir@0x0011CB80",
+  "mceStorePwd@0x0011CCD0",
+  "sceMcChdir@0x0011CD60",
+  "sceMcFormat@0x0011CEA0",
+  "sceMcDelete@0x0011CF70",
+  "sceMcFlush@0x0011D090",
+  "sceMcSetFileInfo@0x0011D150",
+  "sceMcRename@0x0011D320",
+  "sceMcUnformat@0x0011D478",
+  "sceMcGetEntSpace@0x0011D548",
+]
+entry_points = [
+  "entry_00100010@0x00100010",
+  "entry_00100018@0x00100018",
+  "entry_00100100@0x00100100",
+  "_dpfge@0x00100230",
+  "_dpfle@0x00100280",
+  "_dpfeq@0x001002D0",
+  "_d_utod@0x00100300",
+  "checkModelVersion@0x00100558",
+  "entry_00101010@0x00101010",
+  "sceGsSetDefAlphaEnv@0x00101588",
+  "WaitDma@0x00102120",
+  "WatchDma@0x00102190",
+  "CheckAddress@0x00102218",
+  "sceDevVu0Pause@0x00102998",
+  "sceDevVu0PutDBit@0x00102A48",
+  "sceDevVu0PutTBit@0x00102A78",
+  "sceDevVu0Sync@0x00102AC8",
+  "sceDevVu0GetCnd@0x00102B28",
+  "sceDevVu0PutCnd@0x00102C98",
+  "sceVuCheckBusy@0x00102E00",
+  "sceVu0MemWriteQ@0x00102E30",
+  "sceVu0MemReadQ@0x00102E70",
+  "sceDevVu1Pause@0x00102ED0",
+  "sceDevVu1PutDBit@0x00102F80",
+  "sceDevVu1PutTBit@0x00102FB0",
+  "sceDevVu1Sync@0x00103000",
+  "sceDevVu1GetTpc@0x00103058",
+  "sceDevVu1GetCnd@0x00103080",
+  "sceDevVu1PutCnd@0x00103210",
+  "sceDevVif0Pause@0x00103380",
+  "sceDevVif0Continue@0x001033E8",
+  "sceDevVif0PutErr@0x00103428",
+  "sceDevVif0Sync@0x00103458",
+  "sceDevVif0GetCnd@0x001034A8",
+  "sceDevVif0PutFifo@0x00103628",
+  "sceDevVif1Reset@0x00103688",
+  "sceDevVif1Pause@0x001036B0",
+  "entry_001036f0@0x001036F0",
+  "sceDevVif1Continue@0x00103718",
+  "sceDevVif1PutErr@0x00103758",
+  "sceDevVif1Sync@0x00103788",
+  "sceDevVif1GetCnd@0x001037D8",
+  "sceDevVif1PutFifo@0x001039B0",
+  "sceDevVif1GetFifo@0x00103A10",
+  "sceGifPkRefe@0x00103AE8",
+  "_dualPrimeVector@0x00104110",
+  "_getAllRefs@0x00104298",
+  "_motionComp0@0x001049A0",
+  "_getRef0@0x00104BF0",
+  "_doMC@0x00105078",
+  "_sceMpegPictureData0@0x00105298",
+  "_slice0@0x001054D8",
+  "_motionVector@0x00105808",
+  "_motionVectors@0x00105C30",
+  "_decMB0@0x00105DD0",
+  "_sceMpegMbAddressIncrement@0x00106328",
+  "_sceMpegWaitIpuIdle@0x001064A0",
+  "_sceMpegWaitIpuIdle64@0x00106608",
+  "_sceMpegNextBit@0x00106788",
+  "_sceMpegPeepBit@0x00106870",
+  "_sceMpegFlushBuf@0x00106900",
+  "_waitIpuIdle@0x00106998",
+  "_skipMB0@0x001069D8",
+  "_copyAddRefImage@0x00106A98",
+  "_copyRefImage@0x00106B88",
+  "dmaRefImage@0x00106C48",
+  "entry_00106d58@0x00106D58",
+  "_rix_000@0x00106DC8",
+  "_ri0_000@0x00106E40",
+  "_rix_001@0x00106ED8",
+  "_ri0_001@0x00106F90",
+  "_rix_010@0x00107060",
+  "_ri0_010@0x00107110",
+  "_rix_011@0x001071C8",
+  "_ri0_011@0x001072C0",
+  "_rix_100@0x001073C0",
+  "_ri0_100@0x00107460",
+  "_rix_101@0x00107510",
+  "_ri0_101@0x001075F0",
+  "_rix_110@0x001076D8",
+  "_ri0_110@0x001077B0",
+  "_rix_111@0x00107880",
+  "_ri0_111@0x001079A0",
+  "receiveDataFromIPU@0x00107AB8",
+  "_sceMpegSliceA0@0x00107B58",
+  "_initSeq@0x00107CF8",
+  "_sequenceHeader@0x00108010",
+  "_groupOfPicturesHeader@0x001082C0",
+  "_pictureHeader@0x00108360",
+  "_sequenceExtension@0x001084A8",
+  "_quantMatrixExtension@0x001085E8",
+  "_pictureCodingExtension@0x001086F0",
+  "entry_001088d8@0x001088D8",
+  "_extensionAndUserData@0x001088F8",
+  "_waitIpuIdle@0x00108AC8",
+  "_sceMpegNextHeader@0x00108B08",
+  "flushByteBoundary@0x00108C68",
+  "_sequenceDisplayExtension@0x00108CB8",
+  "_copyrightExtension@0x00108D48",
+  "_pictureDisplayExtension@0x00108DE0",
+  "_clearOnce@0x00108ED8",
+  "_sendDataToIPU@0x001091E0",
+  "_clearEach@0x001092E0",
+  "_getpic@0x001093A8",
+  "_updateRefImage@0x00109560",
+  "_decodeOrSkipFrame@0x00109818",
+  "_decodeOrSkipField@0x00109988",
+  "sceMpegSetBuffType@0x00109DF8",
+  "_sceMpegDispatchMpegCallback@0x00109E40",
+  "_sceMpegDispatchMpegCbNodata@0x00109EB8",
+  "_decodeOrSkip@0x00109F30",
+  "_decPicture@0x0010A0C8",
+  "_cpr8@0x0010A2A8",
+  "_dispRefImage@0x0010A538",
+  "_dispRefImageField@0x0010A7F8",
+  "_sceMpegOutputFrame@0x0010ACD8",
+  "_doCSC2@0x0010AD68",
+  "_sceMpegCscStoreRefImage@0x0010AF28",
+  "_ch3dmaCSC@0x0010B400",
+  "_ch4dma@0x0010B548",
+  "_sceMpegStopIpuDma@0x0010B630",
+  "_sceMpegErrorBdec@0x0010B6D0",
+  "_sceMpegError@0x0010B798",
+  "_sceMpegError1@0x0010B7F0",
+  "setD3_CHCR@0x0010B830",
+  "setD4_CHCR@0x0010B8A8",
+  "setD4_CHCR@0x0010BBC0",
+  "VSync@0x0010C730",
+  "VSync2@0x0010C7C0",
+  "sbrk@0x0010C9A0",
+  "kill@0x0010CA78",
+  "topThread@0x0010CFA0",
+  "iSuspendThread@0x0010D280",
+  "DelayThread@0x0010D318",
+  "_DelayThreadHandler@0x0010D558",
+  "sceDeci2GrpOpen@0x0010D648",
+  "sceDeci2GrpClose@0x0010D678",
+  "kputs@0x0010D790",
+  "QueuePeekWriteDone@0x0010D7E0",
+  "QueuePeekReadDone@0x0010D820",
+  "kputchar@0x0010DD00",
+  "deci2Putchar@0x0010DD38",
+  "serialPutchar@0x0010DDE8",
+  "ftoi@0x0010DE20",
+  "printfloat@0x0010DEB0",
+  "_sceSnprintf@0x0010E088",
+  "snprintf_char@0x0010EDA0",
+  "_sceSnprintf_pf@0x0010EE48",
+  "sceVsnprintf@0x0010EE98",
+  "sceSnprintf@0x0010EED0",
+  "sceVprintf@0x0010EF18",
+  "isceSifSendCmd@0x0010F628",
+  "_request_end@0x0010FB60",
+  "_alarm_rdata@0x0010FC30",
+  "_request_rdata@0x0010FC70",
+  "_search_svdata@0x0010FEA8",
+  "_alarm_bind@0x0010FEF8",
+  "_request_bind@0x0010FF38",
+  "_request_call@0x00110158",
+  "_sceFsIobSemaMK@0x00110918",
+  "use_iob_cnt@0x00110988",
+  "new_iob@0x00110A08",
+  "sceFsSifCallRpc@0x00110A90",
+  "get_iob@0x00110B80",
+  "_sceFs_Rcv_Intr@0x00110BF0",
+  "_sceFsWaitS@0x00111000",
+  "scePowerOffHandler@0x00111040",
+  "_sceFs_Poff_Intr@0x001110E0",
+  "sceFsSetIopBuf@0x001113F8",
+  "sceFsSetIopPrio@0x00111538",
+  "sceIoctl2@0x00112528",
+  "_sceCallCode@0x00112710",
+  "sceMkdir@0x001128E0",
+  "sceFormat@0x00112AB8",
+  "sceAddDrv@0x00112D38",
+  "sceDopen@0x00112E88",
+  "sceDclose@0x00112F50",
+  "sceDread@0x001130B8",
+  "sceGetstat@0x00113210",
+  "sceChstat@0x001133C8",
+  "sceRename@0x00113618",
+  "sceSync@0x00113840",
+  "sceMount@0x001139F0",
+  "sceLseek64@0x00113C90",
+  "sceDevctl@0x00113ED0",
+  "sceSymlink@0x00114178",
+  "sceReadlink@0x00114370",
+  "sceSifQueryMemSize@0x00114850",
+  "sceSifQueryMaxFreeMemSize@0x001148C0",
+  "sceSifQueryTotalFreeMemSize@0x00114930",
+  "sceSifQueryBlockTopAddress@0x001149A0",
+  "sceSifQueryBlockSize@0x00114A20",
+  "_lf_bind@0x00114AA0",
+  "sceSifStopModule@0x00114E70",
+  "sceSifUnloadModule@0x00115078",
+  "sceSifSearchModuleByName@0x00115108",
+  "sceSifSearchModuleByAddress@0x001151A8",
+  "SetTLBHandler@0x00115AE0",
+  "SetDebugHandler@0x00115B40",
+  "kCopy@0x00115BD8",
+  "InitTLBFunctions@0x00115C30",
+  "SetTLBEntry@0x00115D28",
+  "InitTLB32MB@0x00115DF8",
+  "_kTLBException@0x00116000",
+  "_kExitTLBHandler@0x00116140",
+  "_kDebugException@0x00116240",
+  "DIntr@0x00116360",
+  "supplement_crt0@0x001163C8",
+  "kCopy@0x00116448",
+  "kFindAddress@0x00116480",
+  "GetSystemCallEntry@0x001164D0",
+  "InitSystemCallTableAddress@0x00116508",
+  "_InitSys@0x00116618",
+  "kCopy@0x00116690",
+  "PatchIsNeeded@0x001166D8",
+  "InitExecPS2@0x00116740",
+  "kCopy@0x00116800",
+  "SetArg@0x00116840",
+  "ExecPS2@0x00116960",
+  "LoadExecPS2@0x001169D0",
+  "ExecOSD@0x00116A40",
+  "kCopy@0x00116AB0",
+  "SetT2@0x00116BD0",
+  "InitTimer@0x00116C70",
+  "EndTimer@0x00116DC8",
+  "GetTimerPreScaleFactor@0x00116E80",
+  "StartTimerSystemTime@0x00116EB0",
+  "StopTimerSystemTime@0x00116F40",
+  "SetNextComp@0x00116FC0",
+  "InsertAlarm@0x00117150",
+  "UnlinkAlarm@0x001171D8",
+  "cbTimerHandler@0x00117210",
+  "iGetTimerSystemTime@0x001174B8",
+  "GetTimerSystemTime@0x00117508",
+  "iAllocTimerCounter@0x00117588",
+  "AllocTimerCounter@0x001175F8",
+  "iFreeTimerCounter@0x00117640",
+  "iGetTimerUsedUnusedCounters@0x00117730",
+  "GetTimerUsedUnusedCounters@0x00117780",
+  "iStartTimerCounter@0x001177E0",
+  "iStopTimerCounter@0x001178E0",
+  "SetTimerCount@0x001179F8",
+  "iGetTimerCount@0x00117B60",
+  "iSetTimerHandler@0x00117C20",
+  "SetTimerHandler@0x00117D18",
+  "SetTimerAlarm@0x00117FF0",
+  "iSetTimerAlarm@0x00118120",
+  "ReleaseTimerAlarm@0x00118210",
+  "iReleaseTimerAlarm@0x001182B8",
+  "sceSifSetRebootNotifyBuffer@0x00118358",
+  "sceSifAddRebootNotifyHandler@0x001183D8",
+  "sceSifRemoveRebootNotifyHandler@0x00118490",
+  "sceSifExecNotifyHandler@0x001184E8",
+  "_pad_intr_hdr@0x001186E0",
+  "_send_to_iop@0x001188D0",
+  "scePadSetDmaCallback@0x00119B68",
+  "scePadSetFlushRate@0x00119C90",
+  "_sceCd_cd_read_intr@0x0011A418",
+  "cmd_sem_init@0x0011A4D0",
+  "cdvd_exit@0x0011A5B8",
+  "sceCdPOffCallback@0x0011A658",
+  "_sceCd_Poff_Intr@0x0011A6D8",
+  "PowerOffCB@0x0011A730",
+  "sceCdLayerSearchFile@0x0011A7A8",
+  "_sceCd_ncmd_prechk@0x0011AAC8",
+  "_sceCd_scmd_prechk@0x0011ADC8",
+  "_sceCdSC@0x0011AF20",
+  "sceCdDiskReady_old@0x0011B2B8",
+  "sceMcUdCheckNewCard@0x0011CB10",
+  "regMain@0x0011D658",
+  "mceEncEcc@0x0011D748",
+  "mceDecEcc@0x0011D7C8",
+  "mceDecEccAll@0x0011D8E0",
+  "mceExtractSliceData@0x0011D968",
+  "mceSifEntry@0x0011DA98",
+  "sceMcReadFast@0x0011DB58",
+  "sceMcWriteFast@0x0011DC68",
+  "__ieee754_fmod@0x0011DD68",
+  "__ieee754_log@0x0011E158",
+  "__ieee754_log10@0x0011E648",
+  "__ieee754_acosf@0x0011E7D0",
+  "__ieee754_asinf@0x0011EC00",
+  "__ieee754_atan2f@0x0011EFA0",
+  "__ieee754_fmodf@0x0011F288",
+  "__ieee754_logf@0x0011F4D8",
+  "__ieee754_powf@0x0011F800",
+  "__ieee754_sqrtf@0x00120470",
+  "__kernel_rem_pio2f@0x00120700",
+  "__kernel_tanf@0x00121158",
+  "matherr@0x00121600",
+  "rint@0x00121628",
+  "atanf@0x00121828",
+  "cosf@0x00121B00",
+  "floorf@0x00121C30",
+  "sinf@0x00121EA0",
+  "tanf@0x00121F90",
+  "fmod@0x00122018",
+  "atan2f@0x00122480",
+  "fmodf@0x001225A8",
+  "logf@0x001226E8",
+  "powf@0x00122830",
+  "sqrtf@0x00122D38",
+  "std@0x00125180",
+  "atoi@0x00126FA0",
+  "_hi0bits@0x001278B8",
+  "_lo0bits@0x00127940",
+  "__mcmp@0x00127E98",
+  "__fixdfdi@0x0012EE30",
+  "__fixunsdfdi@0x0012EE90",
+  "__fixunssfdi@0x0012EF80",
+  "__floatdidf@0x0012F078",
+  "__floatdisf@0x0012F110",
+  "__moddi3@0x0012F1F0",
+  "__muldi3@0x0012F858",
+  "__udivdi3@0x0012F8B8",
+  "__umoddi3@0x0012FE88",
+  "__pack_d@0x001303C8",
+  "__unpack_d@0x001304F8",
+  "_fpadd_parts@0x00130598",
+  "dpadd@0x001307D8",
+  "dpsub@0x00130830",
+  "dpmul@0x00130898",
+  "dpdiv@0x00130B40",
+  "__fpcmp_parts_d@0x00130CA8",
+  "dpcmp@0x00130DC0",
+  "litodp@0x00130E10",
+  "dptoli@0x00130EC8",
+  "dptoul@0x00130F60",
+  "__negdf2@0x00131000",
+  "__make_dp@0x00131038",
+  "dptofp@0x00131068",
+  "__pack_f@0x001310C0",
+  "__unpack_f@0x001311D0",
+  "_fpadd_parts@0x00131260",
+  "fpadd@0x00131498",
+  "fpsub@0x001314F0",
+  "fpmul@0x00131558",
+  "fpdiv@0x00131750",
+  "__fpcmp_parts_f@0x001318B0",
+  "fpcmp@0x001319C8",
+  "sitofp@0x00131A18",
+  "fptosi@0x00131AD0",
+  "fptoui@0x00131B60",
+  "__negsf2@0x00131BF8",
+  "__make_fp@0x00131C30",
+  "fptodp@0x00131C60",
+  "entry_00144094@0x00144094",
+  "entry_00145690@0x00145690",
+  "entry_00145c94@0x00145C94",
+  "entry_00147394@0x00147394",
+  "entry_0014768c@0x0014768C",
+  "entry_00147b94@0x00147B94",
+  "entry_0014828c@0x0014828C",
+  "entry_0014888c@0x0014888C",
+  "entry_00149490@0x00149490",
+  "entry_0014958c@0x0014958C",
+  "entry_00149a94@0x00149A94",
+  "entry_0014a790@0x0014A790",
+  "entry_0014a98c@0x0014A98C",
+  "entry_0014ab90@0x0014AB90",
+  "entry_0014ad94@0x0014AD94",
+  "entry_0014ae90@0x0014AE90",
+  "entry_0014b294@0x0014B294",
+  "entry_0014b390@0x0014B390",
+  "entry_0014b588@0x0014B588",
+  "entry_0014b690@0x0014B690",
+  "entry_0014b88c@0x0014B88C",
+  "entry_0014b98c@0x0014B98C",
+  "entry_0014bc94@0x0014BC94",
+  "entry_0014c888@0x0014C888",
+  "entry_0014d388@0x0014D388",
+  "entry_0014e090@0x0014E090",
+  "entry_0014e48c@0x0014E48C",
+  "entry_0014e690@0x0014E690",
+  "entry_0014ea88@0x0014EA88",
+  "entry_0014ed90@0x0014ED90",
+  "entry_0014f294@0x0014F294",
+  "entry_0014fb8c@0x0014FB8C",
+  "entry_00150014@0x00150014",
+  "entry_0017b058@0x0017B058",
+  "entry_00180000@0x00180000",
+  "entry_00180180@0x00180180",
+  "entry_00181110@0x00181110",
+  "entry_00181800@0x00181800",
+  "entry_00184198@0x00184198",
+  "entry_00184690@0x00184690",
+  "entry_00184898@0x00184898",
+  "entry_00184c94@0x00184C94",
+  "entry_00184d90@0x00184D90",
+  "entry_00184d94@0x00184D94",
+  "entry_00184e8c@0x00184E8C",
+  "entry_00184e94@0x00184E94",
+  "entry_00184f94@0x00184F94",
+  "entry_0018508c@0x0018508C",
+  "entry_00185190@0x00185190",
+  "entry_0018528c@0x0018528C",
+  "entry_00185390@0x00185390",
+  "entry_0018578c@0x0018578C",
+  "entry_00185a8c@0x00185A8C",
+  "entry_00185e8c@0x00185E8C",
+  "entry_00185e90@0x00185E90",
+  "entry_00185f90@0x00185F90",
+  "entry_0018608c@0x0018608C",
+  "entry_00186198@0x00186198",
+  "entry_00186298@0x00186298",
+  "entry_00186790@0x00186790",
+  "entry_00186894@0x00186894",
+  "entry_00186c90@0x00186C90",
+  "entry_00186e8c@0x00186E8C",
+  "entry_00187194@0x00187194",
+  "entry_00187298@0x00187298",
+  "entry_0018768c@0x0018768C",
+  "entry_00187794@0x00187794",
+  "entry_00187994@0x00187994",
+  "entry_00187a94@0x00187A94",
+  "entry_00187b94@0x00187B94",
+  "entry_00187c8c@0x00187C8C",
+  "entry_00187d90@0x00187D90",
+  "entry_00188394@0x00188394",
+  "entry_00188494@0x00188494",
+  "entry_00188b8c@0x00188B8C",
+  "entry_00188e8c@0x00188E8C",
+  "entry_00188f8c@0x00188F8C",
+  "entry_0018928c@0x0018928C",
+  "entry_00189290@0x00189290",
+  "entry_00189294@0x00189294",
+  "entry_0018958c@0x0018958C",
+  "entry_0018a094@0x0018A094",
+  "entry_0018a290@0x0018A290",
+  "entry_0018a488@0x0018A488",
+  "entry_0018a48c@0x0018A48C",
+  "entry_0018a790@0x0018A790",
+  "entry_0018a890@0x0018A890",
+  "entry_0018ab88@0x0018AB88",
+  "entry_0018b38c@0x0018B38C",
+  "entry_0018b588@0x0018B588",
+  "entry_0018b690@0x0018B690",
+  "entry_0018b890@0x0018B890",
+  "entry_0018ba90@0x0018BA90",
+  "entry_0018bb8c@0x0018BB8C",
+  "entry_0018bb90@0x0018BB90",
+  "entry_0018bc94@0x0018BC94",
+  "entry_0018bd90@0x0018BD90",
+  "entry_0018bd94@0x0018BD94",
+  "entry_0018be8c@0x0018BE8C",
+  "entry_0018c088@0x0018C088",
+  "entry_0018c290@0x0018C290",
+  "entry_0018c38c@0x0018C38C",
+  "entry_0018c488@0x0018C488",
+  "entry_0018c48c@0x0018C48C",
+  "entry_0018ca88@0x0018CA88",
+  "entry_0018cc90@0x0018CC90",
+  "entry_0018cd88@0x0018CD88",
+  "entry_0018cd94@0x0018CD94",
+  "entry_0018d188@0x0018D188",
+  "entry_0018d390@0x0018D390",
+  "entry_0018d494@0x0018D494",
+  "entry_0018d588@0x0018D588",
+  "entry_0018da88@0x0018DA88",
+  "entry_0018db94@0x0018DB94",
+  "entry_0018de94@0x0018DE94",
+  "entry_0018df94@0x0018DF94",
+  "entry_0018e38c@0x0018E38C",
+  "entry_0018e690@0x0018E690",
+  "entry_0018e994@0x0018E994",
+  "entry_0018ea88@0x0018EA88",
+  "entry_0018ea8c@0x0018EA8C",
+  "entry_0018ea90@0x0018EA90",
+  "entry_0018f08c@0x0018F08C",
+  "entry_0018f194@0x0018F194",
+  "entry_0018f588@0x0018F588",
+  "entry_0018f594@0x0018F594",
+  "entry_0018f68c@0x0018F68C",
+  "entry_0018f888@0x0018F888",
+  "entry_0018f88c@0x0018F88C",
+  "entry_0018f8e0@0x0018F8E0",
+  "entry_0018fc8c@0x0018FC8C",
+  "entry_0018fc90@0x0018FC90",
+  "entry_0018fc94@0x0018FC94",
+  "entry_00190018@0x00190018",
+  "entry_001d001c@0x001D001C",
+  "entry_001e8000@0x001E8000",
+  "entry_00200028@0x00200028",
+  "entry_0020015c@0x0020015C",
+  "entry_002001bc@0x002001BC",
+  "entry_002003d8@0x002003D8",
+  "entry_00200418@0x00200418",
+  "entry_00200518@0x00200518",
+  "entry_00200598@0x00200598",
+  "entry_00202950@0x00202950",
+  "entry_00202e64@0x00202E64",
+  "entry_00203190@0x00203190",
+  "entry_00203a64@0x00203A64",
+  "entry_00203a78@0x00203A78",
+  "entry_00204a50@0x00204A50",
+  "entry_00205290@0x00205290",
+  "entry_00206310@0x00206310",
+  "entry_00206b50@0x00206B50",
+  "entry_00207390@0x00207390",
+  "entry_00207838@0x00207838",
+  "entry_002210ac@0x002210AC",
+  "entry_0023ffdc@0x0023FFDC",
+  "entry_00240300@0x00240300",
+  "sceMtapSetWorkAddr@0x00255C40",
+  "sceMtapInit@0x00255CA0",
+  "sceMtapPortClose@0x00255E30",
+  "sceMtapGetInfo@0x00255EA0",
+  "sceMtapGetConnection@0x00255F80",
+  "sceMtapChangeThreadPriority@0x00255FF0",
+  "sceMtapGetModVersion@0x00256060",
+  "GetRomName@0x002560C8",
+  "IsT10K@0x00256138",
+  "sceScfGetLanguage@0x00256178",
+  "sceScfGetAspect@0x002561F8",
+  "sceScfGetSpdif@0x00256238",
+  "sceScfGetTimeZone@0x00256278",
+  "sceScfGetDateNotation@0x002562C8",
+  "sceScfGetSummerTime@0x00256330",
+  "sceScfGetTimeNotation@0x00256398",
+  "tobcd@0x00256400",
+  "frombcd@0x00256430",
+  "adddate@0x00256520",
+  "subdate@0x002565D8",
+  "addhour@0x00256680",
+  "subhour@0x002566B0",
+  "AdjustTime@0x002566D8",
+  "sceScfGetLocalTimefromRTC@0x00256770",
+  "entry_0025ad68@0x0025AD68",
+  "entry_0025c9a0@0x0025C9A0",
+  "entry_002601d8@0x002601D8",
+  "entry_00280258@0x00280258",
+  "entry_00293328@0x00293328",
+  "entry_00295838@0x00295838",
+  "entry_00296c6c@0x00296C6C",
+  "entry_00297838@0x00297838",
+  "entry_002c0640@0x002C0640",
+  "entry_002d72e8@0x002D72E8",
+  "entry_002e656c@0x002E656C",
+  "entry_002e6c6c@0x002E6C6C",
+  "entry_002e6e68@0x002E6E68",
+  "entry_00300038@0x00300038",
+  "entry_00303130@0x00303130",
+  "_InitSys@0x003113D8",
+  "_InitSys@0x003120B8",
+  "_InitSys@0x00312908",
+  "entry_00313130@0x00313130",
+  "_InitSys@0x003132B8",
+  "_InitSys@0x00313390",
+  "_InitSys@0x00314058",
+  "_InitSys@0x0031B7F8",
+  "_InitSys@0x0031B8A0",
+  "_InitSys@0x0031CCB8",
+  "_InitSys@0x0031CD40",
+  "_InitSys@0x0031E908",
+  "_InitSys@0x0031EA20",
+  "entry_003204d8@0x003204D8",
+  "_sceCd_Poff_Intr@0x00321C98",
+  "entry_00323030@0x00323030",
+  "entry_00323130@0x00323130",
+  "entry_00325350@0x00325350",
+  "entry_00333030@0x00333030",
+  "entry_00333130@0x00333130",
+  "entry_00343030@0x00343030",
+  "entry_00343130@0x00343130",
+  "eh_context_free@0x0034E800",
+  "entry_00353030@0x00353030",
+  "entry_00353130@0x00353130",
+  "entry_00363030@0x00363030",
+  "entry_00373030@0x00373030",
+  "entry_0037b9bc@0x0037B9BC",
+  "entry_00383030@0x00383030",
+]
+skip = []
+native_overrides = [
+  "0x0010c868",
+  "0x001146c8",
+  "0x0011a7a8",
+  "0x00138b00",
+  "0x00138ee0",
+  "0x00255ca0",
+  "0x00255dc0",
+  "0x00255e30",
+  "0x00255ea0",
+]
+
+[patches]
+instructions = []
+
+[mmio]
+"0x1033d0" = "0x10003810"
+"0x103414" = "0x10003810"
+"0x103460" = "0x10003800"
+"0x103518" = "0x10003910"
+"0x103538" = "0x10003920"
+"0x103558" = "0x10003930"
+"0x103578" = "0x10003940"
+"0x103600" = "0x10003850"
+"0x103650" = "0x10003800"
+"0x103698" = "0x10003c10"
+"0x103700" = "0x10003c10"
+"0x103744" = "0x10003c10"
+"0x103790" = "0x10003c00"
+"0x103854" = "0x10003d10"
+"0x103874" = "0x10003d20"
+"0x103894" = "0x10003d30"
+"0x1038b4" = "0x10003d40"
+"0x1038d4" = "0x10003d50"
+"0x103978" = "0x10003c50"
+"0x1039d8" = "0x10003c00"
+"0x103a38" = "0x10003c00"
+"0x104a28" = "0x1000d400"
+"0x104aa8" = "0x1000d400"
+"0x105328" = "0x1000b020"
+"0x105338" = "0x10002010"
+"0x105368" = "0x1000b420"
+"0x1053c4" = "0x10002020"
+"0x105418" = "0x10002010"
+"0x105564" = "0x1000b020"
+"0x105574" = "0x10002010"
+"0x1055a8" = "0x1000b420"
+"0x105604" = "0x10002020"
+"0x105658" = "0x10002010"
+"0x105868" = "0x10002000"
+"0x105890" = "0x10002020"
+"0x10599c" = "0x10002000"
+"0x1059c4" = "0x10002020"
+"0x105a2c" = "0x10002000"
+"0x105a54" = "0x10002020"
+"0x105b88" = "0x10002000"
+"0x105bb0" = "0x10002020"
+"0x105e24" = "0x10002010"
+"0x105e58" = "0x10002000"
+"0x105e80" = "0x10002020"
+"0x106374" = "0x10002000"
+"0x106398" = "0x10002020"
+"0x1064e4" = "0x10002010"
+"0x106528" = "0x10002020"
+"0x106658" = "0x10002010"
+"0x106698" = "0x10002020"
+"0x1067cc" = "0x10002000"
+"0x1068b8" = "0x10002000"
+"0x10692c" = "0x10002000"
+"0x1069a8" = "0x10002010"
+"0x106d8c" = "0x1000d420"
+"0x106d90" = "0x1000d400"
+"0x107b14" = "0x1000b010"
+"0x107b2c" = "0x1000b000"
+"0x1080b4" = "0x10002000"
+"0x10813c" = "0x1000b420"
+"0x10815c" = "0x10002000"
+"0x1081b4" = "0x10002000"
+"0x10823c" = "0x1000b420"
+"0x108248" = "0x1000b400"
+"0x108268" = "0x10002000"
+"0x1084e8" = "0x10002010"
+"0x108620" = "0x10002000"
+"0x108660" = "0x10002000"
+"0x108758" = "0x10002010"
+"0x1087cc" = "0x10002010"
+"0x1087fc" = "0x10002010"
+"0x10882c" = "0x10002010"
+"0x108ad8" = "0x10002010"
+"0x108c84" = "0x10002020"
+"0x108ee8" = "0x10002010"
+"0x1092ac" = "0x1000b420"
+"0x1092bc" = "0x1000b400"
+"0x109308" = "0x1000f520"
+"0x109320" = "0x1000f590"
+"0x109328" = "0x1000b000"
+"0x109330" = "0x1000b400"
+"0x109338" = "0x1000d400"
+"0x109344" = "0x1000f520"
+"0x109370" = "0x1000b020"
+"0x109378" = "0x1000b420"
+"0x109380" = "0x1000d420"
+"0x109398" = "0x10002010"
+"0x10a3b8" = "0x1000d480"
+"0x10a3c0" = "0x1000d410"
+"0x10a3cc" = "0x1000d420"
+"0x10a3d8" = "0x1000d400"
+"0x10a400" = "0x1000d400"
+"0x10a434" = "0x1000d080"
+"0x10a43c" = "0x1000d010"
+"0x10a448" = "0x1000d020"
+"0x10a454" = "0x1000d000"
+"0x10a478" = "0x1000d000"
+"0x10a4a0" = "0x1000d020"
+"0x10ae54" = "0x1000b020"
+"0x10ae60" = "0x1000b000"
+"0x10ae84" = "0x10002000"
+"0x10aee0" = "0x10002010"
+"0x10af7c" = "0x10002010"
+"0x10af90" = "0x10002010"
+"0x10afcc" = "0x10002000"
+"0x10afe0" = "0x10002010"
+"0x10b07c" = "0x1000b410"
+"0x10b084" = "0x1000b420"
+"0x10b094" = "0x1000b400"
+"0x10b12c" = "0x1000b020"
+"0x10b13c" = "0x1000b000"
+"0x10b160" = "0x10002000"
+"0x10b1b8" = "0x1000b000"
+"0x10b1e0" = "0x10002010"
+"0x10b2dc" = "0x1000b020"
+"0x10b2ec" = "0x1000b000"
+"0x10b310" = "0x10002000"
+"0x10b368" = "0x1000b000"
+"0x10b390" = "0x10002010"
+"0x10b410" = "0x1000e010"
+"0x10b428" = "0x1000b020"
+"0x10b43c" = "0x1000b000"
+"0x10b484" = "0x1000b010"
+"0x10b490" = "0x1000b020"
+"0x10b4a0" = "0x1000b000"
+"0x10b4ac" = "0x10002000"
+"0x10b520" = "0x1000b020"
+"0x10b528" = "0x1000b000"
+"0x10b558" = "0x1000e010"
+"0x10b590" = "0x1000b410"
+"0x10b598" = "0x1000b420"
+"0x10b5a8" = "0x1000b400"
+"0x10b5e8" = "0x1000b410"
+"0x10b604" = "0x1000b400"
+"0x10b650" = "0x1000f520"
+"0x10b668" = "0x1000f590"
+"0x10b670" = "0x1000b000"
+"0x10b678" = "0x1000b400"
+"0x10b680" = "0x1000f520"
+"0x10b6ac" = "0x1000b020"
+"0x10b6b4" = "0x1000b420"
+"0x10b6c4" = "0x10002010"
+"0x10b710" = "0x10002010"
+"0x10b73c" = "0x1000f520"
+"0x10b754" = "0x1000f590"
+"0x10b75c" = "0x1000b000"
+"0x10b760" = "0x1000f520"
+"0x10b78c" = "0x1000b020"
+"0x10b854" = "0x1000f520"
+"0x10b86c" = "0x1000f590"
+"0x10b874" = "0x1000b000"
+"0x10b878" = "0x1000f520"
+"0x10b8cc" = "0x1000f520"
+"0x10b8e4" = "0x1000f590"
+"0x10b8ec" = "0x1000b400"
+"0x10b8f0" = "0x1000f520"
+"0x10bbe4" = "0x1000f520"
+"0x10bbfc" = "0x1000f590"
+"0x10bc04" = "0x1000b400"
+"0x10bc08" = "0x1000f520"
+"0x10c74c" = "0x1000f000"
+"0x10c770" = "0x1000f000"
+"0x10c7a0" = "0x1000f000"
+"0x10c7ec" = "0x1000f000"
+"0x10c810" = "0x1000f000"
+"0x10c83c" = "0x1000f000"
+"0x10dd08" = "0x1000f130"
+"0x116d50" = "0x10001010"
+"0x116ed0" = "0x10001010"
+"0x116f60" = "0x10001010"
+"0x116ff4" = "0x10001010"
+"0x117244" = "0x10001010"
+"0x11727c" = "0x10001000"
+"0x117280" = "0x10001010"
+"0x1172c0" = "0x10001000"
+"0x1173d8" = "0x10001000"
+"0x1173e0" = "0x10001010"
+"0x117410" = "0x10001000"
+"0x11743c" = "0x10001000"
+"0x117444" = "0x10001010"
+"0x117474" = "0x10001000"
+"0x1174c8" = "0x10001010"
+"0x11752c" = "0x10001010"
+"0x136bf0" = "0x10000010"
+"0x136d70" = "0x10000000"
+"0x136d78" = "0x10000020"
+"0x136d80" = "0x10000030"
+"0x2590d4" = "0x1000d000"
+"0x2590ec" = "0x1000e020"
+"0x25913c" = "0x1000e020"
+"0x259170" = "0x1000d400"
+"0x2592f4" = "0x1000d000"
+"0x259354" = "0x1000d000"
+"0x2593b4" = "0x1000d000"
+"0x25941c" = "0x1000d000"
+"0x25947c" = "0x1000d000"
+"0x2594dc" = "0x1000d000"
+"0x25953c" = "0x1000d000"
+"0x25956c" = "0x1000d000"
+"0x259584" = "0x1000e020"
+"0x2595c0" = "0x1000e010"
+"0x2595cc" = "0x1000d080"
+"0x2595d8" = "0x1000d010"
+"0x2595e0" = "0x1000d020"
+"0x2595e8" = "0x1000d000"
+"0x259704" = "0x1000d000"
+"0x25971c" = "0x1000e020"
+"0x25976c" = "0x1000e020"
+"0x2597a0" = "0x1000d400"
+"0x25991c" = "0x1000d000"
+"0x25997c" = "0x1000d000"
+"0x2599dc" = "0x1000d000"
+"0x259a44" = "0x1000d000"
+"0x259aa4" = "0x1000d000"
+"0x259b04" = "0x1000d000"
+"0x259b64" = "0x1000d000"
+"0x259b94" = "0x1000d000"
+"0x259bac" = "0x1000e020"
+"0x259be8" = "0x1000e010"
+"0x259bf4" = "0x1000d080"
+"0x259c00" = "0x1000d010"
+"0x259c08" = "0x1000d020"
+"0x259c10" = "0x1000d000"
+"0x259c98" = "0x1000d400"
+"0x259cb0" = "0x1000e020"
+"0x259ce0" = "0x1000d400"
+"0x259d04" = "0x1000d000"
+"0x259d1c" = "0x1000e020"
+"0x259ea4" = "0x1000d000"
+"0x259f04" = "0x1000d000"
+"0x259f64" = "0x1000d000"
+"0x259fcc" = "0x1000d000"
+"0x25a02c" = "0x1000d000"
+"0x25a08c" = "0x1000d000"
+"0x25a0ec" = "0x1000d000"
+"0x25a11c" = "0x1000d000"
+"0x25a134" = "0x1000e020"
+"0x25a170" = "0x1000e010"
+"0x25a17c" = "0x1000d080"
+"0x25a188" = "0x1000d010"
+"0x25a190" = "0x1000d020"
+"0x25a198" = "0x1000d000"
+"0x25a200" = "0x1000d400"
+"0x25a218" = "0x1000e020"
+"0x25a248" = "0x1000d400"
+"0x25a26c" = "0x1000d000"
+"0x25a284" = "0x1000e020"
+"0x25a40c" = "0x1000d000"
+"0x25a46c" = "0x1000d000"
+"0x25a4cc" = "0x1000d000"
+"0x25a534" = "0x1000d000"
+"0x25a594" = "0x1000d000"
+"0x25a5f4" = "0x1000d000"
+"0x25a654" = "0x1000d000"
+"0x25a684" = "0x1000d000"
+"0x25a69c" = "0x1000e020"
+"0x25a6d8" = "0x1000e010"
+"0x25a6e4" = "0x1000d080"
+"0x25a6f0" = "0x1000d010"
+"0x25a6f8" = "0x1000d020"
+"0x25a700" = "0x1000d000"
+"0x25a77c" = "0x1000d000"
+"0x25a794" = "0x1000e020"
+"0x25a7e4" = "0x1000e020"
+"0x25a818" = "0x1000d400"
+"0x25a898" = "0x1000d400"
+"0x25a8e0" = "0x1000d400"
+"0x25a990" = "0x1000d400"
+"0x25aa08" = "0x1000e020"
+"0x25aa38" = "0x1000d400"
+"0x25aa64" = "0x1000e010"
+"0x25aa6c" = "0x1000d480"
+"0x25aa7c" = "0x1000d410"
+"0x25aa88" = "0x1000d420"
+"0x25aa94" = "0x1000d400"
+"0x25aab4" = "0x1000e020"
+"0x25aae8" = "0x1000d400"
+"0x25ab0c" = "0x1000d000"
+"0x25ab24" = "0x1000e020"
+"0x25ab60" = "0x1000e010"
+"0x25ab6c" = "0x1000d080"
+"0x25ab78" = "0x1000d010"
+"0x25ab80" = "0x1000d020"
+"0x25ab88" = "0x1000d000"
+"0x26024c" = "0x1000d000"
+"0x260264" = "0x1000e020"
+"0x260294" = "0x1000d000"
+"0x2602ac" = "0x1000e020"
+"0x260340" = "0x1000d000"
+"0x2603c8" = "0x1000d400"
+"0x260448" = "0x1000d400"
+"0x260828" = "0x1000d400"
+"0x260884" = "0x1000d000"
+"0x26089c" = "0x1000e020"
+"0x2608ec" = "0x1000e020"
+"0x260920" = "0x1000d400"
+"0x26094c" = "0x1000e010"
+"0x260954" = "0x1000d480"
+"0x260964" = "0x1000d410"
+"0x260970" = "0x1000d420"
+"0x26097c" = "0x1000d400"
+"0x26099c" = "0x1000e020"
+"0x2609d0" = "0x1000d400"
+"0x260c28" = "0x1000d000"
+"0x260c40" = "0x1000e020"
+"0x260c70" = "0x1000d400"
+"0x260c88" = "0x1000e020"
+"0x260cb8" = "0x1000d400"
+"0x260ce4" = "0x1000e010"
+"0x260cf4" = "0x1000d080"
+"0x260cfc" = "0x1000d010"
+"0x260d0c" = "0x1000d020"
+"0x260d14" = "0x1000d000"
+"0x26107c" = "0x1000d000"
+"0x261094" = "0x1000e020"
+"0x2610e4" = "0x1000e020"
+"0x261118" = "0x1000d400"
+"0x261198" = "0x1000d000"
+"0x261220" = "0x1000d400"
+"0x2612a0" = "0x1000d400"
+"0x261770" = "0x1000d400"
+"0x2617d4" = "0x1000d000"
+"0x2617ec" = "0x1000e020"
+"0x26183c" = "0x1000e020"
+"0x261870" = "0x1000d400"
+"0x26189c" = "0x1000e010"
+"0x2618a4" = "0x1000d480"
+"0x2618b4" = "0x1000d410"
+"0x2618c0" = "0x1000d420"
+"0x2618cc" = "0x1000d400"
+"0x2618ec" = "0x1000e020"
+"0x261920" = "0x1000d400"
+"0x261c08" = "0x1000d000"
+"0x261c20" = "0x1000e020"
+"0x261c50" = "0x1000d400"
+"0x261c68" = "0x1000e020"
+"0x261c98" = "0x1000d400"
+"0x261cc4" = "0x1000e010"
+"0x261cd4" = "0x1000d080"
+"0x261cdc" = "0x1000d010"
+"0x261cec" = "0x1000d020"
+"0x261cf4" = "0x1000d000"
+"0x262080" = "0x1000d000"
+"0x262098" = "0x1000e020"
+"0x2620e4" = "0x1000e020"
+"0x262118" = "0x1000d400"
+"0x26215c" = "0x70003f08"
+"0x26217c" = "0x70003f18"
+"0x262378" = "0x1000d000"
+"0x262408" = "0x1000d400"
+"0x262488" = "0x1000d400"
+"0x262508" = "0x1000d400"
+"0x2629d8" = "0x1000d400"
+"0x262a64" = "0x1000d000"
+"0x262a7c" = "0x1000e020"
+"0x262adc" = "0x1000e020"
+"0x262b10" = "0x1000d400"
+"0x262b3c" = "0x1000e010"
+"0x262b64" = "0x1000d410"
+"0x262b80" = "0x1000d400"
+"0x262ba0" = "0x1000e020"
+"0x262bd0" = "0x1000d400"
+"0x262c2c" = "0x1000d410"
+"0x262c38" = "0x1000d420"
+"0x262c44" = "0x1000d400"
+"0x262c64" = "0x1000e020"
+"0x262c98" = "0x1000d400"
+"0x263548" = "0x1000d000"
+"0x263560" = "0x1000e020"
+"0x263590" = "0x1000d400"
+"0x2635a8" = "0x1000e020"
+"0x2635d8" = "0x1000d400"
+"0x263634" = "0x1000d010"
+"0x263640" = "0x1000d020"
+"0x263648" = "0x1000d000"
+"0x263f40" = "0x1000d000"
+"0x263f58" = "0x1000e020"
+"0x263fa4" = "0x1000e020"
+"0x263fd8" = "0x1000d400"
+"0x264018" = "0x70003f58"
+"0x264030" = "0x70003f68"
+"0x2640f0" = "0x1000d000"
+"0x264180" = "0x1000d400"
+"0x264200" = "0x1000d400"
+"0x264280" = "0x1000d400"
+"0x264588" = "0x1000d400"
+"0x264614" = "0x1000d000"
+"0x26462c" = "0x1000e020"
+"0x26468c" = "0x1000e020"
+"0x2646c0" = "0x1000d400"
+"0x2646e8" = "0x1000e010"
+"0x2646f8" = "0x1000d480"
+"0x264700" = "0x1000d410"
+"0x264720" = "0x1000d400"
+"0x264740" = "0x1000e020"
+"0x264770" = "0x1000d400"
+"0x26479c" = "0x1000e010"
+"0x2647b8" = "0x1000d410"
+"0x2647c4" = "0x1000d420"
+"0x2647d0" = "0x1000d400"
+"0x2647f0" = "0x1000e020"
+"0x264820" = "0x1000d400"
+"0x2650b8" = "0x1000d000"
+"0x2650d0" = "0x1000e020"
+"0x265100" = "0x1000d400"
+"0x265118" = "0x1000e020"
+"0x265148" = "0x1000d400"
+"0x265198" = "0x1000d010"
+"0x2651a4" = "0x1000d020"
+"0x2651ac" = "0x1000d000"
+"0x265a6c" = "0x1000d000"
+"0x265a84" = "0x1000e020"
+"0x265ad4" = "0x1000e020"
+"0x265b08" = "0x1000d400"
+"0x265e00" = "0x1000d400"
+"0x265e90" = "0x1000d400"
+"0x265f20" = "0x1000d400"
+"0x265fb0" = "0x1000d400"
+"0x266600" = "0x1000d400"
+"0x26669c" = "0x1000d000"
+"0x2666b4" = "0x1000e020"
+"0x26671c" = "0x1000e020"
+"0x266750" = "0x1000d400"
+"0x26677c" = "0x1000e010"
+"0x266784" = "0x1000d480"
+"0x2667c4" = "0x1000d400"
+"0x2667e4" = "0x1000e020"
+"0x266818" = "0x1000d400"
+"0x266840" = "0x1000e010"
+"0x266854" = "0x1000d480"
+"0x266860" = "0x1000d410"
+"0x26687c" = "0x1000d400"
+"0x26689c" = "0x1000e020"
+"0x2668d0" = "0x1000d400"
+"0x2668fc" = "0x1000e010"
+"0x26690c" = "0x1000d480"
+"0x266918" = "0x1000d410"
+"0x266924" = "0x1000d420"
+"0x266930" = "0x1000d400"
+"0x266950" = "0x1000e020"
+"0x266980" = "0x1000d400"
+"0x267250" = "0x1000d000"
+"0x267268" = "0x1000e020"
+"0x267298" = "0x1000d400"
+"0x2672b0" = "0x1000e020"
+"0x2672e0" = "0x1000d400"
+"0x267308" = "0x1000e010"
+"0x26731c" = "0x1000d080"
+"0x267328" = "0x1000d010"
+"0x267334" = "0x1000d020"
+"0x26733c" = "0x1000d000"
+"0x26853c" = "0x1000d000"
+"0x268554" = "0x1000e020"
+"0x2685a4" = "0x1000e020"
+"0x2685d8" = "0x1000d400"
+"0x268688" = "0x70003f08"
+"0x2686a0" = "0x70003f18"
+"0x268898" = "0x1000d000"
+"0x268928" = "0x1000d400"
+"0x2689a8" = "0x1000d400"
+"0x268a30" = "0x1000d400"
+"0x268f60" = "0x1000d400"
+"0x268fec" = "0x1000d000"
+"0x269004" = "0x1000e020"
+"0x269064" = "0x1000e020"
+"0x269098" = "0x1000d400"
+"0x2690c4" = "0x1000e010"
+"0x2690ec" = "0x1000d410"
+"0x269108" = "0x1000d400"
+"0x269128" = "0x1000e020"
+"0x269158" = "0x1000d400"
+"0x269184" = "0x1000e010"
+"0x269194" = "0x1000d480"
+"0x2691a0" = "0x1000d410"
+"0x2691ac" = "0x1000d420"
+"0x2691b8" = "0x1000d400"
+"0x2691d8" = "0x1000e020"
+"0x269208" = "0x1000d400"
+"0x269b60" = "0x1000d000"
+"0x269b78" = "0x1000e020"
+"0x269ba8" = "0x1000d400"
+"0x269bc0" = "0x1000e020"
+"0x269bf0" = "0x1000d400"
+"0x269c1c" = "0x1000e010"
+"0x269c2c" = "0x1000d080"
+"0x269c34" = "0x1000d010"
+"0x269c44" = "0x1000d020"
+"0x269c4c" = "0x1000d000"
+"0x26add4" = "0x1000d000"
+"0x26adec" = "0x1000e020"
+"0x26ae3c" = "0x1000e020"
+"0x26ae70" = "0x1000d400"
+"0x26aeb4" = "0x70003f58"
+"0x26aed0" = "0x70003f68"
+"0x26afb0" = "0x1000d000"
+"0x26b040" = "0x1000d400"
+"0x26b0c0" = "0x1000d400"
+"0x26b140" = "0x1000d400"
+"0x26b468" = "0x1000d400"
+"0x26b4f4" = "0x1000d000"
+"0x26b50c" = "0x1000e020"
+"0x26b56c" = "0x1000e020"
+"0x26b5a0" = "0x1000d400"
+"0x26b5c8" = "0x1000e010"
+"0x26b5d8" = "0x1000d480"
+"0x26b5e0" = "0x1000d410"
+"0x26b600" = "0x1000d400"
+"0x26b620" = "0x1000e020"
+"0x26b650" = "0x1000d400"
+"0x26b67c" = "0x1000e010"
+"0x26b698" = "0x1000d410"
+"0x26b6a4" = "0x1000d420"
+"0x26b6b0" = "0x1000d400"
+"0x26b6d0" = "0x1000e020"
+"0x26b700" = "0x1000d400"
+"0x26c008" = "0x1000d000"
+"0x26c020" = "0x1000e020"
+"0x26c050" = "0x1000d400"
+"0x26c068" = "0x1000e020"
+"0x26c098" = "0x1000d400"
+"0x26c0e8" = "0x1000d010"
+"0x26c0f4" = "0x1000d020"
+"0x26c0fc" = "0x1000d000"
+"0x26ca20" = "0x1000d000"
+"0x26ca38" = "0x1000e020"
+"0x26ca84" = "0x1000e020"
+"0x26cab8" = "0x1000d400"
+"0x26cde0" = "0x1000d400"
+"0x26ce68" = "0x1000d400"
+"0x26cef8" = "0x1000d400"
+"0x26cf80" = "0x1000d400"
+"0x26d630" = "0x1000d400"
+"0x26d6cc" = "0x1000d000"
+"0x26d6e4" = "0x1000e020"
+"0x26d748" = "0x1000e020"
+"0x26d778" = "0x1000d400"
+"0x26d7a4" = "0x1000e010"
+"0x26d7ac" = "0x1000d480"
+"0x26d7ec" = "0x1000d400"
+"0x26d80c" = "0x1000e020"
+"0x26d840" = "0x1000d400"
+"0x26d86c" = "0x1000e010"
+"0x26d878" = "0x1000d480"
+"0x26d88c" = "0x1000d410"
+"0x26d8a8" = "0x1000d400"
+"0x26d8c8" = "0x1000e020"
+"0x26d8f8" = "0x1000d400"
+"0x26d924" = "0x1000e010"
+"0x26d934" = "0x1000d480"
+"0x26d940" = "0x1000d410"
+"0x26d94c" = "0x1000d420"
+"0x26d958" = "0x1000d400"
+"0x26d978" = "0x1000e020"
+"0x26d9a8" = "0x1000d400"
+"0x26e308" = "0x1000d000"
+"0x26e320" = "0x1000e020"
+"0x26e350" = "0x1000d400"
+"0x26e368" = "0x1000e020"
+"0x26e398" = "0x1000d400"
+"0x26e3c0" = "0x1000e010"
+"0x26e3d4" = "0x1000d080"
+"0x26e3e0" = "0x1000d010"
+"0x26e3ec" = "0x1000d020"
+"0x26e3f4" = "0x1000d000"
+"0x26f6f0" = "0x1000d000"
+"0x26f708" = "0x1000e020"
+"0x26f754" = "0x1000e020"
+"0x26f788" = "0x1000d400"
+"0x26f838" = "0x1000d000"
+"0x26f8b8" = "0x1000d400"
+"0x26f938" = "0x1000d400"
+"0x26fcc8" = "0x1000d400"
+"0x26fd2c" = "0x1000d000"
+"0x26fd44" = "0x1000e020"
+"0x26fd94" = "0x1000e020"
+"0x26fdc8" = "0x1000d400"
+"0x26fdf4" = "0x1000e010"
+"0x26fdfc" = "0x1000d480"
+"0x26fe0c" = "0x1000d410"
+"0x26fe18" = "0x1000d420"
+"0x26fe24" = "0x1000d400"
+"0x26fe44" = "0x1000e020"
+"0x26fe78" = "0x1000d400"
+"0x2701bc" = "0x1000d000"
+"0x2701d4" = "0x1000e020"
+"0x270204" = "0x1000d400"
+"0x27021c" = "0x1000e020"
+"0x270250" = "0x1000d400"
+"0x27027c" = "0x1000e010"
+"0x27028c" = "0x1000d080"
+"0x270294" = "0x1000d010"
+"0x2702a4" = "0x1000d020"
+"0x2702ac" = "0x1000d000"
+"0x270694" = "0x1000d000"
+"0x2706ac" = "0x1000e020"
+"0x2706fc" = "0x1000e020"
+"0x270730" = "0x1000d400"
+"0x270800" = "0x1000d000"
+"0x270880" = "0x1000d400"
+"0x270900" = "0x1000d400"
+"0x270c90" = "0x1000d400"
+"0x270cf4" = "0x1000d000"
+"0x270d0c" = "0x1000e020"
+"0x270d5c" = "0x1000e020"
+"0x270d90" = "0x1000d400"
+"0x270dbc" = "0x1000e010"
+"0x270dc4" = "0x1000d480"
+"0x270dd4" = "0x1000d410"
+"0x270de0" = "0x1000d420"
+"0x270dec" = "0x1000d400"
+"0x270e0c" = "0x1000e020"
+"0x270e40" = "0x1000d400"
+"0x271184" = "0x1000d000"
+"0x27119c" = "0x1000e020"
+"0x2711cc" = "0x1000d400"
+"0x2711e4" = "0x1000e020"
+"0x271218" = "0x1000d400"
+"0x271244" = "0x1000e010"
+"0x271254" = "0x1000d080"
+"0x27125c" = "0x1000d010"
+"0x27126c" = "0x1000d020"
+"0x271274" = "0x1000d000"
+"0x271670" = "0x1000d000"
+"0x271688" = "0x1000e020"
+"0x2716d4" = "0x1000e020"
+"0x271708" = "0x1000d400"
+"0x271790" = "0x1000d000"
+"0x271810" = "0x1000d400"
+"0x271890" = "0x1000d400"
+"0x271ad0" = "0x1000d400"
+"0x271b44" = "0x1000d000"
+"0x271b5c" = "0x1000e020"
+"0x271bb8" = "0x1000e020"
+"0x271be8" = "0x1000d400"
+"0x271c18" = "0x1000e010"
+"0x271c2c" = "0x1000d480"
+"0x271c38" = "0x1000d410"
+"0x271c54" = "0x1000d400"
+"0x271c74" = "0x1000e020"
+"0x271ca8" = "0x1000d400"
+"0x271f4c" = "0x1000d000"
+"0x271f64" = "0x1000e020"
+"0x271f98" = "0x1000d400"
+"0x271fb0" = "0x1000e020"
+"0x271fe0" = "0x1000d400"
+"0x27200c" = "0x1000e010"
+"0x27201c" = "0x1000d080"
+"0x272024" = "0x1000d010"
+"0x272034" = "0x1000d020"
+"0x27203c" = "0x1000d000"
+"0x2724e0" = "0x1000d000"
+"0x2724f8" = "0x1000e020"
+"0x272544" = "0x1000e020"
+"0x272578" = "0x1000d400"
+"0x272608" = "0x1000d000"
+"0x272688" = "0x1000d400"
+"0x272710" = "0x1000d400"
+"0x272908" = "0x1000d400"
+"0x27296c" = "0x1000d000"
+"0x272984" = "0x1000e020"
+"0x2729d4" = "0x1000e020"
+"0x272a08" = "0x1000d400"
+"0x272a34" = "0x1000e010"
+"0x272a3c" = "0x1000d480"
+"0x272a4c" = "0x1000d410"
+"0x272a58" = "0x1000d420"
+"0x272a64" = "0x1000d400"
+"0x272a84" = "0x1000e020"
+"0x272ab8" = "0x1000d400"
+"0x272c50" = "0x1000d000"
+"0x272c68" = "0x1000e020"
+"0x272c98" = "0x1000d400"
+"0x272cb0" = "0x1000e020"
+"0x272ce0" = "0x1000d400"
+"0x272d0c" = "0x1000e010"
+"0x272d1c" = "0x1000d080"
+"0x272d24" = "0x1000d010"
+"0x272d34" = "0x1000d020"
+"0x272d3c" = "0x1000d000"
+"0x2d3ca8" = "0x10003020"
+"0x2d3d10" = "0x10003020"
+"0x2d41dc" = "0x1000a030"
+"0x2d41e4" = "0x1000a020"
+"0x2d41f0" = "0x1000a000"
+"0x2d4484" = "0x1000d000"
+"0x2d449c" = "0x1000e020"
+"0x2d44d8" = "0x1000e010"
+"0x2d44ec" = "0x1000d080"
+"0x2d44f8" = "0x1000d010"
+"0x2d450c" = "0x1000d000"
+"0x2d46e4" = "0x1000d000"
+"0x2d46fc" = "0x1000e020"
+"0x2d4910" = "0x1000d000"
+"0x2d4928" = "0x1000e020"
+"0x2d4a88" = "0x1000d000"
+"0x2d4aa0" = "0x1000e020"
+"0x2d4e28" = "0x1000d000"
+"0x2d4e40" = "0x1000e020"
+"0x2d4e78" = "0x1000e010"
+"0x2d4e8c" = "0x1000d080"
+"0x2d4e98" = "0x1000d010"
+"0x2d4eac" = "0x1000d000"
+"0x2d5074" = "0x1000d000"
+"0x2d508c" = "0x1000e020"
+"0x2d50c8" = "0x1000e010"
+"0x2d50dc" = "0x1000d080"
+"0x2d50e8" = "0x1000d010"
+"0x2d50fc" = "0x1000d000"
+"0x2d5358" = "0x1000d000"
+"0x2d5370" = "0x1000e020"
+"0x2d53a8" = "0x1000e010"
+"0x2d53bc" = "0x1000d080"
+"0x2d53c8" = "0x1000d010"
+"0x2d53dc" = "0x1000d000"
+"0x2d5524" = "0x1000d000"
+"0x2d553c" = "0x1000e020"
+"0x2d5578" = "0x1000e010"
+"0x2d558c" = "0x1000d080"
+"0x2d5598" = "0x1000d010"
+"0x2d55ac" = "0x1000d000"
+"0x2d578c" = "0x1000d000"
+"0x2d57a4" = "0x1000e020"
+"0x2d57e0" = "0x1000e010"
+"0x2d57f4" = "0x1000d080"
+"0x2d5800" = "0x1000d010"
+"0x2d5814" = "0x1000d000"
+"0x2d587c" = "0x1000d000"
+"0x2d5894" = "0x1000e020"
+"0x2d590c" = "0x1000d000"
+"0x2d5924" = "0x1000e020"
+"0x2d5960" = "0x1000e010"
+"0x2d5974" = "0x1000d080"
+"0x2d5980" = "0x1000d010"
+"0x2d5994" = "0x1000d000"
+"0x2d59fc" = "0x1000d000"
+"0x2d5a14" = "0x1000e020"
+"0x2d5c60" = "0x1000d000"
+"0x2d5c78" = "0x1000e020"
+"0x2d5de8" = "0x10003820"
+"0x2d5e00" = "0x10003820"
+"0x2d5e08" = "0x10003c20"
+"0x2d5e0c" = "0x1000e000"
+"0x2d5e90" = "0x1000d000"
+"0x2d5ea8" = "0x1000e020"
+"0x2d6554" = "0x1000d000"
+"0x2d656c" = "0x1000e020"
+"0x2d6750" = "0x10003c10"
+"0x2d6758" = "0x10003810"
+"0x2dfbf8" = "0x1000e010"
+"0x2e0208" = "0x1000e010"
+"0x2e0338" = "0x1000e010"
+"0x2e0864" = "0x1000e010"
+"0x35c434" = "0x1000f520"
+"0x35c44c" = "0x1000f590"
+"0x35c454" = "0x1000b000"
+"0x35c45c" = "0x1000f520"
+"0x35c49c" = "0x1000f520"
+"0x35c4b4" = "0x1000f590"
+"0x35c4bc" = "0x1000b400"
+"0x35c4c4" = "0x1000f520"
+"0x35c8f0" = "0x1000b400"
+"0x35c8f4" = "0x1000b410"
+"0x35cab0" = "0x1000b410"
+"0x35cad0" = "0x1000b430"
+"0x35cadc" = "0x1000b420"
+"0x35cae4" = "0x1000b400"
+"0x35caf0" = "0x10002010"
+"0x35cb20" = "0x1000b010"
+"0x35cb40" = "0x1000b020"
+"0x35cb50" = "0x1000b000"
+"0x35cb58" = "0x10002020"
+"0x35cb60" = "0x10002010"
+"0x35cda8" = "0x1000b010"
+"0x35cdb0" = "0x1000b020"
+"0x35cdc8" = "0x10002010"
+"0x35cdf0" = "0x10002000"
+"0x35cdf8" = "0x10002010"
+"0x35ce28" = "0x1000b410"
+"0x35ce2c" = "0x1000b430"
+"0x35ce30" = "0x1000b420"
+"0x35ce58" = "0x10002010"
+"0x35cec8" = "0x1000b420"
+"0x35cecc" = "0x1000b410"
+"0x35ced0" = "0x1000b430"
+
+[jump_tables]
+[[jump_tables.table]]
+address = "0x4bc430"
+entries = [
+  { index = 0, target = "0x2b3f60" },
+  { index = 1, target = "0x2b3f70" },
+  { index = 2, target = "0x2b3f80" },
+  { index = 3, target = "0x2b3f9c" },
+  { index = 4, target = "0x2b3fac" },
+  { index = 5, target = "0x2b3fc8" },
+  { index = 6, target = "0x2b3fec" },
+  { index = 7, target = "0x2b3ffc" },
+  { index = 8, target = "0x2b400c" },
+  { index = 9, target = "0x2b401c" },
+]
+
+[[jump_tables.table]]
+address = "0x4c44c0"
+entries = [
+  { index = 0, target = "0x3455d8" },
+  { index = 1, target = "0x3455d8" },
+  { index = 2, target = "0x3455d0" },
+  { index = 3, target = "0x3455d0" },
+  { index = 4, target = "0x3455d8" },
+  { index = 5, target = "0x3455d8" },
+]
+
+[[jump_tables.table]]
+address = "0x4c4bf0"
+entries = [
+  { index = 0, target = "0x347690" },
+  { index = 1, target = "0x347678" },
+  { index = 2, target = "0x347690" },
+  { index = 3, target = "0x347680" },
+  { index = 4, target = "0x347690" },
+  { index = 5, target = "0x347690" },
+  { index = 6, target = "0x347688" },
+  { index = 7, target = "0x347690" },
+  { index = 8, target = "0x347690" },
+]
+
+[[jump_tables.table]]
+address = "0x4c64c0"
+entries = [
+  { index = 0, target = "0x34def0" },
+  { index = 1, target = "0x34ded8" },
+  { index = 2, target = "0x34dee8" },
+  { index = 3, target = "0x34def0" },
+  { index = 4, target = "0x34def0" },
+]
+
+[[jump_tables.table]]
+address = "0x4c6db0"
+entries = [
+  { index = 0, target = "0x366a70" },
+  { index = 1, target = "0x366a78" },
+  { index = 2, target = "0x366a80" },
+  { index = 3, target = "0x366a88" },
+  { index = 4, target = "0x366a90" },
+  { index = 5, target = "0x366a98" },
+  { index = 6, target = "0x366aa0" },
+  { index = 7, target = "0x366aa8" },
+]
+
+[[jump_tables.table]]
+address = "0x4c6e40"
+entries = [
+  { index = 0, target = "0x367110" },
+  { index = 1, target = "0x3670f0" },
+  { index = 2, target = "0x367070" },
+  { index = 3, target = "0x367110" },
+  { index = 4, target = "0x367090" },
+  { index = 5, target = "0x3670b0" },
+  { index = 6, target = "0x367110" },
+  { index = 7, target = "0x367110" },
+  { index = 8, target = "0x367110" },
+  { index = 9, target = "0x367110" },
+  { index = 10, target = "0x367110" },
+  { index = 11, target = "0x367050" },
+  { index = 12, target = "0x367110" },
+  { index = 13, target = "0x367050" },
+  { index = 14, target = "0x367110" },
+  { index = 15, target = "0x367110" },
+  { index = 16, target = "0x367110" },
+  { index = 17, target = "0x367110" },
+  { index = 18, target = "0x367110" },
+  { index = 19, target = "0x367110" },
+  { index = 20, target = "0x367110" },
+  { index = 21, target = "0x3670d0" },
+  { index = 22, target = "0x367110" },
+  { index = 23, target = "0x367110" },
+  { index = 24, target = "0x367110" },
+  { index = 25, target = "0x367110" },
+  { index = 26, target = "0x367110" },
+  { index = 27, target = "0x367110" },
+  { index = 28, target = "0x367110" },
+  { index = 29, target = "0x367110" },
+  { index = 30, target = "0x367110" },
+  { index = 31, target = "0x367110" },
+  { index = 32, target = "0x367110" },
+  { index = 33, target = "0x367110" },
+  { index = 34, target = "0x367110" },
+  { index = 35, target = "0x367110" },
+  { index = 36, target = "0x367110" },
+  { index = 37, target = "0x367110" },
+  { index = 38, target = "0x367110" },
+  { index = 39, target = "0x367110" },
+  { index = 40, target = "0x367110" },
+  { index = 41, target = "0x367110" },
+  { index = 42, target = "0x367110" },
+  { index = 43, target = "0x367110" },
+  { index = 44, target = "0x367110" },
+  { index = 45, target = "0x367110" },
+  { index = 46, target = "0x367110" },
+  { index = 47, target = "0x367110" },
+  { index = 48, target = "0x367110" },
+  { index = 49, target = "0x367110" },
+  { index = 50, target = "0x367110" },
+  { index = 51, target = "0x367110" },
+  { index = 52, target = "0x367110" },
+  { index = 53, target = "0x367110" },
+  { index = 54, target = "0x367110" },
+  { index = 55, target = "0x367110" },
+  { index = 56, target = "0x367110" },
+  { index = 57, target = "0x367110" },
+  { index = 58, target = "0x367110" },
+  { index = 59, target = "0x367110" },
+  { index = 60, target = "0x367110" },
+  { index = 61, target = "0x367110" },
+  { index = 62, target = "0x367110" },
+  { index = 63, target = "0x367110" },
+  { index = 64, target = "0x367110" },
+  { index = 65, target = "0x367110" },
+  { index = 66, target = "0x367110" },
+  { index = 67, target = "0x367110" },
+  { index = 68, target = "0x367110" },
+  { index = 69, target = "0x367110" },
+  { index = 70, target = "0x367110" },
+  { index = 71, target = "0x367110" },
+  { index = 72, target = "0x367110" },
+  { index = 73, target = "0x367110" },
+  { index = 74, target = "0x367110" },
+  { index = 75, target = "0x367110" },
+  { index = 76, target = "0x367110" },
+  { index = 77, target = "0x367110" },
+  { index = 78, target = "0x367110" },
+  { index = 79, target = "0x367110" },
+  { index = 80, target = "0x367110" },
+  { index = 81, target = "0x367110" },
+  { index = 82, target = "0x367110" },
+  { index = 83, target = "0x367110" },
+  { index = 84, target = "0x367110" },
+  { index = 85, target = "0x367110" },
+  { index = 86, target = "0x367110" },
+  { index = 87, target = "0x367110" },
+  { index = 88, target = "0x367110" },
+  { index = 89, target = "0x367110" },
+  { index = 90, target = "0x367110" },
+  { index = 91, target = "0x367110" },
+  { index = 92, target = "0x367110" },
+  { index = 93, target = "0x367110" },
+  { index = 94, target = "0x367110" },
+  { index = 95, target = "0x367110" },
+  { index = 96, target = "0x367110" },
+  { index = 97, target = "0x367110" },
+  { index = 98, target = "0x367110" },
+  { index = 99, target = "0x367110" },
+  { index = 100, target = "0x367110" },
+]

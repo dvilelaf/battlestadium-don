@@ -1,0 +1,116 @@
+Patch 0080: one copy of the GIF data on the game thread (GifArbiter::submitNow).
+What: GifArbiter::submit copies every packet into a queue vector and the host GS thread's ring copies it again. submitNow()
+is submit() + drain() for the immediately-drained case: with a host GS and an empty queue the packet is scanned
+(GifHostScanner::feed, CSR SIGNAL/FINISH/LABEL, same bytes, same order) and handed to the host straight from the caller's
+memory; the host copies it into the GS ring before the call returns. With a non-empty queue or no host GS it is exactly
+submit() + drain(). Switched to it: PS2Memory::submitGifPacket (drainImmediately), flushMaskedPath3Packets (only when
+drainImmediately and the queue is empty at entry), GS::writeRegister (host path), the VIF1 path-3 mask release (before the
+fifo entry shrinks). Queued submits (not drained at once) keep their copy: their source can change before the drain.
+Verified: perf_fight.py (4-player fight, blanks 6000-7800) with DON_GS_THREAD=1 built with this patch: state hash
+a71d52ac6fe9b90e639d4e7d33808bbd6ecd50e0d1c28f1c8e67fac6b07906e5, equal to the reference; the linux-dev build passes.
+Original work, GPL-3.0.
+--- a/ps2xRuntime/include/runtime/gs/ps2_gif_arbiter.h
++++ b/ps2xRuntime/include/runtime/gs/ps2_gif_arbiter.h
+@@ -71,6 +71,12 @@
+ 
+     void submit(GifPathId pathId, const uint8_t *data, uint32_t sizeBytes, bool path2DirectHl = false);
+ 
++    // submit() followed by drain(). With a host GS and an empty queue (the usual case) the packet is scanned and
++    // handed to the host straight from `data`, without the queue's copy: `data` is only read before this returns,
++    // and a queue of one packet is not reordered, so the host sees the same bytes in the same order. Otherwise
++    // it is exactly submit() + drain().
++    void submitNow(GifPathId pathId, const uint8_t *data, uint32_t sizeBytes, bool path2DirectHl = false);
++
+     void drain();
+     bool empty() const { return m_queue.empty(); }
+ 
+--- a/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
++++ b/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
+@@ -182,6 +182,22 @@
+     m_queue.push_back(std::move(pkt));
+ }
+ 
++void GifArbiter::submitNow(GifPathId pathId, const uint8_t *data, uint32_t sizeBytes, bool path2DirectHl)
++{
++    if (!m_hostGs || !m_queue.empty())
++    {
++        submit(pathId, data, sizeBytes, path2DirectHl);
++        drain();
++        return;
++    }
++    if (!data || sizeBytes < 16)
++        return;
++    const uint32_t bytes = sizeBytes & ~15u; // a GIF qword is 16 bytes: drop a partial one
++    if (m_privRegs)
++        m_scanner.feed(pathId, data, bytes, *m_privRegs);
++    m_hostGs->gif_transfer(m_hostGs->user, static_cast<int>(pathId), data, bytes);
++}
++
+ void GifArbiter::drain()
+ {
+     if (!m_processFn && !m_hostGs)
+--- a/ps2xRuntime/src/lib/gs/gs_frontend.cpp
++++ b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
+@@ -1067,8 +1067,7 @@
+     {
+         // One A+D GIF packet (tag: NLOOP=1, EOP=1, FLG=PACKED, NREG=1, REGS=A+D), path 3.
+         const uint64_t packet[4] = {1ull | (1ull << 15) | (1ull << 60), 0x0Eull, value, regAddr};
+-        m_hostArbiter->submit(GifPathId::Path3, reinterpret_cast<const uint8_t *>(packet), sizeof(packet));
+-        m_hostArbiter->drain();
++        m_hostArbiter->submitNow(GifPathId::Path3, reinterpret_cast<const uint8_t *>(packet), sizeof(packet));
+         return;
+     }
+     std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
+--- a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
++++ b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+@@ -349,15 +349,13 @@
+         auto &front = m_path3MaskedFifo.front();
+         const size_t n = firstGifPacketBytes(front.data(), front.size());
+         if (m_gifArbiter)
+-            m_gifArbiter->submit(GifPathId::Path3, front.data(), static_cast<uint32_t>(n), false);
++            m_gifArbiter->submitNow(GifPathId::Path3, front.data(), static_cast<uint32_t>(n), false); // submit + drain, before `front` shrinks
+         else if (m_gifPacketCallback)
+             m_gifPacketCallback(front.data(), static_cast<uint32_t>(n));
+         if (n >= front.size())
+             m_path3MaskedFifo.erase(m_path3MaskedFifo.begin());
+         else
+             front.erase(front.begin(), front.begin() + static_cast<std::ptrdiff_t>(n));
+-        if (m_gifArbiter)
+-            m_gifArbiter->drain();
+     };
+ 
+     while (pos + 4 <= sizeBytes)
+--- a/ps2xRuntime/src/lib/ps2_memory.cpp
++++ b/ps2xRuntime/src/lib/ps2_memory.cpp
+@@ -2109,9 +2109,13 @@
+     if (m_path3Masked || m_path3MaskedFifo.empty())
+         return;
+ 
++    // Everything is drained at the end: with an empty queue each packet can go straight to the host (same order).
++    const bool direct = m_gifArbiter && drainImmediately && m_gifArbiter->empty();
+     auto emit = [&](const uint8_t *packetData, uint32_t packetSize)
+     {
+-        if (m_gifArbiter)
++        if (direct)
++            m_gifArbiter->submitNow(GifPathId::Path3, packetData, packetSize, false);
++        else if (m_gifArbiter)
+             m_gifArbiter->submit(GifPathId::Path3, packetData, packetSize, false);
+         else if (m_gifPacketCallback)
+             m_gifPacketCallback(packetData, packetSize);
+@@ -2143,13 +2147,12 @@
+         flushMaskedPath3Packets(false);
+     }
+ 
+-    if (m_gifArbiter)
++    if (m_gifArbiter && drainImmediately)
++        m_gifArbiter->submitNow(pathId, data, sizeBytes, path2DirectHl);
++    else if (m_gifArbiter)
+         m_gifArbiter->submit(pathId, data, sizeBytes, path2DirectHl);
+     else if (m_gifPacketCallback)
+         m_gifPacketCallback(data, sizeBytes);
+-
+-    if (m_gifArbiter && drainImmediately)
+-        m_gifArbiter->drain();
+ }
+ 
+ void PS2Memory::processGIFPacket(uint32_t srcPhysAddr, uint32_t qwCount)

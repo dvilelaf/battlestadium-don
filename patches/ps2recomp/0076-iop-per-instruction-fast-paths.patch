@@ -1,0 +1,170 @@
+# 0076-iop-per-instruction-fast-paths: the IOP interpreter stops doing per-instruction DMA and import bookkeeping
+#
+# What it fixes: the game thread of a 4-player fight spent a large share of its time in the IOP interpreter's
+# per-instruction overhead: schedulePendingDma (a std::optional copy) after every instruction and every guest write,
+# servicePendingDmaInterrupts / pendingDmaInterrupts.empty() once per instruction, and IopImportRegistry::decode
+# fetching the instruction word that executeInstruction fetches again. Now: IopMemory::dmaStartPending() gates the
+# takeDmaStart; nextDmaCycle (the earliest completion, kept by setPendingDma/refreshNextDmaCycle on every change of
+# pendingDmaInterrupts) is the only thing the per-instruction check compares, and the idle-skip uses it too; step()
+# fetches the word once, calls imports.decode only for `jr ra` (0x03E00008, the only word decode accepts) and hands
+# the word to the new IopCpuCore::executeInstruction(cpu, word). The emulated behaviour is unchanged: same cycles,
+# same interrupts in the same order at the same cycle.
+# How it was verified: tools/run/perf_fight.py on the unmodified and the modified build (DON_MOVIE_SKIP_AFTER=1):
+# identical state hash 7ab176a1857c3946c602461eb6117d22a5fc8337803e9558b44600f99c4ee985 (129 state lines); GameThread
+# CPU ms per blank 15.8-16.4 -> 13.5 (this PC); pytest tests/regression -m slow -k fight_practice: passed.
+# Based on an unfinished change by an earlier agent (work/wip-2026-10-18/iop/iop.diff), every hunk checked.
+--- a/ps2xIOP/src/emulator/core/iop_cpu.cpp
++++ b/ps2xIOP/src/emulator/core/iop_cpu.cpp
+@@ -54,8 +54,12 @@
+ 
+     bool IopCpuCore::executeInstruction(IopCpuState &cpu)
+     {
++        return executeInstruction(cpu, m_memory.read32(cpu.pc));
++    }
++
++    bool IopCpuCore::executeInstruction(IopCpuState &cpu, uint32_t instruction)
++    {
+         const uint32_t pc = cpu.pc;
+-        const uint32_t instruction = m_memory.read32(pc);
+         const bool wasDelaySlot = cpu.branchPending;
+         const uint32_t priorBranchTarget = cpu.branchTarget;
+ 
+--- a/ps2xIOP/src/emulator/core/iop_cpu.h
++++ b/ps2xIOP/src/emulator/core/iop_cpu.h
+@@ -31,6 +31,8 @@
+         explicit IopCpuCore(IopMemory &memory) noexcept;
+ 
+         [[nodiscard]] bool executeInstruction(IopCpuState &cpu);
++        // Same, with the word at cpu.pc already fetched by the caller.
++        [[nodiscard]] bool executeInstruction(IopCpuState &cpu, uint32_t instruction);
+         void raiseException(IopCpuState &cpu, uint32_t code, uint32_t faultPc, bool delaySlot, std::optional<uint32_t> badAddress = std::nullopt) const;
+ 
+     private:
+--- a/ps2xIOP/src/emulator/core/iop_memory.h
++++ b/ps2xIOP/src/emulator/core/iop_memory.h
+@@ -72,6 +72,8 @@
+         void setInterruptControl(uint32_t value) noexcept { m_interruptControl = value & 1u; }
+ 
+         [[nodiscard]] std::optional<DmaStart> takeDmaStart() noexcept;
++        // True only after a write that started a DMA, until takeDmaStart() consumes it (the per-instruction check).
++        [[nodiscard]] bool dmaStartPending() const noexcept { return m_dmaStart.has_value(); }
+         [[nodiscard]] std::span<const uint8_t> ram() const noexcept { return m_ram; }
+ 
+         // Host SPU2 (ps2x/iop/iop_host_spu2.h): DMA channel 4 (core 0) or 7 (core 1) finished. Clears CHCR.TR and
+--- a/ps2xIOP/src/emulator/iop_emulator.cpp
++++ b/ps2xIOP/src/emulator/iop_emulator.cpp
+@@ -134,6 +134,7 @@
+             timrman.reset();
+             ioman.reset();
+             pendingDmaInterrupts.clear();
++            nextDmaCycle = kNoDmaCycle;
+             pendingExtraInterrupts.clear();
+             pendingGuestCallbacks.clear();
+             nextModuleId = 1;
+@@ -191,13 +192,31 @@
+             if (pendingDmaInterrupts.find(irq) != pendingDmaInterrupts.end())
+                 ++pendingExtraInterrupts[irq];
+             else
+-                pendingDmaInterrupts[irq] = totalCycles;
++                setPendingDma(irq, totalCycles);
++        }
++
++        // Every change to pendingDmaInterrupts goes through here so nextDmaCycle (the earliest completion, the only
++        // thing the per-instruction check compares) never goes stale.
++        void setPendingDma(int irq, uint64_t cycle)
++        {
++            pendingDmaInterrupts[irq] = cycle;
++            refreshNextDmaCycle();
++        }
++
++        void refreshNextDmaCycle()
++        {
++            uint64_t next = kNoDmaCycle;
++            for (const auto &entry : pendingDmaInterrupts)
++                next = std::min(next, entry.second);
++            nextDmaCycle = next;
+         }
+ 
+         void schedulePendingDma()
+         {
++            if (!memory.dmaStartPending())
++                return;
+             if (const auto dma = memory.takeDmaStart())
+-                pendingDmaInterrupts[dma->irq] = totalCycles + dma->delayCycles;
++                setPendingDma(dma->irq, totalCycles + dma->delayCycles);
+         }
+ 
+         // Host SPU2 (ps2x/iop/iop_host_spu2.h): advances it to the current cycle and turns the events it queued
+@@ -442,6 +461,9 @@
+             if (checkInterrupt(cpu))
+                 return true;
+ 
++            // One fetch per instruction: only a `jr ra` can be an import stub, and the word is handed on to the CPU.
++            const uint32_t word = memory.read32(cpu.pc);
++            if (word == 0x03E00008u)
+             if (const auto import = imports.decode(cpu.pc))
+             {
+                 const ImportDisposition disposition = dispatchImport(*import, cpu);
+@@ -454,7 +476,7 @@
+                 return !cpu.stopped;
+             }
+ 
+-            const bool running = cpuCore.executeInstruction(cpu);
++            const bool running = cpuCore.executeInstruction(cpu, word);
+             schedulePendingDma();
+             ++totalInstructions;
+             ++totalCycles;
+@@ -470,7 +492,7 @@
+             {
+                 if (!step(cpu))
+                     break;
+-                if (!servicingDmaInterrupts && !pendingDmaInterrupts.empty())
++                if (totalCycles >= nextDmaCycle && !servicingDmaInterrupts)
+                     servicePendingDmaInterrupts();
+                 if (!servicingGuestCallbacks && !pendingGuestCallbacks.empty())
+                     servicePendingGuestCallbacks();
+@@ -569,7 +591,7 @@
+         // Not that good to use exception handling for control flow but will do for now
+         void servicePendingDmaInterrupts()
+         {
+-            if (servicingDmaInterrupts || pendingDmaInterrupts.empty())
++            if (servicingDmaInterrupts || totalCycles < nextDmaCycle)
+                 return;
+             // The running context has interrupts suspended (CpuSuspendIntr / CpuDisableIntr): nothing is taken,
+             // the pending interrupts stay pending and are taken at the first check after it enables them again.
+@@ -589,6 +611,7 @@
+                 completed.push_back(it->first);
+                 it = pendingDmaInterrupts.erase(it);
+             }
++            refreshNextDmaCycle();
+             // Inside a handler interrupts are disabled; the state of the interrupted context comes back at the return.
+             const uint32_t interrupted = memory.interruptControl();
+             memory.setInterruptControl(0u);
+@@ -602,7 +625,7 @@
+                     if (extra != pendingExtraInterrupts.end() && extra->second != 0u)
+                     {
+                         --extra->second;
+-                        pendingDmaInterrupts[irq] = totalCycles;
++                        setPendingDma(irq, totalCycles);
+                     }
+                 }
+             }
+@@ -672,8 +695,7 @@
+                     if (!next)
+                     {
+                         uint64_t nextWake = kernel.nextWakeCycle(target);
+-                        for (const auto &[irq, completionCycle] : pendingDmaInterrupts)
+-                            nextWake = std::min(nextWake, completionCycle);
++                        nextWake = std::min(nextWake, nextDmaCycle);
+                         if (!pendingGuestCallbacks.empty())
+                             nextWake = std::min(nextWake, pendingGuestCallbacks.begin()->first);
+                         nextWake = timrman.nextEventCycle(nextWake);
+@@ -808,6 +830,8 @@
+         IopLoadcore loadcore;
+         std::map<int, Module> modules;
+         std::map<int, uint64_t> pendingDmaInterrupts;
++        static constexpr uint64_t kNoDmaCycle = ~uint64_t{0};
++        uint64_t nextDmaCycle = kNoDmaCycle; // min of pendingDmaInterrupts' cycles; kNoDmaCycle when empty
+         std::map<int, uint32_t> pendingExtraInterrupts; // raises beyond the first one that are waiting for the same irq
+         std::multimap<uint64_t, ScheduledGuestCallback> pendingGuestCallbacks;
+         uint32_t nextModuleId = 1;

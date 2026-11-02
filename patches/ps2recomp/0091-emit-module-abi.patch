@@ -1,0 +1,231 @@
+Patch 0091: new recompiler option general.emit_module_abi (off by default) for the game module.
+What: with `emit_module_abi = true` in the TOML [general] table, every emitted .cpp and the two declaration headers
+(ps2_recompiled_functions.h, ps2_recompiled_stubs.h) include only the module ABI headers of this repository
+(don_guest_abi.h, don_guest_decls.h, don_guest_stubs.h under src/game_module/) instead of ps2_runtime.h, ps2_stubs.h,
+ps2_syscalls.h, ps2_log.h, ps2_runtime_macros.h and <stdexcept>. The module build then needs no shim folder.
+With the option off (the default) the output is byte-identical to before. Touches code_generator.h too (the flag
+reaches the emitters through CodeGenerator).
+Verified (T-614): built ps2_recomp from a scratch tree with patches 0001-0091; the frozen config with the option off
+regenerates a tree with no differences from generated/ (diff -rq prints nothing); with it on, the includes are the ABI ones.
+Not based on another project's code.
+
+diff --git a/ps2xRecomp/include/ps2recomp/code_generator.h b/ps2xRecomp/include/ps2recomp/code_generator.h
+index 2965614..c7385be 100644
+--- a/ps2xRecomp/include/ps2recomp/code_generator.h
++++ b/ps2xRecomp/include/ps2recomp/code_generator.h
+@@ -55,6 +55,9 @@ namespace ps2recomp
+         void setConfiguredJumpTables(const std::vector<JumpTable> &jumpTables);
+         void setResumeEntryTargets(const std::unordered_map<uint32_t, std::vector<uint32_t>> &resumeTargetsByOwner);
+         void setEmitInstructionComments(bool emitInstructionComments);
++        // general.emit_module_abi: the emitters write kModuleAbiIncludeBlock instead of the runtime's includes.
++        void setEmitModuleAbi(bool emitModuleAbi) { m_emitModuleAbi = emitModuleAbi; }
++        bool emitModuleAbi() const { return m_emitModuleAbi; }
+         // Owner of every resume target claimed by several owners (config general.resume_owners). With
+         // collectShared the function table emitter records the candidates of those targets instead of failing
+         // on one that is not frozen (--dump-resume-owners).
+@@ -82,6 +85,7 @@ namespace ps2recomp
+         const std::vector<Section>& m_sections;
+         BootstrapInfo m_bootstrapInfo;
+         bool m_emitInstructionComments = true;
++        bool m_emitModuleAbi = false;
+         RecompilerReporter *m_reporter = nullptr;
+         std::string m_currentFunctionName;
+ 
+diff --git a/ps2xRecomp/include/ps2recomp/types.h b/ps2xRecomp/include/ps2recomp/types.h
+index 5f09cac..e7c6561 100644
+--- a/ps2xRecomp/include/ps2recomp/types.h
++++ b/ps2xRecomp/include/ps2recomp/types.h
+@@ -173,12 +173,23 @@ namespace ps2recomp
+     };
+ 
+     // Recompiler configuration
++    // The include block of every generated file when RecompilerConfig::emitModuleAbi is on.
++    inline constexpr const char *kModuleAbiIncludeBlock =
++        "#include \"don_guest_abi.h\"\n"
++        "#include \"don_guest_decls.h\"\n"
++        "#include \"don_guest_stubs.h\"\n"
++        "#include \"ps2_recompiled_functions.h\"\n"
++        "#include \"ps2_recompiled_stubs.h\"\n\n";
++
+     struct RecompilerConfig
+     {
+         std::string inputPath;
+         std::string outputPath;
+         std::string ghidraMapPath;
+         bool singleFileOutput = false;
++        // general.emit_module_abi (off by default): the generated code includes only the module ABI headers
++        // (src/game_module/don_guest_*.h) and the two generated declaration headers, never the runtime's.
++        bool emitModuleAbi = false;
+         bool lowMemoryMode = false;
+         uint32_t outputWorkerThreads = 0;
+         bool patchSyscalls = false;
+diff --git a/ps2xRecomp/src/lib/config_manager.cpp b/ps2xRecomp/src/lib/config_manager.cpp
+index 1a56a20..0bbc278 100644
+--- a/ps2xRecomp/src/lib/config_manager.cpp
++++ b/ps2xRecomp/src/lib/config_manager.cpp
+@@ -42,6 +42,7 @@ namespace ps2recomp
+             config.resumeOwnersPath = toml::find_or<std::string>(general, "resume_owners", "");
+             config.outputPath = toml::find<std::string>(general, "output");
+             config.singleFileOutput = toml::find_or<bool>(general, "single_file_output", false);
++            config.emitModuleAbi = toml::find_or<bool>(general, "emit_module_abi", false);
+             config.lowMemoryMode = toml::find_or<bool>(general, "low_memory_mode", config.lowMemoryMode);
+             const int64_t configuredOutputWorkers = toml::find_or<int64_t>(
+                 general,
+@@ -308,6 +309,7 @@ namespace ps2recomp
+         }
+         general["output"] = config.outputPath;
+         general["single_file_output"] = config.singleFileOutput;
++        general["emit_module_abi"] = config.emitModuleAbi;
+         general["low_memory_mode"] = config.lowMemoryMode;
+         general["output_worker_threads"] = static_cast<int64_t>(config.outputWorkerThreads);
+         general["patch_syscalls"] = config.patchSyscalls;
+diff --git a/ps2xRecomp/src/lib/function_emitter.cpp b/ps2xRecomp/src/lib/function_emitter.cpp
+index 3192e90..884b37e 100644
+--- a/ps2xRecomp/src/lib/function_emitter.cpp
++++ b/ps2xRecomp/src/lib/function_emitter.cpp
+@@ -40,7 +40,11 @@ namespace ps2recomp
+         std::stringstream ss;
+         cg.m_currentFunctionName = function.name;
+ 
+-        if (useHeaders)
++        if (useHeaders && cg.m_emitModuleAbi)
++        {
++            ss << kModuleAbiIncludeBlock;
++        }
++        else if (useHeaders)
+         {
+             ss << "#include <stdexcept>\n";
+             ss << "#include \"ps2_runtime_macros.h\"\n";
+diff --git a/ps2xRecomp/src/lib/function_table_emitter.cpp b/ps2xRecomp/src/lib/function_table_emitter.cpp
+index e2a4105..2b76a2a 100644
+--- a/ps2xRecomp/src/lib/function_table_emitter.cpp
++++ b/ps2xRecomp/src/lib/function_table_emitter.cpp
+@@ -203,11 +203,18 @@ namespace ps2recomp
+         }
+ 
+         std::stringstream ss;
+-        ss << "#include \"ps2_runtime.h\"\n";
+-        ss << "#include <ps2_recompiled_functions.h>\n";
+-        ss << "#include \"ps2_stubs.h\"\n";
+-        ss << "#include <ps2_recompiled_stubs.h>\n";
+-        ss << "#include \"ps2_syscalls.h\"\n\n";
++        if (m_codeGenerator.emitModuleAbi())
++        {
++            ss << kModuleAbiIncludeBlock;
++        }
++        else
++        {
++            ss << "#include \"ps2_runtime.h\"\n";
++            ss << "#include <ps2_recompiled_functions.h>\n";
++            ss << "#include \"ps2_stubs.h\"\n";
++            ss << "#include <ps2_recompiled_stubs.h>\n";
++            ss << "#include \"ps2_syscalls.h\"\n\n";
++        }
+ 
+         ss << "extern const uint32_t g_ps2RecompiledFunctionTableBase = 0x" << std::hex << tableBase << "u;\n";
+         ss << "extern const uint32_t g_ps2RecompiledFunctionTableEnd = 0x" << std::hex << tableEnd << "u;\n";
+diff --git a/ps2xRecomp/src/lib/ps2_recompiler.cpp b/ps2xRecomp/src/lib/ps2_recompiler.cpp
+index 33932dd..f1f732f 100644
+--- a/ps2xRecomp/src/lib/ps2_recompiler.cpp
++++ b/ps2xRecomp/src/lib/ps2_recompiler.cpp
+@@ -147,8 +147,13 @@ namespace ps2recomp
+             return 1;
+         }
+ 
+-        void writeCombinedOutputPreamble(std::ostream &output)
++        void writeCombinedOutputPreamble(std::ostream &output, bool moduleAbi)
+         {
++            if (moduleAbi)
++            {
++                output << kModuleAbiIncludeBlock;
++                return;
++            }
+             output << "#include <stdexcept>\n";
+             output << "#include <ps2_recompiled_functions.h>\n\n";
+             output << "#include \"ps2_runtime_macros.h\"\n";
+@@ -1093,6 +1098,7 @@ namespace ps2recomp
+             m_codeGenerator->setConfiguredJumpTables(m_config.jumpTables);
+             m_codeGenerator->setFrozenResumeOwners(m_config.resumeOwners, !m_dumpResumeOwnersPath.empty());
+             m_codeGenerator->setEmitInstructionComments(true);
++            m_codeGenerator->setEmitModuleAbi(m_config.emitModuleAbi);
+ 
+             m_failureKind = FailureKind::Io;
+             fs::create_directories(m_config.outputPath);
+@@ -1434,12 +1440,21 @@ namespace ps2recomp
+                         }
+ 
+                         std::stringstream stubFile;
+-                        stubFile << "#include \"ps2_runtime.h\"\n";
+-                        stubFile << "#include \"ps2_syscalls.h\"\n";
+-                        stubFile << "#include \"ps2_stubs.h\"\n";
+-                        stubFile << "#ifdef _DEBUG\n";
+-                        stubFile << "#include \"ps2_log.h\"\n";
+-                        stubFile << "#endif\n";
++                        if (m_config.emitModuleAbi)
++                        {
++                            stubFile << "#include \"don_guest_abi.h\"\n";
++                            stubFile << "#include \"don_guest_decls.h\"\n";
++                            stubFile << "#include \"don_guest_stubs.h\"\n";
++                        }
++                        else
++                        {
++                            stubFile << "#include \"ps2_runtime.h\"\n";
++                            stubFile << "#include \"ps2_syscalls.h\"\n";
++                            stubFile << "#include \"ps2_stubs.h\"\n";
++                            stubFile << "#ifdef _DEBUG\n";
++                            stubFile << "#include \"ps2_log.h\"\n";
++                            stubFile << "#endif\n";
++                        }
+                         stubFile << "\n";
+                         stubFile << generatedStubs.at(function.start) << "\n";
+                         return stubFile.str();
+@@ -1468,7 +1483,7 @@ namespace ps2recomp
+                     throw IoError("Failed to open combined output: " + outputPath.string());
+                 }
+ 
+-                writeCombinedOutputPreamble(combinedOutput);
++                writeCombinedOutputPreamble(combinedOutput, m_config.emitModuleAbi);
+ 
+                 if (outputWorkerCount <= 1)
+                 {
+@@ -1927,9 +1942,17 @@ namespace ps2recomp
+             std::stringstream ss;
+ 
+             ss << "#pragma once\n\n";
+-            ss << "#include <cstdint>\n";
+-            ss << "#include \"ps2_runtime.h\"\n";
+-            ss << "#include \"ps2_syscalls.h\"\n\n";
++            if (m_config.emitModuleAbi)
++            {
++                ss << "#include \"don_guest_decls.h\"\n";
++                ss << "#include \"don_guest_stubs.h\"\n\n";
++            }
++            else
++            {
++                ss << "#include <cstdint>\n";
++                ss << "#include \"ps2_runtime.h\"\n";
++                ss << "#include \"ps2_syscalls.h\"\n\n";
++            }
+             // ss << "namespace ps2recomp {\n";
+             // ss << "namespace stubs {\n\n";
+ 
+@@ -1991,9 +2014,16 @@ namespace ps2recomp
+             ss << "#ifndef PS2_RECOMPILED_FUNCTIONS_H\n";
+             ss << "#define PS2_RECOMPILED_FUNCTIONS_H\n\n";
+ 
+-            ss << "#include <cstdint>\n\n";
+-            ss << "struct R5900Context;\n";
+-            ss << "class PS2Runtime;\n\n";
++            if (m_config.emitModuleAbi)
++            {
++                ss << "#include \"don_guest_decls.h\"\n\n";
++            }
++            else
++            {
++                ss << "#include <cstdint>\n\n";
++                ss << "struct R5900Context;\n";
++                ss << "class PS2Runtime;\n\n";
++            }
+ 
+             for (const auto &function : m_functions)
+             {

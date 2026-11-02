@@ -1,0 +1,17 @@
+# Files over 1 MB that the Linux archive may carry (public_check.py --large-allow, size rule only).
+# One entry per line: <glob relative to the archive root> <reason>. `*` also crosses `/`.
+# The hash, format and personal rules still scan every file listed here.
+don-linux-*/don the game executable (our code, no game data)
+don-linux-*/libdon_gs.so PCSX2 GS bridge shared library
+don-linux-*/libdon_vu.so PCSX2 microVU bridge shared library
+don-linux-*/libSDL3.so.0 SDL3 shared library
+don-linux-*/libshaderc_shared.so.1 shaderc shared library
+don-linux-*/libzstd.so.1 zstd shared library
+don-linux-*/bin/ps2_recomp the recompiler executable (builds the player's module)
+don-linux-*/config/functions.ghidra.csv function names, addresses and sizes (table)
+don-linux-*/config/recomp/functions.filtered.csv function names, addresses and sizes (table)
+don-linux-*/resources/GameIndex.yaml PCSX2 game database (GPL)
+don-linux-*/resources/RedumpDatabase.yaml PCSX2 disc database (GPL)
+don-linux-*/resources/fonts/Twemoji.Mozilla.ttf Twemoji font (CC-BY 4.0, licence shipped)
+don-linux-*/toolchain/bin/* the pinned LLVM executables
+don-linux-*/toolchain/lib/clang/17/include/arm_*.h the pinned LLVM compiler's own headers

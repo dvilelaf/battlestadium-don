@@ -1,0 +1,277 @@
+# Client of a two-player online session (T-509/T-510): the player-2 half of
+# tools/run/scripts/multiplayer_match.txt, whose player-0 lines live in net_host_2p.txt. The commands below have
+# no prefix: in net mode the host uses the script's player-1 pad for its local player on every copy, so on the
+# client they drive the local player, which is the guest's player 2. The menu presses (SELECT to plug the pad
+# into the ENTRY EDITING screen, the two Circle taps at the character select) are the route's P2 ones; without
+# them player 2 stays COM, so a client that only fights does not reach the fight.
+#
+#   build/linux-dev/don --headless --sound on --mute --net-join 127.0.0.1:7877 \
+#       --input-script tools/run/scripts/net_client_2p.txt ~/.local/share/don/variants/en-jpvoice/SLPS_256.75
+2640 tap SELECT 4
+3820 tap CIRCLE 6
+4220 tap CIRCLE 6
+4900 press LEFT
+4960 release LEFT
+4975 tap SQUARE 4
+4989 tap SQUARE 4
+5003 tap SQUARE 4
+5050 tap TRIANGLE 6
+5200 press LEFT
+5260 release LEFT
+5275 tap SQUARE 4
+5289 tap SQUARE 4
+5303 tap SQUARE 4
+5350 tap TRIANGLE 6
+5500 press LEFT
+5560 release LEFT
+5575 tap SQUARE 4
+5589 tap SQUARE 4
+5603 tap SQUARE 4
+5650 tap TRIANGLE 6
+5800 press LEFT
+5860 release LEFT
+5875 tap SQUARE 4
+5889 tap SQUARE 4
+5903 tap SQUARE 4
+5950 tap TRIANGLE 6
+6100 press LEFT
+6160 release LEFT
+6175 tap SQUARE 4
+6189 tap SQUARE 4
+6203 tap SQUARE 4
+6250 tap TRIANGLE 6
+6400 press LEFT
+6460 release LEFT
+6475 tap SQUARE 4
+6489 tap SQUARE 4
+6503 tap SQUARE 4
+6550 tap TRIANGLE 6
+6700 press LEFT
+6760 release LEFT
+6775 tap SQUARE 4
+6789 tap SQUARE 4
+6803 tap SQUARE 4
+6850 tap TRIANGLE 6
+7000 press LEFT
+7060 release LEFT
+7075 tap SQUARE 4
+7089 tap SQUARE 4
+7103 tap SQUARE 4
+7150 tap TRIANGLE 6
+7300 press LEFT
+7360 release LEFT
+7375 tap SQUARE 4
+7389 tap SQUARE 4
+7403 tap SQUARE 4
+7450 tap TRIANGLE 6
+7600 press LEFT
+7660 release LEFT
+7675 tap SQUARE 4
+7689 tap SQUARE 4
+7703 tap SQUARE 4
+7750 tap TRIANGLE 6
+7900 press LEFT
+7960 release LEFT
+7975 tap SQUARE 4
+7989 tap SQUARE 4
+8003 tap SQUARE 4
+8050 tap TRIANGLE 6
+8200 press LEFT
+8260 release LEFT
+8275 tap SQUARE 4
+8289 tap SQUARE 4
+8303 tap SQUARE 4
+8350 tap TRIANGLE 6
+8500 press LEFT
+8560 release LEFT
+8575 tap SQUARE 4
+8589 tap SQUARE 4
+8603 tap SQUARE 4
+8650 tap TRIANGLE 6
+8800 press LEFT
+8860 release LEFT
+8875 tap SQUARE 4
+8889 tap SQUARE 4
+8903 tap SQUARE 4
+8950 tap TRIANGLE 6
+9100 press LEFT
+9160 release LEFT
+9175 tap SQUARE 4
+9189 tap SQUARE 4
+9203 tap SQUARE 4
+9250 tap TRIANGLE 6
+9400 press LEFT
+9460 release LEFT
+9475 tap SQUARE 4
+9489 tap SQUARE 4
+9503 tap SQUARE 4
+9550 tap TRIANGLE 6
+9700 press LEFT
+9760 release LEFT
+9775 tap SQUARE 4
+9789 tap SQUARE 4
+9803 tap SQUARE 4
+9850 tap TRIANGLE 6
+10000 press LEFT
+10060 release LEFT
+10075 tap SQUARE 4
+10089 tap SQUARE 4
+10103 tap SQUARE 4
+10150 tap TRIANGLE 6
+10300 press LEFT
+10360 release LEFT
+10375 tap SQUARE 4
+10389 tap SQUARE 4
+10403 tap SQUARE 4
+10450 tap TRIANGLE 6
+10600 press LEFT
+10660 release LEFT
+10675 tap SQUARE 4
+10689 tap SQUARE 4
+10703 tap SQUARE 4
+10750 tap TRIANGLE 6
+10900 press LEFT
+10960 release LEFT
+10975 tap SQUARE 4
+10989 tap SQUARE 4
+11003 tap SQUARE 4
+11050 tap TRIANGLE 6
+11200 press LEFT
+11260 release LEFT
+11275 tap SQUARE 4
+11289 tap SQUARE 4
+11303 tap SQUARE 4
+11350 tap TRIANGLE 6
+11500 press LEFT
+11560 release LEFT
+11575 tap SQUARE 4
+11589 tap SQUARE 4
+11603 tap SQUARE 4
+11650 tap TRIANGLE 6
+11800 press LEFT
+11860 release LEFT
+11875 tap SQUARE 4
+11889 tap SQUARE 4
+11903 tap SQUARE 4
+11950 tap TRIANGLE 6
+12100 press LEFT
+12160 release LEFT
+12175 tap SQUARE 4
+12189 tap SQUARE 4
+12203 tap SQUARE 4
+12250 tap TRIANGLE 6
+12400 press LEFT
+12460 release LEFT
+12475 tap SQUARE 4
+12489 tap SQUARE 4
+12503 tap SQUARE 4
+12550 tap TRIANGLE 6
+12700 press LEFT
+12760 release LEFT
+12775 tap SQUARE 4
+12789 tap SQUARE 4
+12803 tap SQUARE 4
+12850 tap TRIANGLE 6
+13000 press LEFT
+13060 release LEFT
+13075 tap SQUARE 4
+13089 tap SQUARE 4
+13103 tap SQUARE 4
+13150 tap TRIANGLE 6
+13300 press LEFT
+13360 release LEFT
+13375 tap SQUARE 4
+13389 tap SQUARE 4
+13403 tap SQUARE 4
+13450 tap TRIANGLE 6
+13600 press LEFT
+13660 release LEFT
+13675 tap SQUARE 4
+13689 tap SQUARE 4
+13703 tap SQUARE 4
+13750 tap TRIANGLE 6
+13900 press LEFT
+13960 release LEFT
+13975 tap SQUARE 4
+13989 tap SQUARE 4
+14003 tap SQUARE 4
+14050 tap TRIANGLE 6
+14200 press LEFT
+14260 release LEFT
+14275 tap SQUARE 4
+14289 tap SQUARE 4
+14303 tap SQUARE 4
+14350 tap TRIANGLE 6
+14500 press LEFT
+14560 release LEFT
+14575 tap SQUARE 4
+14589 tap SQUARE 4
+14603 tap SQUARE 4
+14650 tap TRIANGLE 6
+14800 press LEFT
+14860 release LEFT
+14875 tap SQUARE 4
+14889 tap SQUARE 4
+14903 tap SQUARE 4
+14950 tap TRIANGLE 6
+15100 press LEFT
+15160 release LEFT
+15175 tap SQUARE 4
+15189 tap SQUARE 4
+15203 tap SQUARE 4
+15250 tap TRIANGLE 6
+15400 press LEFT
+15460 release LEFT
+15475 tap SQUARE 4
+15489 tap SQUARE 4
+15503 tap SQUARE 4
+15550 tap TRIANGLE 6
+15700 press LEFT
+15760 release LEFT
+15775 tap SQUARE 4
+15789 tap SQUARE 4
+15803 tap SQUARE 4
+15850 tap TRIANGLE 6
+16000 press LEFT
+16060 release LEFT
+16075 tap SQUARE 4
+16089 tap SQUARE 4
+16103 tap SQUARE 4
+16150 tap TRIANGLE 6
+16300 press LEFT
+16360 release LEFT
+16375 tap SQUARE 4
+16389 tap SQUARE 4
+16403 tap SQUARE 4
+16450 tap TRIANGLE 6
+16600 press LEFT
+16660 release LEFT
+16675 tap SQUARE 4
+16689 tap SQUARE 4
+16703 tap SQUARE 4
+16750 tap TRIANGLE 6
+16900 press LEFT
+16960 release LEFT
+16975 tap SQUARE 4
+16989 tap SQUARE 4
+17003 tap SQUARE 4
+17050 tap TRIANGLE 6
+17200 press LEFT
+17260 release LEFT
+17275 tap SQUARE 4
+17289 tap SQUARE 4
+17303 tap SQUARE 4
+17350 tap TRIANGLE 6
+17500 press LEFT
+17560 release LEFT
+17575 tap SQUARE 4
+17589 tap SQUARE 4
+17603 tap SQUARE 4
+17650 tap TRIANGLE 6
+17800 press LEFT
+17860 release LEFT
+17875 tap SQUARE 4
+17889 tap SQUARE 4
+17903 tap SQUARE 4
+17950 tap TRIANGLE 6
+18100 quit

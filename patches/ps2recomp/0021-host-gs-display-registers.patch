@@ -1,0 +1,456 @@
+The display registers of the replaced sceGs* handlers follow the game's own SDK code when a host GS is installed
+
+What it fixes: with a real GS (src/gsbridge, patches 0004-0009, and the host program of T-110) the picture
+was four times too narrow, because the runtime's replaced sceGs* handlers wrote their own idea of the
+display set-up instead of what the game's own SDK code writes (docs/knowledge/18-display-registers.md
+sections 3, 4 and 6): sceGsResetGraph sent a stand-in A+D packet through the GIF whose entries 0x41 and
+0x42 a real GS reads as SCISSOR_2 and ALPHA_1 (overwriting the game's values; the host program carried a
+stop-gap filter, filter_reset_graph, to keep them away from the GS), SMODE1, SRFSH, SYNCH1, SYNCH2 and
+SYNCV were never written at all, and DISPLAY was built with MAGH 0 (a quarter of the horizontal size).
+That stand-in packet was also what wrote PMODE, DISPFB and DISPLAY with the runtime's values.
+
+What it does, and only with a host GS installed (PS2Runtime::setHostGs; without one the runtime's own GS
+keeps every legacy value, pinned by the test):
+  * sceGsResetGraph(0): no GIF packet; CSR reset (0x200), the CSR revision byte into the gparam block,
+    IMR = 0xFF00, then the SetGsCrt syscall - exactly what the game's own sceGsResetGraph does
+    (knowledge/18 section 2).
+  * GsSetCrt: with a host GS and NTSC interlace (video mode 2) it writes the BIOS's measured video
+    registers SMODE1 0x740814504, SMODE2 0x1 (frame) or 0x3 (field), SRFSH 0x8, SYNCH1 0x7F5B61F06F040,
+    SYNCH2 0x33A4D8, SYNCV 0xC7800601A01801 (knowledge/18 section 1). Any other mode keeps the legacy
+    registers and logs one line.
+  * sceGsSetDefDispEnv, sceGsSetDefDBuff, sceGsSetDefDBuffDc and sceGszbufaddr build what the SDK's own
+    functions build: the PMODE 0x66 / SMODE2 / DISPFB / DISPLAY formulas of section 2, MAGH =
+    (w + 0x9FF) / w, DX/DY from the NTSC/PAL mode tables, DH = h-1 (frame) or 2h-1 (field), DTHE for a
+    16-bit psm, the A+D tag of 8 (14 with the clear packets) registers, the second buffer's frame page at
+    half the z-buffer page, and the z-buffer page count of the frame. sceGsPutDispEnv -> applyGsDispEnv
+    puts the display environment on circuit 2 only (revision != 1), as the SDK does.
+  * No output mode other than NTSC (omode 2) and PAL (omode 3) has a formula here; those keep the legacy
+    values and log one line each. Everything the runtime's own renderer needs is untouched: gsHostMode()
+    is false without a host GS.
+
+How it was verified: tests/runtime/host_gs_display_test.cpp (new) fails against the tree without this
+patch (11 checks: no SMODE1/SRFSH/SYNCH1/SYNCH2/SYNCV, DISPLAY2 with MAGH 0, PMODE 0x8007, IMR 0, and the
+stand-in packet's 0x41/0x42/0x59..0x5F entries among the 9 GIF packets the display set-up forwards) and
+passes with it (the six video registers equal to knowledge/18 section 1, DISPLAY2 = the SDK's
+0x1BF9FF0183227C = the table's DISPLAY1, DISPFB2 = 0x1400 = the table's DISPFB1, no stand-in entry and
+exactly the 8 draw-environment register writes forwarded, and the legacy path unchanged when no host GS
+is installed). tests/host: `uv run --no-project --with pillow --with pytest python -I -m pytest tests/host
+-q` -> 8 passed, with the synthetic guest setting the display up only through these handlers and with
+filter_reset_graph and DON_HOST_GS_FILTER removed from src/host/gs_glue.cpp. With the game, a 60 s run
+writes a 640-pixel-wide screenshot and its registers at the memory-card dialog are compared with the
+console's own dump; the numbers are in the report of T-108.
+
+Origin: original work for this project (T-108). The SDK behaviour the handlers now follow is measured and
+written down in docs/knowledge/18-display-registers.md (decompiled from the game's own copy of the SDK).
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
+index 9c54919..519d4cd 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
+@@ -801,6 +801,24 @@ namespace ps2_stubs
+             g_gparam.interlace = static_cast<uint8_t>(interlace & 0x1);
+             g_gparam.omode = static_cast<uint8_t>(omode & 0xFF);
+             g_gparam.ffmode = static_cast<uint8_t>(ffmode & 0x1);
++            if (gsHostMode(runtime))
++            {
++                // What the game's own sceGsResetGraph(0) does: CSR reset, the revision byte of CSR into
++                // the gparam block, IMR = 0xFF00, then the SetGsCrt syscall. It sends no GIF packet and
++                // writes no display register itself (those come from SetGsCrt and sceGsPutDispEnv).
++                auto &gs = runtime->memory().gs();
++                runtime->memory().write64(0x12001000u, 0x200u);
++                g_gparam.version = static_cast<uint8_t>((gs.csr.load() >> 16) & 0xFFu);
++                writeGsGParamToScratch(runtime);
++                gs.imr = 0xFF00u;
++                R5900Context crt = *ctx;
++                crt.r[4] = _mm_set_epi32(0, 0, 0, static_cast<int>(interlace & 0x1u));
++                crt.r[5] = _mm_set_epi32(0, 0, 0, static_cast<int>(omode & 0xFFu));
++                crt.r[6] = _mm_set_epi32(0, 0, 0, static_cast<int>(ffmode & 0x1u));
++                ps2_syscalls::GsSetCrt(rdram, &crt, runtime);
++                setReturnS32(ctx, 0);
++                return;
++            }
+             writeGsGParamToScratch(runtime);
+             uint64_t pmode = makePmode(1, 0, 0, 0, 0, 0x80);
+             uint64_t smode2 = (interlace & 0x1) | ((ffmode & 0x1) << 1);
+@@ -886,6 +904,47 @@ namespace ps2_stubs
+             h = 448u;
+         }
+ 
++        if (gsHostMode(runtime))
++        {
++            // The same corrections as sceGsSetDefDBuff, from the same builder: the Dc structure has the
++            // two display environments, the first giftag and the first draw environment at the same
++            // offsets, and its own 16/22-register tags. The SDK's own SetDefDBuffDc is not among the
++            // decompiled SDK functions, so the measured rule of sceGsSetDefDBuff is applied to the first
++            // draw environment (offset 0x60) exactly as the SDK applies it.
++            GsSdkDBuff sdk{};
++            if (makeGsSdkDBuff(g_gparam, psm, static_cast<int32_t>(w), static_cast<int32_t>(h), sdk))
++            {
++                const uint32_t fbw = std::max<uint32_t>(1u, (w + 63u) / 64u);
++                const int32_t dw = static_cast<int32_t>(w);
++                const int32_t dh = static_cast<int32_t>(h);
++                const bool seedClear = clear != 0u;
++
++                GsDBuffDcMem db{};
++                db.disp[0] = {sdk.disp[0].pmode, sdk.disp[0].smode2, sdk.disp[0].dispfb, sdk.disp[0].display, 0u};
++                db.disp[1] = {sdk.disp[1].pmode, sdk.disp[1].smode2, sdk.disp[1].dispfb, sdk.disp[1].display, 0u};
++                db.giftag0 = {makeGiftagAplusD(seedClear ? 22u : 16u), 0xEULL};
++                db.giftag1 = db.giftag0;
++                seedGsDrawEnv1(db.draw01, dw, dh, 0u, fbw, psm, sdk.zbufPages, zpsm, ztest, sdk.dthe);
++                seedGsDrawEnv2(db.draw02, dw, dh, 0u, fbw, psm, sdk.zbufPages, zpsm, ztest, sdk.dthe);
++                seedGsDrawEnv1(db.draw11, dw, dh, 0u, fbw, psm, sdk.zbufPages, zpsm, ztest, sdk.dthe);
++                seedGsDrawEnv2(db.draw12, dw, dh, 0u, fbw, psm, sdk.zbufPages, zpsm, ztest, sdk.dthe);
++                db.draw01.frame1.value = (db.draw01.frame1.value & ~0x1FFull) | sdk.fbp1;
++                if (seedClear)
++                {
++                    seedGsClearPacket(db.clear0, dw, dh, 0u, ztest, false);
++                    seedGsClearPacket(db.clear1, dw, dh, 0u, ztest, true);
++                }
++                if (!writeGsDBuffDc(rdram, envAddr, db))
++                {
++                    setReturnS32(ctx, -1);
++                    return;
++                }
++                setReturnS32(ctx, 0);
++                return;
++            }
++            warnGsHostOutputMode("sceGsSetDefDBuffDc", g_gparam.omode);
++        }
++
+         const uint32_t fbw = std::max<uint32_t>(1u, (w + 63u) / 64u);
+         const uint64_t pmode = makePmode(1u, 1u, 0u, 0u, 0u, 0x80u);
+         const uint64_t smode2 =
+@@ -946,7 +1005,6 @@ namespace ps2_stubs
+         const uint32_t ztest = readStackU32(rdram, ctx, 16);
+         const uint32_t zpsm = readStackU32(rdram, ctx, 20);
+         const uint32_t clear = readStackU32(rdram, ctx, 24);
+-        (void)clear;
+ 
+         if (w == 0u)
+         {
+@@ -957,6 +1015,45 @@ namespace ps2_stubs
+             h = 448u;
+         }
+ 
++        if (gsHostMode(runtime))
++        {
++            // What the game's own sceGsSetDefDBuff (guest 0x100EE0) builds: two display environments from
++            // the sceGsSetDefDispEnv formulas, two draw environments of eight A+D pairs, A+D tags of 8
++            // (14 with the two clear packets) registers, and, for a field-mode or progressive display, the
++            // second buffer at half the z-buffer page address.
++            GsSdkDBuff sdk{};
++            if (makeGsSdkDBuff(g_gparam, psm, static_cast<int32_t>(w), static_cast<int32_t>(h), sdk))
++            {
++                const uint32_t fbw = std::max<uint32_t>(1u, (w + 63u) / 64u);
++                const int32_t dw = static_cast<int32_t>(w);
++                const int32_t dh = static_cast<int32_t>(h);
++
++                GsDBuffMem db{};
++                db.disp[0] = {sdk.disp[0].pmode, sdk.disp[0].smode2, sdk.disp[0].dispfb, sdk.disp[0].display, 0u};
++                db.disp[1] = {sdk.disp[1].pmode, sdk.disp[1].smode2, sdk.disp[1].dispfb, sdk.disp[1].display, 0u};
++                seedGsDrawEnv1(db.draw0, dw, dh, 0u, fbw, psm, sdk.zbufPages, zpsm, ztest, sdk.dthe);
++                seedGsDrawEnv1(db.draw1, dw, dh, 0u, fbw, psm, sdk.zbufPages, zpsm, ztest, sdk.dthe);
++                if (clear != 0u)
++                {
++                    seedGsClearPacket(db.clear0, dw, dh, 0u, ztest, false);
++                    seedGsClearPacket(db.clear1, dw, dh, 0u, ztest, true);
++                }
++                db.giftag0 = {makeGiftagAplusD(clear != 0u ? 14u : 8u), 0xEULL};
++                db.giftag1 = db.giftag0;
++                // The second buffer's frame page, as the SDK sets it after calling zbufaddr.
++                db.draw0.frame1.value = (db.draw0.frame1.value & ~0x1FFull) | sdk.fbp1;
++                if (!writeGsDBuff(rdram, envAddr, db))
++                {
++                    setReturnS32(ctx, -1);
++                    return;
++                }
++                setReturnS32(ctx, 0);
++                return;
++            }
++            warnGsHostOutputMode("sceGsSetDefDBuff", g_gparam.omode);
++        }
++        (void)clear;
++
+         const uint32_t fbw = std::max<uint32_t>(1u, (w + 63u) / 64u);
+         const uint64_t pmode = makePmode(1u, 1u, 0u, 0u, 0u, 0x80u);
+         const uint64_t smode2 =
+@@ -1011,6 +1108,26 @@ namespace ps2_stubs
+         if (h == 0)
+             h = 448;
+ 
++        if (gsHostMode(runtime))
++        {
++            GsSdkDispEnv sdk{};
++            if (makeGsSdkDispEnv(g_gparam, psm, static_cast<int32_t>(w), static_cast<int32_t>(h),
++                                 static_cast<int32_t>(dx), static_cast<int32_t>(dy), sdk))
++            {
++                GsDispEnvMem env{sdk.pmode, sdk.smode2, sdk.dispfb, sdk.display, 0u};
++                uint8_t *ptr = getMemPtr(rdram, envAddr);
++                if (!ptr)
++                {
++                    setReturnS32(ctx, -1);
++                    return;
++                }
++                std::memcpy(ptr, &env, sizeof(env));
++                setReturnS32(ctx, 0);
++                return;
++            }
++            warnGsHostOutputMode("sceGsSetDefDispEnv", g_gparam.omode);
++        }
++
+         uint32_t fbw = (w + 63) / 64;
+         uint64_t dispfb = makeDispFb(0, fbw, psm, 0, 0);
+         uint64_t display = makeDisplay(dx, dy, 0, 0, w - 1, h - 1);
+@@ -1319,6 +1436,23 @@ namespace ps2_stubs
+     void sceGszbufaddr(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
+         (void)rdram;
++        if (gsHostMode(runtime))
++        {
++            // The game's own code (guest 0x100A40) reads the mode values as 16-bit fields of the guest
++            // gparam block (interlace at +0, ffmode at +4) and tests both for 1; the runtime keeps g_gparam
++            // as 8-bit fields (interlace, omode, ffmode, revision) and the copy in the scratchpad therefore
++            // packs interlace and omode into one 16-bit field, so the read below would never match. Use the
++            // runtime's own fields. psm arrives in a1 (every caller of this handler passes its psm there:
++            // sceGsSetDefDrawEnv, sceGsSetDefDrawEnv2, sceGsSetDefDBuff, sceGsSetDefDBuffDc), w in a2 and h
++            // in a3 -- one register lower than the SDK's own zbufaddr(int psm, int w, int h).
++            const uint32_t psm = getRegU32(ctx, 5);
++            const int32_t w = static_cast<int32_t>(static_cast<int16_t>(getRegU32(ctx, 6) & 0xFFFF));
++            const int32_t h = static_cast<int32_t>(static_cast<int16_t>(getRegU32(ctx, 7) & 0xFFFF));
++            const bool interlaceField = g_gparam.interlace != 0u && g_gparam.ffmode != 0u;
++            setReturnS32(ctx, static_cast<int32_t>(gsSdkZbufPages(psm, w, h, interlaceField)));
++            return;
++        }
++
+         uint32_t param_1 = getRegU32(ctx, 4);
+         int32_t w = static_cast<int32_t>(static_cast<int16_t>(getRegU32(ctx, 6) & 0xFFFF));
+         int32_t h = static_cast<int32_t>(static_cast<int16_t>(getRegU32(ctx, 7) & 0xFFFF));
+@@ -1345,6 +1479,11 @@ namespace ps2_stubs
+ 
+         int32_t product = width_blocks * height_blocks;
+ 
++        // The guest's gparam block holds 16-bit fields (interlace at +0, omode at +2, ffmode at +4); this
++        // reads the runtime's 8-bit copy in the scratchpad (interlace at +0x100, omode at +0x101, ffmode at
++        // +0x102), so the 16-bit halves it tests are interlace|omode<<8 and the scratchpad word after the
++        // copy, not interlace and ffmode. Left alone: without a host GS the values the runtime's own GS
++        // works with must not change (host-GS mode is handled above).
+         uint64_t gparam_val = 0;
+         if (runtime)
+         {
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h b/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
+index b1bb6d8..a9cb54d 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
+@@ -1874,11 +1874,138 @@ namespace
+         return true;
+     }
+ 
++    // ---- Host-GS mode --------------------------------------------------------------------------------
++    // With a host GS installed (PS2Runtime::setHostGs) the display registers reach a real GS, so the
++    // sceGs* handlers have to produce what the game's own SDK code produces. Without one, the runtime's
++    // own GS keeps the values it was written for and nothing below is used.
++
++    static bool gsHostMode(PS2Runtime *runtime)
++    {
++        return runtime && runtime->hostGs() != nullptr;
++    }
++
++    // The display environment sceGsSetDefDispEnv builds (PMODE, SMODE2, DISPFB, DISPLAY) from the SDK
++    // formulas: NTSC (omode 2) and PAL (omode 3) only. Any other output mode reads screen offsets from a
++    // file and a syscall in the SDK; there it returns false and the caller keeps the legacy values.
++    struct GsSdkDispEnv
++    {
++        uint64_t pmode;
++        uint64_t smode2;
++        uint64_t dispfb;
++        uint64_t display;
++    };
++
++    static bool makeGsSdkDispEnv(const GsGParam &gp, uint32_t psm, int32_t w, int32_t h, int32_t dx, int32_t dy,
++                                 GsSdkDispEnv &out)
++    {
++        if ((gp.omode != 2u && gp.omode != 3u) || w <= 0)
++            return false;
++        const bool interlace = gp.interlace != 0u;
++        const bool field = gp.ffmode != 0u;
++        out.pmode = 0x66u;
++        out.smode2 = interlace ? (field ? 3u : 1u) : 2u;
++        out.dispfb = (static_cast<uint64_t>(psm & 0xFu) << 15) |
++                     (static_cast<uint64_t>(static_cast<uint32_t>(w + 63) >> 6 & 0x3Fu) << 9);
++        const int32_t x0 = gp.omode == 2u ? 0x27C : 0x290;
++        int32_t dyBase;
++        if (gp.omode == 2u)
++            dyBase = interlace ? 0x32 : 0x19;
++        else
++            dyBase = interlace ? 0x48 : 0x24;
++        const int32_t dh = (interlace && field) ? h * 2 - 1 : h - 1;
++        const int32_t magh = (w + 0x9FF) / w;
++        out.display = (static_cast<uint64_t>(magh - 1) << 23) |
++                      (static_cast<uint64_t>(magh * w - 1) << 32) |
++                      (static_cast<uint64_t>(dx * magh + x0) & 0xFFFu) |
++                      (static_cast<uint64_t>(dh) << 44) |
++                      ((static_cast<uint64_t>(dy + dyBase) & 0xFFFu) << 12);
++        return true;
++    }
++
++    // One line per output mode that has no SDK formula here (host-GS mode keeps the legacy values for it).
++    static void warnGsHostOutputMode(const char *what, uint32_t omode)
++    {
++        static std::atomic<uint32_t> seen{0u};
++        if (omode < 32u && (seen.fetch_or(1u << omode) & (1u << omode)) != 0u)
++            return;
++        RUNTIME_ERROR("[ps2x] " << what << ": output mode 0x" << std::hex << omode << std::dec
++                                << " has no SDK display formula in host-GS mode; keeping the legacy values\n");
++    }
++
++    // The page count the game's own sceGszbufaddr (guest 0x100A40) returns: the page count of the frame,
++    // halved for an interlaced field display (docs/knowledge/18-display-registers.md section 2).
++    static uint32_t gsSdkZbufPages(uint32_t psm, int32_t w, int32_t h, bool interlaceField)
++    {
++        int32_t widthBlocks = (w + 63) >> 6;
++        if (w + 63 < 0)
++            widthBlocks = (w + 126) >> 6;
++
++        int32_t heightBlocks;
++        if ((psm & 2u) != 0u)
++        {
++            heightBlocks = (h + 63) >> 6;
++            if (h + 63 < 0)
++                heightBlocks = (h + 126) >> 6;
++        }
++        else
++        {
++            heightBlocks = (h + 31) >> 5;
++            if (h + 31 < 0)
++                heightBlocks = (h + 62) >> 5;
++        }
++
++        const int32_t pages = widthBlocks * heightBlocks;
++        return static_cast<uint32_t>(interlaceField ? pages : pages * 2);
++    }
++
++    // The display half of the double buffer sceGsSetDefDBuff/sceGsSetDefDBuffDc build: the display
++    // environment both buffers share, the page count of the z-buffer and DTHE. Both buffers get their own
++    // frame-buffer page only for a progressive or an interlaced field display, at half the z-buffer page.
++    struct GsSdkDBuff
++    {
++        GsSdkDispEnv disp[2];
++        uint32_t zbufPages = 0;
++        uint32_t fbp1 = 0; // frame-buffer page of the second buffer
++        bool dthe = false;
++    };
++
++    static bool makeGsSdkDBuff(const GsGParam &gp, uint32_t psm, int32_t w, int32_t h, GsSdkDBuff &out)
++    {
++        if (!makeGsSdkDispEnv(gp, psm, w, h, 0, 0, out.disp[0]))
++            return false;
++        out.disp[1] = out.disp[0];
++        out.zbufPages = gsSdkZbufPages(psm, w, h, gp.interlace != 0u && gp.ffmode != 0u);
++        out.dthe = (psm & 2u) != 0u;
++        if (gp.interlace == 0u || gp.ffmode != 0u)
++            out.fbp1 = (out.zbufPages >> 1) & 0x1FFu;
++        out.disp[1].dispfb = (out.disp[1].dispfb & ~0x1FFull) | out.fbp1;
++        return true;
++    }
++
+     static void applyGsDispEnv(PS2Runtime *runtime, const GsDispEnvMem &env)
+     {
+         if (!runtime || !runtime->syncCoreSubsystems())
+             return;
+         auto &regs = runtime->memory().gs();
++        if (gsHostMode(runtime))
++        {
++            // sceGsPutDispEnv: GS revision 1 drives circuit 1, every later one circuit 2 only.
++            regs.pmode = env.pmode;
++            if (g_gparam.version == 1u)
++            {
++                regs.dispfb1 = env.dispfb;
++                regs.display1 = env.display;
++                regs.extdata = env.bgcolor; // the same slot: sceGsPutDispEnv writes it to EXTDATA
++            }
++            else
++            {
++                regs.smode2 = env.smode2;
++                regs.dispfb2 = env.dispfb;
++                regs.display2 = env.display;
++                regs.bgcolor = env.bgcolor;
++            }
++            return;
++        }
+         regs.pmode = env.pmode;
+         regs.smode2 = env.smode2;
+         regs.dispfb1 = env.dispfb;
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp b/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
+index 351e9f9..f53f461 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
+@@ -3,13 +3,55 @@
+ 
+ namespace ps2_syscalls
+ {
++    namespace
++    {
++        // The video registers the BIOS SetGsCrt writes, for the one mode whose values were measured: NTSC
++        // (video mode 2), interlaced, from docs/knowledge/18-display-registers.md section 1. Returns false
++        // without a host GS and for every other mode, so that the caller keeps the legacy registers.
++        // SMODE2 follows the SDK's rule (interlace ? (ffmode ? 3 : 1) : 2); PMODE is not written here,
++        // sceGsPutDispEnv writes it. The values reach the host GS in the privileged-register array of
++        // Ps2HostGs::vsync (PS2Runtime::notifyHostGsVsync).
++        bool setHostGsVideoRegisters(PS2Runtime *runtime, int interlaced, int videoMode, int frameMode)
++        {
++            if (!runtime || runtime->hostGs() == nullptr)
++                return false;
++            if ((interlaced & 0x1) != 1 || videoMode != 2)
++            {
++                // One line per distinct mode; everything else keeps the legacy behaviour.
++                static std::atomic<uint32_t> warned{0u};
++                const uint32_t bit = 1u << ((interlaced & 1) | ((videoMode & 0xF) << 1));
++                if ((warned.fetch_or(bit) & bit) == 0u)
++                    RUNTIME_ERROR("[ps2x] GsSetCrt: only NTSC interlace (interlaced=1, video mode 2) has measured "
++                                  "video registers with a host GS; interlaced="
++                                  << interlaced << " video mode=0x" << std::hex << videoMode << std::dec
++                                  << " ffmode=" << frameMode << "; keeping the legacy registers\n");
++                return false;
++            }
++
++            auto &gs = runtime->memory().gs();
++            gs.smode1 = 0x740814504ull;
++            gs.smode2 = (frameMode != 0) ? 3ull : 1ull;
++            gs.srfsh = 0x8ull;
++            gs.synch1 = 0x7F5B61F06F040ull;
++            gs.synch2 = 0x33A4D8ull;
++            gs.syncv = 0xC7800601A01801ull;
++            return true;
++        }
++    }
++
+     void GsSetCrt(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
+         int interlaced = getRegU32(ctx, 4); // $a0 - 0=non-interlaced, 1=interlaced
+-        int videoMode = getRegU32(ctx, 5);  // $a1 - 0=NTSC, 1=PAL, 2=VESA, 3=HiVision
+-        int frameMode = getRegU32(ctx, 6);  // $a2 - 0=field, 1=frame
++        int videoMode = getRegU32(ctx, 5);  // $a1 - 0=NTSC, 1=PAL, 2=VESA, 3=HiVision. The game passes 2
++                                            //       for NTSC (the game's own SetGsCrt call, see
++                                            //       docs/knowledge/18-display-registers.md section 2)
++        int frameMode = getRegU32(ctx, 6);  // $a2 - ffmode of the game's gparam: 0=frame, 1=field
+ 
+-        if (runtime)
++        // With a host GS and the mode the game asks for (NTSC interlace) the video registers are the BIOS's
++        // measured ones, and PMODE is left to sceGsPutDispEnv; any other mode keeps the legacy values.
++        const bool hostVideoRegisters = setHostGsVideoRegisters(runtime, interlaced, videoMode, frameMode);
++
++        if (runtime && !hostVideoRegisters)
+         {
+             auto &gs = runtime->memory().gs();
+             const uint64_t smode2 =
+@@ -27,7 +69,10 @@ namespace ps2_syscalls
+ 
+         RUNTIME_LOG("PS2 GsSetCrt: interlaced=" << interlaced
+                                                 << ", videoMode=" << videoMode
+-                                                << ", frameMode=" << frameMode << std::endl);
++                                                << ", frameMode=" << frameMode
++                                                << (hostVideoRegisters ? " (host GS: NTSC interlace video registers)"
++                                                                       : "")
++                                                << std::endl);
+ 
+         setReturnS32(ctx, 0);
+     }

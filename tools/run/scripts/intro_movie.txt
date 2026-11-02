@@ -1,0 +1,5 @@
+# Intro movie: the two taps that answer the memory-card dialog (blanks 270 and 330 of
+# tools/run/scripts/multiplayer_ougi.txt). Nothing presses START afterwards, so the opening movie plays
+# (run it with DON_PLAY_MOVIES=1; used by tests/regression/test_movie_audio.py).
+270 tap LEFT 6
+330 tap CIRCLE 6

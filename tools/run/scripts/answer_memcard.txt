@@ -1,0 +1,25 @@
+# T-112: answer the memory-card dialog and watch what the game does next.
+#
+# Measured with `--shots --shot-every 60` (work/shots/probe, T-112): the dialog ("the memory card in
+# slot 1 ... start the game as it is?") is on screen from vertical blank 180 on and stays until it is
+# answered, so the first command is at 240 - the picture here is byte-identical to the one at 180.
+# Frames are presented frames (vertical blanks), never wall-clock time: the port is slower than the
+# console, so 600 frames are about 40 s here and one second there.
+#
+# The cursor starts on the right option ("no"): LEFT moves it to the left one ("yes"), CIRCLE confirms
+# (docs/INPUT_SCRIPTS.md: CIRCLE confirms in this game). The reference emulator's route
+# (tools/ref/route.txt) does the same: `press left`, `press circle`. After that the reference shows
+# logos and an opening video of about 100 s (6000 frames) and then the title screen; the shots every
+# 600 frames are there to see how far the port gets.
+
+240   shot  memcard_dialog
++30   tap   LEFT    6
++30   shot  memcard_left
++30   tap   CIRCLE  6
++60   shot  memcard_after_circle
++600  shot  next_1
++600  shot  next_2
++600  shot  next_3
++600  shot  next_4
++600  shot  next_5
++60   quit

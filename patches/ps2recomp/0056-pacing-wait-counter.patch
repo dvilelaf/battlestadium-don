@@ -1,0 +1,70 @@
+# 0056-pacing-wait-counter: the scheduler counts the nanoseconds it spends waiting for a host deadline
+#
+# What it does: EeScheduler::pacingWaitNs() returns the total time spent in the two wait_until calls (the idle
+# pacing sleep and the vertical-blank wait). Read by the host's DON_PACING_LOG diagnostic (T-305) to split the
+# interval between two blanks. Diagnostic only: no guest-visible effect, one relaxed atomic add per wait.
+# Verified: DON_PACING_LOG=1 run of 20 s reported 9.5 s of waiting, and the 22 runtime tests build.
+#
+diff --git a/ps2xRuntime/include/runtime/ee_scheduler.h b/ps2xRuntime/include/runtime/ee_scheduler.h
+index 7245d48..76b8ebc 100644
+--- a/ps2xRuntime/include/runtime/ee_scheduler.h
++++ b/ps2xRuntime/include/runtime/ee_scheduler.h
+@@ -319,6 +319,9 @@ public:
+     // a guest function again. While it is true the host stack is being unwound to the run loop and no
+     // generated caller may take a callee's return for a normal return.
+     [[nodiscard]] bool unwinding() const noexcept { return m_unwinding; }
++    // Patch 0056: the total nanoseconds this scheduler has spent waiting for a host deadline (the pacing sleep
++    // of the idle path and of the vertical-blank wait); read by the host's DON_PACING_LOG diagnostic.
++    [[nodiscard]] uint64_t pacingWaitNs() const noexcept { return m_pacingWaitNs.load(std::memory_order_relaxed); }
+     void accountCycles(uint32_t cycles) noexcept;
+     [[nodiscard]] bool isExecutingGuest() const noexcept;
+ 
+@@ -441,6 +444,12 @@ private:
+     static int waitObjectId(const EeWaitState &wait);
+     void writeGuestU32(uint32_t address, uint32_t value);
+     void waitForEvent();
++    void addPacingWait(std::chrono::steady_clock::time_point since) noexcept
++    {
++        m_pacingWaitNs.fetch_add(static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
++                                     std::chrono::steady_clock::now() - since).count()),
++                                 std::memory_order_relaxed);
++    }
+     void scheduleEvent(uint64_t deadlineCycle, std::chrono::steady_clock::time_point hostDeadline, EeEvent event);
+     void updateNextDeadline();
+     // Patch 0034: the slow path (the code that used to run on every dispatch) and the pre-computation of
+@@ -505,6 +514,7 @@ private:
+     // Patch 0041: a queued interrupt handler is waiting for the running context to enable interrupts.
+     bool m_interruptsDeferred = false;
+     bool m_unwinding = false;
++    std::atomic<uint64_t> m_pacingWaitNs{0};
+     uint64_t m_dispatchCount = 0;
+     uint64_t m_fastPathCount = 0;
+     uint64_t m_slowPathCount = 0;
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index 16ce6eb..d783d45 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -2012,9 +2012,11 @@ void EeScheduler::processDueDeadlines()
+ 
+             if (now < pacingDeadline)
+             {
++                const auto waitStart = std::chrono::steady_clock::now();
+                 m_eventCv.wait_until(lock, pacingDeadline, [this]()
+                                      { return !m_events.empty() ||
+                                               m_stopRequested.load(std::memory_order_acquire); });
++                addPacingWait(waitStart);
+                 if (!m_events.empty() || m_stopRequested.load(std::memory_order_acquire))
+                 {
+                     updateNextDeadline();
+@@ -2263,9 +2265,11 @@ void EeScheduler::waitForEvent()
+         }
+     }
+ 
++    const auto waitStart = std::chrono::steady_clock::now();
+     const bool signaled = m_eventCv.wait_until(lock, hostDeadline, [this]()
+                                                { return !m_events.empty() ||
+                                                         m_stopRequested.load(std::memory_order_acquire); });
++    addPacingWait(waitStart);
+     if (!signaled)
+     {
+         const uint64_t elapsed = deadlineCycle > m_eeCycle ? deadlineCycle - m_eeCycle : 0u;

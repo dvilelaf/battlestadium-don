@@ -1,0 +1,95 @@
+Recompiler and runtime: vmax and vmini order the bit patterns as signed integers, like the console.
+
+What it fixes: the emitted text was _mm_max_ps / _mm_min_ps, so -0 and +0 compared equal (the second operand won) and a denormal
+pattern was a zero. The reference emulator (third_party/pcsx2/pcsx2/VUops.cpp applyMinMax, with fp_max / fp_min of FPU.cpp)
+compares the two patterns as signed integers, two negative ones the other way round: max(+0, -0) is +0, min is -0 and a
+denormal pattern is a larger number than zero. Two helpers in the runtime header do that per lane (ps2_vu_max_ps, ps2_vu_min_ps);
+the emitted text calls them. Same rule as patch 0049 for max.s and min.s.
+
+How it was verified: tests/conformance family "vu0", vmax, vmaxx..w, vmaxi, vmini, vminix..w, vminii: 235 to 416 of 546 to 1,157
+cases differed before, none after.
+Sites in the game: vmax 87 (mask 0x3), vmini 87 (mask 0x3), vmaxx 1, vminix 1. The difference needs a signed zero or a denormal
+as an operand.
+
+Original work for this repository (no code from another project).
+
+--- a/ps2xRecomp/src/lib/vu_translation_helpers.cpp
++++ b/ps2xRecomp/src/lib/vu_translation_helpers.cpp
+@@ -246,7 +246,7 @@
+ 
+         std::string shuffle_pattern = fmt::format("_MM_SHUFFLE({},{},{},{})", field, field, field, field);
+ 
+-        return fmt::format("{{ __m128 res = _mm_min_ps(ctx->vu0_vf[{}], _mm_shuffle_ps(ctx->vu0_vf[{}], ctx->vu0_vf[{}], {})); "
++        return fmt::format("{{ __m128 res = ps2_vu_min_ps(ctx->vu0_vf[{}], _mm_shuffle_ps(ctx->vu0_vf[{}], ctx->vu0_vf[{}], {})); "
+                            "__m128i mask = _mm_set_epi32({}, {}, {}, {}); "
+                            "ctx->vu0_vf[{}] = _mm_blendv_ps(ctx->vu0_vf[{}], res, _mm_castsi128_ps(mask)); }}",
+                            vfs, vft, vft, shuffle_pattern,
+@@ -265,7 +265,7 @@
+ 
+         std::string shuffle_pattern = fmt::format("_MM_SHUFFLE({},{},{},{})", field, field, field, field);
+ 
+-        return fmt::format("{{ __m128 res = _mm_max_ps(ctx->vu0_vf[{}], _mm_shuffle_ps(ctx->vu0_vf[{}], ctx->vu0_vf[{}], {})); "
++        return fmt::format("{{ __m128 res = ps2_vu_max_ps(ctx->vu0_vf[{}], _mm_shuffle_ps(ctx->vu0_vf[{}], ctx->vu0_vf[{}], {})); "
+                            "__m128i mask = _mm_set_epi32({}, {}, {}, {}); "
+                            "ctx->vu0_vf[{}] = _mm_blendv_ps(ctx->vu0_vf[{}], res, _mm_castsi128_ps(mask)); }}",
+                            vfs, vft, vft, shuffle_pattern,
+@@ -326,7 +326,7 @@
+         uint8_t vfs = inst.rd;
+         uint8_t vft = inst.rt;
+         uint8_t dest_mask = inst.vectorInfo.vectorField;
+-        return fmt::format("{{ __m128 res = _mm_max_ps(ctx->vu0_vf[{}], ctx->vu0_vf[{}]); "
++        return fmt::format("{{ __m128 res = ps2_vu_max_ps(ctx->vu0_vf[{}], ctx->vu0_vf[{}]); "
+                            "__m128i mask = _mm_set_epi32({}, {}, {}, {}); "
+                            "ctx->vu0_vf[{}] = _mm_blendv_ps(ctx->vu0_vf[{}], res, _mm_castsi128_ps(mask)); }}",
+                            vfs, vft,
+@@ -340,7 +340,7 @@
+         uint8_t vfd = inst.sa;
+         uint8_t vfs = inst.rd;
+         uint8_t dest_mask = inst.vectorInfo.vectorField;
+-        return fmt::format("{{ __m128 res = _mm_max_ps(ctx->vu0_vf[{}], _mm_set1_ps(ctx->vu0_i)); "
++        return fmt::format("{{ __m128 res = ps2_vu_max_ps(ctx->vu0_vf[{}], _mm_set1_ps(ctx->vu0_i)); "
+                            "__m128i mask = _mm_set_epi32({}, {}, {}, {}); "
+                            "ctx->vu0_vf[{}] = _mm_blendv_ps(ctx->vu0_vf[{}], res, _mm_castsi128_ps(mask)); }}",
+                            vfs,
+@@ -354,7 +354,7 @@
+         uint8_t vfd = inst.sa;
+         uint8_t vfs = inst.rd;
+         uint8_t dest_mask = inst.vectorInfo.vectorField;
+-        return fmt::format("{{ __m128 res = _mm_min_ps(ctx->vu0_vf[{}], _mm_set1_ps(ctx->vu0_i)); "
++        return fmt::format("{{ __m128 res = ps2_vu_min_ps(ctx->vu0_vf[{}], _mm_set1_ps(ctx->vu0_i)); "
+                            "__m128i mask = _mm_set_epi32({}, {}, {}, {}); "
+                            "ctx->vu0_vf[{}] = _mm_blendv_ps(ctx->vu0_vf[{}], res, _mm_castsi128_ps(mask)); }}",
+                            vfs,
+@@ -459,7 +459,7 @@
+         uint8_t vfs = inst.rd;
+         uint8_t vft = inst.rt;
+         uint8_t dest_mask = inst.vectorInfo.vectorField;
+-        return fmt::format("{{ __m128 res = _mm_min_ps(ctx->vu0_vf[{}], ctx->vu0_vf[{}]); "
++        return fmt::format("{{ __m128 res = ps2_vu_min_ps(ctx->vu0_vf[{}], ctx->vu0_vf[{}]); "
+                            "__m128i mask = _mm_set_epi32({}, {}, {}, {}); "
+                            "ctx->vu0_vf[{}] = _mm_blendv_ps(ctx->vu0_vf[{}], res, _mm_castsi128_ps(mask)); }}",
+                            vfs, vft,
+--- a/ps2xRuntime/include/ps2_runtime_macros.h
++++ b/ps2xRuntime/include/ps2_runtime_macros.h
+@@ -650,6 +650,21 @@
+         return (uint32_t)(sa > sb ? sa : sb);
+     return (uint32_t)(sa < sb ? sa : sb);
+ }
++// vmax and vmini (VUops.cpp: applyMinMax, fp_max/fp_min of FPU.cpp): per lane, the bit patterns ordered as signed integers, two
++// negative ones the other way round. -0 < +0 and a denormal pattern is a number, unlike _mm_max_ps / _mm_min_ps.
++static inline __m128i ps2_vu_order_key(__m128 x)
++{
++    const __m128i i = _mm_castps_si128(x);
++    return _mm_xor_si128(i, _mm_srli_epi32(_mm_srai_epi32(i, 31), 1));
++}
++static inline __m128 ps2_vu_max_ps(__m128 a, __m128 b)
++{
++    return _mm_blendv_ps(b, a, _mm_castsi128_ps(_mm_cmpgt_epi32(ps2_vu_order_key(a), ps2_vu_order_key(b))));
++}
++static inline __m128 ps2_vu_min_ps(__m128 a, __m128 b)
++{
++    return _mm_blendv_ps(b, a, _mm_castsi128_ps(_mm_cmplt_epi32(ps2_vu_order_key(a), ps2_vu_order_key(b))));
++}
+ #define FPU_CVT_L_S(a) ((int64_t)(float)(a))
+ #define FPU_C_F_S(a, b) (0)
+ #define FPU_C_UN_S(a, b) (isnan((float)(a)) || isnan((float)(b)))

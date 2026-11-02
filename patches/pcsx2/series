@@ -1,0 +1,7 @@
+0001-bridge-cmake-hook.patch
+0002-gif-packed-partial-exhaustion.patch
+0003-texture-cache-scratch-capacity.patch
+0004-gs-software-renderer-own-code-memory.patch
+0005-clang-cl-cross-build-fixes.patch
+0006-per-process-gs-mem.patch
+0007-aligned-malloc-size-multiple-of-alignment.patch

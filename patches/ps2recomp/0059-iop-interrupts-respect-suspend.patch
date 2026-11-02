@@ -1,0 +1,156 @@
+# 0059-iop-interrupts-respect-suspend: the IOP's DMA and SPU2 interrupts honour the guest's interrupt-suspend state
+#
+# What it fixes: IopIntrman::dispatchInterrupt (via IopEmulator::servicePendingDmaInterrupts, called after every guest
+# instruction) started the handler of a pending DMA/SPU2 interrupt wherever the running thread was, without looking at
+# CpuSuspendIntr/CpuDisableIntr. The suspend flag (IopMemory::m_interruptControl) was one global shared by every thread and
+# never read on that path: measured on the route, 5237 of 5468 handler entries (blanks 1-3500) found it at 0. On the console
+# the interrupt waits until the thread resumes it, so a handler never sees a structure the thread is half way through
+# writing (the signature of patch 0041 on the main processor; journal 011, thirteenth piece).
+# What it does: (1) the interrupt-enable state belongs to the thread (IopThread::interruptsEnabled), saved at the end of a
+# slice and loaded at the start of the next one by IopKernel; a thread that blocked or ended leaves the processor idle with
+# interrupts enabled. (2) servicePendingDmaInterrupts starts no handler while the running context has it suspended; the
+# interrupts stay pending and the first check after the resume (after every guest instruction) takes them. (3) Inside a
+# handler the state is disabled and the interrupted state returns with it. (4) A host SPU2 event raised while the same
+# interrupt is still waiting is counted (pendingExtraInterrupts), not folded: one handler entry per raise.
+# Not covered: timer and alarm callbacks (iop_timrman, pendingGuestCallbacks) still start regardless of the state.
+# Verified: tests/runtime/iop_intr_suspend_test fails 5 checks without this patch and passes with it; iop_host_spu2_test,
+# module_buffer_load_test, iop_heap_capacity_test, iop_heap_reuse_test pass with it.
+#
+diff --git a/ps2xIOP/src/emulator/core/iop_kernel.cpp b/ps2xIOP/src/emulator/core/iop_kernel.cpp
+index 4832d8f..e675ace 100644
+--- a/ps2xIOP/src/emulator/core/iop_kernel.cpp
++++ b/ps2xIOP/src/emulator/core/iop_kernel.cpp
+@@ -690,6 +690,7 @@ namespace ps2x::iop::detail
+             return nullptr;
+ 
+         m_currentThread = next;
++        m_memory.setInterruptControl(next->interruptsEnabled);
+         next->state = IopThreadState::Running;
+         next->cpu.stopped = false;
+         next->cpu.yielded = false;
+@@ -709,10 +710,15 @@ namespace ps2x::iop::detail
+ 
+     void IopKernel::endTimeslice(IopThread &thread, uint32_t returnSentinel)
+     {
++        thread.interruptsEnabled = m_memory.interruptControl();
+         if (thread.cpu.pc == returnSentinel || thread.cpu.stopped)
+             thread.state = IopThreadState::Dormant;
+         else if (thread.state == IopThreadState::Running)
+             thread.state = IopThreadState::Ready;
++        // A thread that is still runnable was preempted: the processor keeps its state, and an interrupt between
++        // two slices interrupts it. One that blocked or ended leaves the processor idle, interrupts enabled.
++        if (thread.state != IopThreadState::Ready)
++            m_memory.setInterruptControl(1u);
+         m_currentThread = nullptr;
+         cleanupDeadThreads();
+     }
+diff --git a/ps2xIOP/src/emulator/core/iop_kernel.h b/ps2xIOP/src/emulator/core/iop_kernel.h
+index 4977102..709b177 100644
+--- a/ps2xIOP/src/emulator/core/iop_kernel.h
++++ b/ps2xIOP/src/emulator/core/iop_kernel.h
+@@ -41,6 +41,9 @@ namespace ps2x::iop::detail
+         uint32_t waitMode = 0;
+         uint32_t waitResultAddress = 0;
+         int wakeupCount = 0;
++        // The interrupt-enable state of this thread's context (CpuSuspendIntr clears it, CpuResumeIntr restores it).
++        // IopMemory holds the state of the running context; a thread switch saves and restores it here.
++        uint32_t interruptsEnabled = 1;
+     };
+ 
+     class IopKernel
+diff --git a/ps2xIOP/src/emulator/iop_emulator.cpp b/ps2xIOP/src/emulator/iop_emulator.cpp
+index 271edf0..ea9f4ed 100644
+--- a/ps2xIOP/src/emulator/iop_emulator.cpp
++++ b/ps2xIOP/src/emulator/iop_emulator.cpp
+@@ -134,6 +134,7 @@ namespace ps2x::iop::detail
+             timrman.reset();
+             ioman.reset();
+             pendingDmaInterrupts.clear();
++            pendingExtraInterrupts.clear();
+             pendingGuestCallbacks.clear();
+             nextModuleId = 1;
+             moduleCursor = kModuleLoadBase;
+@@ -183,6 +184,16 @@ namespace ps2x::iop::detail
+             schedulePendingDma();
+         }
+ 
++        // A host SPU2 event raised while the same interrupt is still waiting (its handler could not start yet) is
++        // counted, not folded: the console takes one interrupt per raise.
++        void raisePendingInterrupt(int irq)
++        {
++            if (pendingDmaInterrupts.find(irq) != pendingDmaInterrupts.end())
++                ++pendingExtraInterrupts[irq];
++            else
++                pendingDmaInterrupts[irq] = totalCycles;
++        }
++
+         void schedulePendingDma()
+         {
+             if (const auto dma = memory.takeDmaStart())
+@@ -217,14 +228,14 @@ namespace ps2x::iop::detail
+                 switch (type)
+                 {
+                 case kHostSpu2EventIrq:
+-                    pendingDmaInterrupts[kIrqSpu2] = totalCycles;
++                    raisePendingInterrupt(kIrqSpu2);
+                     break;
+                 case kHostSpu2EventDmaEnd0:
+                 case kHostSpu2EventDmaEnd1:
+                 {
+                     const int core = type == kHostSpu2EventDmaEnd1 ? 1 : 0;
+                     if (memory.completeSpu2Dma(core))
+-                        pendingDmaInterrupts[core ? kIrqDmaSpu2Core1 : kIrqDmaSpu2Core0] = totalCycles;
++                        raisePendingInterrupt(core ? kIrqDmaSpu2Core1 : kIrqDmaSpu2Core0);
+                     break;
+                 }
+                 default:
+@@ -538,6 +549,10 @@ namespace ps2x::iop::detail
+         {
+             if (servicingDmaInterrupts || pendingDmaInterrupts.empty())
+                 return;
++            // The running context has interrupts suspended (CpuSuspendIntr / CpuDisableIntr): nothing is taken,
++            // the pending interrupts stay pending and are taken at the first check after it enables them again.
++            if (memory.interruptControl() == 0u)
++                return;
+ 
+             servicingDmaInterrupts = true;
+ 
+@@ -552,16 +567,30 @@ namespace ps2x::iop::detail
+                 completed.push_back(it->first);
+                 it = pendingDmaInterrupts.erase(it);
+             }
++            // Inside a handler interrupts are disabled; the state of the interrupted context comes back at the return.
++            const uint32_t interrupted = memory.interruptControl();
++            memory.setInterruptControl(0u);
+             try
+             {
+                 for (const int irq : completed)
++                {
+                     (void)intrman.dispatchInterrupt(irq, *this);
++                    // One more raise of the same interrupt arrived while it was waiting: its own entry.
++                    const auto extra = pendingExtraInterrupts.find(irq);
++                    if (extra != pendingExtraInterrupts.end() && extra->second != 0u)
++                    {
++                        --extra->second;
++                        pendingDmaInterrupts[irq] = totalCycles;
++                    }
++                }
+             }
+             catch (...)
+             {
++                memory.setInterruptControl(interrupted);
+                 servicingDmaInterrupts = false;
+                 throw;
+             }
++            memory.setInterruptControl(interrupted);
+             servicingDmaInterrupts = false;
+         }
+ 
+@@ -757,6 +786,7 @@ namespace ps2x::iop::detail
+         IopLoadcore loadcore;
+         std::map<int, Module> modules;
+         std::map<int, uint64_t> pendingDmaInterrupts;
++        std::map<int, uint32_t> pendingExtraInterrupts; // raises beyond the first one that are waiting for the same irq
+         std::multimap<uint64_t, ScheduledGuestCallback> pendingGuestCallbacks;
+         uint32_t nextModuleId = 1;
+         uint32_t moduleCursor = kModuleLoadBase;

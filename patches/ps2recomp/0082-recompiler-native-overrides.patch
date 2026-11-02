@@ -1,0 +1,51 @@
+Patch 0082: the recompiler knows the addresses the port replaces at run time.
+What: general.native_overrides (an array of address strings in the recompiler's TOML) is read into
+Config::nativeOverrides (sorted, unique), with Config::isNativeOverride(address). The emitter asks it before it emits a
+direct call, so a direct call can never bypass a replacement made through config/native_overrides.txt. Nothing consumes it
+yet in this patch alone (the key is optional; without it nothing changes).
+Verified: the recompiler builds with it; the regenerated code and the 4-player fight state hash
+(a71d52ac6fe9b90e639d4e7d33808bbd6ecd50e0d1c28f1c8e67fac6b07906e5) were checked together with the direct-call work.
+Original work, GPL-3.0.
+--- a/ps2xRecomp/include/ps2recomp/types.h
++++ b/ps2xRecomp/include/ps2recomp/types.h
+@@ -188,6 +188,18 @@
+         std::unordered_map<uint32_t, std::string> patches;
+         std::vector<std::string> stubImplementations;
+         std::vector<std::string> entryPointHints;
++        // Addresses the port replaces at run time (config/native_overrides.txt). A direct call to one of them would
++        // bypass the replacement: isNativeOverride() is what the emitter asks before it emits a direct call.
++        std::vector<uint32_t> nativeOverrides;
++        [[nodiscard]] bool isNativeOverride(uint32_t address) const
++        {
++            for (const uint32_t candidate : nativeOverrides)
++            {
++                if (candidate == address)
++                    return true;
++            }
++            return false;
++        }
+         std::unordered_map<uint32_t, uint32_t> mmioByInstructionAddress;
+         std::vector<JumpTable> jumpTables;
+     };
+--- a/ps2xRecomp/src/lib/config_manager.cpp
++++ b/ps2xRecomp/src/lib/config_manager.cpp
+@@ -95,6 +95,19 @@
+                 std::unique(config.entryPointHints.begin(), config.entryPointHints.end()),
+                 config.entryPointHints.end());
+ 
++            if (general.contains("native_overrides") && general.at("native_overrides").is_array())
++            {
++                for (const std::string &text : toml::find<std::vector<std::string>>(general, "native_overrides"))
++                {
++                    config.nativeOverrides.push_back(static_cast<uint32_t>(std::stoul(text, nullptr, 0)));
++                }
++                std::sort(config.nativeOverrides.begin(), config.nativeOverrides.end());
++                config.nativeOverrides.erase(
++                    std::unique(config.nativeOverrides.begin(), config.nativeOverrides.end()),
++                    config.nativeOverrides.end());
++                m_reporter->info("config", "native overrides: " + std::to_string(config.nativeOverrides.size()));
++            }
++
+             if (general.contains("skip") && general.at("skip").is_array())
+             {
+                 config.skipFunctions = toml::find<std::vector<std::string>>(general, "skip");

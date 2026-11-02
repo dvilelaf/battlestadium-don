@@ -1,0 +1,48 @@
+# T-305: Windows build of the runtime links a static FFmpeg from a prefix.
+#
+# What it fixes: with PS2X_ENABLE_FFMPEG on, the Windows branch of ps2xRuntime/CMakeLists.txt downloads a
+# prebuilt SHARED FFmpeg (System233/ffmpeg-msvc-prebuilt) at build time: needs the network, ships six DLLs.
+# PS2X_FFMPEG_PREFIX (cache path, empty by default = unchanged behaviour) points instead at a prefix with
+# include/ and lib/libav*.a, as tools/setup/build_ffmpeg_windows.sh installs into third_party/ffmpeg/windows
+# (the same minimal LGPL FFmpeg 7.1.1 as the Linux build). No DLLs to stage or install in that case.
+#
+# Verified: scratch tree (series applied + this patch), cross-built with clang-cl in don-build-win:1,
+# -DDON_ENABLE_FFMPEG=ON -DPS2X_FFMPEG_PREFIX=third_party/ffmpeg/windows; see docs/journal (T-305).
+diff --git a/ps2xRuntime/CMakeLists.txt b/ps2xRuntime/CMakeLists.txt
+index deed09e..6c9f82f 100644
+--- a/ps2xRuntime/CMakeLists.txt
++++ b/ps2xRuntime/CMakeLists.txt
+@@ -255,10 +255,24 @@ else()
+ endif()
+ 
+ option(PS2X_ENABLE_FFMPEG "Enable FFmpeg-backed MPEG video decoding" ${PS2X_ENABLE_FFMPEG_DEFAULT})
++# Windows: a prefix with static FFmpeg libraries (include/, lib/libav*.a, built by the port's
++# tools/setup/build_ffmpeg_windows.sh) replaces the downloaded prebuilt shared build below.
++set(PS2X_FFMPEG_PREFIX "" CACHE PATH "Windows: install prefix of a static FFmpeg (include/ and lib/lib*.a); empty downloads a prebuilt shared one")
+ 
+ if(NOT PS2X_ENABLE_FFMPEG)
+     message(STATUS "FFmpeg disabled; MPEG video decode falls back to stub frames")
+     add_library(ffmpeg INTERFACE)
++elseif(WIN32 AND PS2X_FFMPEG_PREFIX)
++    add_library(ffmpeg INTERFACE)
++    target_include_directories(ffmpeg INTERFACE "${PS2X_FFMPEG_PREFIX}/include")
++    # order matters for static libraries: dependents first
++    target_link_libraries(ffmpeg INTERFACE
++        "${PS2X_FFMPEG_PREFIX}/lib/libavformat.a"
++        "${PS2X_FFMPEG_PREFIX}/lib/libavcodec.a"
++        "${PS2X_FFMPEG_PREFIX}/lib/libswscale.a"
++        "${PS2X_FFMPEG_PREFIX}/lib/libswresample.a"
++        "${PS2X_FFMPEG_PREFIX}/lib/libavutil.a"
++        bcrypt user32 ole32)
+ elseif(WIN32)
+     include(ExternalProject)
+ 
+@@ -616,7 +630,7 @@ else()
+     )
+ endif()
+ 
+-if(WIN32 AND PS2X_ENABLE_FFMPEG)
++if(WIN32 AND PS2X_ENABLE_FFMPEG AND NOT PS2X_FFMPEG_PREFIX)
+     install(DIRECTORY "${FFMPEG_BIN_DIR}/"
+         DESTINATION bin
+         FILES_MATCHING

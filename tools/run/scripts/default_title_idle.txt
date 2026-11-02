@@ -1,0 +1,21 @@
+# The default path (no DON_PLAY_MOVIES): the title idle for a minute, then Start into the main menu.
+#
+# Variant: the English one (en_patch/jpvoice/disc/SLPS_256.75). Reproduces the title freeze of journal 029: the port ends the opening video itself after 240 blanks, the title is up from about 2400, and it is left alone for 3600 blanks (a minute) before Start. No Start tap during the video.
+# Landmarks (named shots; blank = vertical blank): warning 600, title 2400, title_wait_1 3000, title_wait_2 4200, title_wait_3 5400, title_wait_4 6000, menu 6900; it quits at 7000.
+#
+# Run it from the repository root (local.env loaded), with a folder for the shots:
+#   DON_TRACE_FRAMES=1 build/linux-dev/don --headless --renderer software --sound off \
+#       --shots work/shots/default_title_idle --input-script tools/run/scripts/default_title_idle.txt en_patch/jpvoice/disc/SLPS_256.75
+# It belongs to the regression suite (tests/regression/): the md5 of every landmark is in
+# tests/regression/routes.json. The timing holds with --sound off only (sound moves the blanks).
+270 tap LEFT 6
+330 tap CIRCLE 6
+600 shot warning
+2400 shot title
+3000 shot title_wait_1
+4200 shot title_wait_2
+5400 shot title_wait_3
+6000 shot title_wait_4
+6000 tap START 6
+6900 shot menu
+7000 quit

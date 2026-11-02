@@ -1,0 +1,2 @@
+# One line: the folder with your own copy of the game's files (the folder that holds SLPS_256.75).
+C:\Games\DON

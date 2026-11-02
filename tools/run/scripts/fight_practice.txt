@@ -1,0 +1,71 @@
+# A fight with inputs, to blank 7800: the reproduction of the defect that patch 0054 fixed.
+#
+# Variant: the English one (en_patch/jpvoice/disc/SLPS_256.75). From power-on to a four-fighter match (Naruto, Piccolo, Gaara, Vegeta on the restaurant stage; the way of to_match_1v1.txt), then every 300 blanks: walk right, three Square, Triangle, Square, Circle. Before patch 0054 the fight stopped at blank 7076 (journal 029); it has to go on to the end.
+# Landmarks (named shots; blank = vertical blank): stage_select 5880, match_load_2 6540, f6600, f6800, f7000, f7076 (the old stop), f7200, f7500, f7800; it quits at 7900.
+#
+# Run it from the repository root (local.env loaded), with a folder for the shots:
+#   DON_PLAY_MOVIES=1 DON_TRACE_FRAMES=1 build/linux-dev/don --headless --renderer software --sound off \
+#       --shots work/shots/fight_practice --input-script tools/run/scripts/fight_practice.txt en_patch/jpvoice/disc/SLPS_256.75
+# It belongs to the regression suite (tests/regression/): the md5 of every landmark is in
+# tests/regression/routes.json. The timing holds with --sound off only (sound moves the blanks).
+240   shot  memcard_prompt
++30   tap   LEFT    6
++60   tap   CIRCLE  6        # 330: answer "yes" to the memory-card dialog
+2640 tap START 6
++0 shot title_x
++300  shot  main_menu        # 3060: the menu is up (the cursor is on ひとりでバトスタ)
++60   tap   CIRCLE  6        # 3120: single-player character select
++480  shot  charselect       # 3600
++60   tap   CROSS   6        # 3660: back to the menu
++480  shot  menu_again       # 4140
++60   tap   DOWN    4        # 4200: サバイバルチャレンジ
++240  tap   DOWN    4        # 4440: プラクティス
++60   tap   CIRCLE  6        # 4500
++480  shot  charselect_practice  # 4980
++120  tap   CIRCLE  6        # 5100: confirm 1P (Naruto)
++300  tap   CIRCLE  6        # 5400: confirm Com (Sasuke), then the stage list
++480  shot  stage_select     # 5880
++60   tap   CIRCLE  6        # 5940: the stage is confirmed; the match loads and starts
++300  shot  match_load_1     # 6240
++300  shot  match_load_2     # 6540
+6600 press RIGHT
+6670 release RIGHT
+6680 tap SQUARE 4
+6694 tap SQUARE 4
+6708 tap SQUARE 4
+6750 tap TRIANGLE 6
+6790 tap SQUARE 4
+6830 tap CIRCLE 6
+6900 press RIGHT
+6970 release RIGHT
+6980 tap SQUARE 4
+6994 tap SQUARE 4
+7008 tap SQUARE 4
+7050 tap TRIANGLE 6
+7090 tap SQUARE 4
+7130 tap CIRCLE 6
+7200 press RIGHT
+7270 release RIGHT
+7280 tap SQUARE 4
+7294 tap SQUARE 4
+7308 tap SQUARE 4
+7350 tap TRIANGLE 6
+7390 tap SQUARE 4
+7430 tap CIRCLE 6
+7500 press RIGHT
+7570 release RIGHT
+7580 tap SQUARE 4
+7594 tap SQUARE 4
+7608 tap SQUARE 4
+7650 tap TRIANGLE 6
+7690 tap SQUARE 4
+7730 tap CIRCLE 6
+7800 press RIGHT
+6600 shot f6600
+6800 shot f6800
+7000 shot f7000
+7076 shot f7076
+7200 shot f7200
+7500 shot f7500
+7800 shot f7800
+7900 quit

@@ -1,0 +1,18 @@
+[elf]
+name = "SLPS_256.75"
+sha256 = "994e840123eb5a4cd5d13170a52fdca275dabb0a9f4585665b5d0fc67f9180c1"
+
+[[variant]]
+id = "jp"
+description = "Japanese (original)"
+data_afs_sha1 = "1c2cdbe5500e5c2328a2ec9f030789156fecc0b5"
+
+[[variant]]
+id = "en-jpvoice"
+description = "English, Japanese voices (Lord Izen patch, 2023-09-07)"
+data_afs_sha1 = "12f174bccbeadc5c89eeb172317d163365904fd2"
+
+[[variant]]
+id = "en-envoice"
+description = "English, English voices (Lord Izen patch, 2023-09-07)"
+data_afs_sha1 = "ca29e2ee6d21b9137533d1ddd80547a10133ae0f"

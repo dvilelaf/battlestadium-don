@@ -1,0 +1,54 @@
+ChangeThreadPriority: answer the thread's previous priority, not the success code (journal 005)
+
+What it fixes: ps2_syscalls::ChangeThreadPriority and iChangeThreadPriority
+(ps2xRuntime/src/lib/Kernel/Syscalls/Thread.cpp, changePriorityImpl) answered KE_OK (0) whenever the
+change succeeded, discarding the previous priority that EeScheduler::changePriority already produces
+in its oldPriority reference parameter. The EE kernel answers the priority the thread had (a negative
+error code only on failure), and the game's code depends on it: its CRI library raises the calling
+thread to priority 1 on entering a critical section (0x314320: the answer is kept in DAT_003d9c10)
+and restores the priority from that kept value on leaving it (0x3143a8:
+ChangeThreadPriority(GetThreadId(), DAT_003d9c10)) — both measured with tools/re/decompile.sh.
+With 0 as the answer, the restore asked for priority 0, which EeScheduler::changePriority rejects with
+KE_ILLEGAL_PRIORITY (-403) (EeScheduler.cpp:704), so the main thread stayed at the 1 the entry had
+set instead of returning to 0x18 (24) that 0x314FF0 had given it. At priority 1 it outranks the four
+CRI threads (8, 16, 18, 25), this scheduler never preempts a running thread for a lower-priority one
+(checkpointDue -> hasReadyAtOrAbovePriority, EeScheduler.cpp:379-385, :2089-2100), so the threads that
+drive the ADXF device state machine (0x31B1F0) never ran, the file state byte handle+1 stayed 2 and
+the boot stayed in the poll loop at 0x331C60 (journal 005).
+
+How it was verified: tests/runtime/change_priority_return_test.cpp (new) calls the handlers the way
+the generated code does and runs the game's own sequence with the values measured in the run: the
+calling thread at 24 (what 0x314FF0 sets), the raise to 1 with its answer kept, the restore with that
+answer, and then an illegal priority (0) and an unknown thread id to show that errors are still
+errors. Against the tree without this patch the test fails: "the raise answers the priority the
+thread had (24), got 0", "the restore answers ... got -403", "the thread ends at the priority it had
+(24), got 1", "the rejected call changed nothing, got 1", "iChangeThreadPriority answers the previous
+priority (8), got 0". With the patch all checks pass, and the other seven executables of
+tests/runtime (change_priority_return, host_gs_hook, host_loop, host_pad_source, host_vu1_hook,
+init_thread_priority, iop_host_spu2, module_buffer_load) pass built with PS2X_WITH_RAYLIB=OFF and
+DISPLAY unset. In the game (bash tools/run/smoke.sh 60, headless, the port's host program) the guest
+thread table (DON_TRACE_THREADS=1) shows the fix took effect: the main thread ends at priority 24 and
+the CRI threads run (journal 005's "Verification" and journal 006).
+
+Origin: original work for this project (T-016). The console behaviour is taken from the game's own
+code (0x314320, 0x3143a8, 0x314FF0, tools/re/decompile.sh) and from the scheduler's existing
+oldPriority out parameter.
+
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/Thread.cpp b/ps2xRuntime/src/lib/Kernel/Syscalls/Thread.cpp
+index d1f4dd6..51151a7 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/Thread.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/Thread.cpp
+@@ -116,7 +116,12 @@ namespace ps2_syscalls
+             const int priority = static_cast<int>(getRegU32(ctx, 5));
+             int oldPriority = 0;
+             const int result = ee.changePriority(id, priority, interruptSafe, oldPriority);
+-            setReturnS32(ctx, result);
++            // The EE kernel answers the priority the thread had, not a success code: the game's CRI
++            // library raises its own thread to priority 1 in a critical section and restores the
++            // priority from this answer (0x314320/0x3143a8). With KE_OK the restore passed 0, which
++            // changePriority rejects, and the main thread was left at 1, starving the CRI threads
++            // (journal 005). On failure the error code is the answer, as in the kernel.
++            setReturnS32(ctx, result == KE_OK ? oldPriority : result);
+             ee.transferIfRequested(interruptSafe);
+         }
+ 

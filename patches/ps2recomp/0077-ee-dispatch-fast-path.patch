@@ -1,0 +1,438 @@
+Patch 0077: the EE per-dispatch path (and the first part of the IOP thread).
+What: checkpointDue/accountCycles (EeScheduler) and advanceEeTimers/creditEeTimers (PS2Memory) are inline in
+their headers, so the fast path of every guest dispatch has no cross-unit calls (the slow path is the new
+checkpointDueSlow); PS2Runtime::findFunction does hasFunction+lookupFunction in one table access, used by
+the scheduler run loop and by dispatchGuestBranch for calls. Statements and order are unchanged.
+This patch also carries the first part of the IOP thread (off by default: DON_IOP_THREAD=0 or unset keeps the IOP
+inline on the EE thread): the worker thread, its hand-off in flushIopDebt and the queue of the IOP's effects on the EE
+(ps2_runtime.*, ps2_iop_host.*). Patch 0078 adds the rest (thread name, DON_IOP_STRESS_US, SPU2 thread hooks).
+Verified: perf_fight state hash identical to the pre-patch run (a71d52ac...906e5); GameThread CPU ms per blank
+17.83 (baseline binary) -> 9.67 (this tree, which also holds the other sprint changes; not attributable alone).
+Based on work/wip-2026-10-18/scheduler (earlier unfinished change), original to this project.
+
+--- a/ps2xRuntime/include/runtime/ee_scheduler.h
++++ b/ps2xRuntime/include/runtime/ee_scheduler.h
+@@ -314,7 +314,8 @@
+     void run();
+     void requestStop();
+     void postEvent(EeEvent event);
+-    [[nodiscard]] bool checkpointDue(uint32_t cycles = kGeneratedCheckpointCycles) noexcept;
++    [[nodiscard]] inline bool checkpointDue(uint32_t cycles = kGeneratedCheckpointCycles) noexcept;
++    [[nodiscard]] bool checkpointDueSlow() noexcept;
+     // Patch 0054: true from the moment a checkpoint has answered "due" until the run loop is about to call
+     // a guest function again. While it is true the host stack is being unwound to the run loop and no
+     // generated caller may take a callee's return for a normal return.
+@@ -322,7 +323,7 @@
+     // Patch 0056: the total nanoseconds this scheduler has spent waiting for a host deadline (the pacing sleep
+     // of the idle path and of the vertical-blank wait); read by the host's DON_PACING_LOG diagnostic.
+     [[nodiscard]] uint64_t pacingWaitNs() const noexcept { return m_pacingWaitNs.load(std::memory_order_relaxed); }
+-    void accountCycles(uint32_t cycles) noexcept;
++    inline void accountCycles(uint32_t cycles) noexcept;
+     [[nodiscard]] bool isExecutingGuest() const noexcept;
+ 
+     // Hand the IOP every EE cycle it is owed (the batch debt) now, so that its state is current before the
+@@ -546,3 +547,34 @@
+     EeKernelSnapshot m_snapshot;
+     uint64_t m_snapshotSequence = 0;
+ };
++
++// Patch 0077: the common path of every guest dispatch, inlined into its callers (the run loop, the
++// branch dispatcher and the checkpoint the generated code calls). The statements and their order
++// are those of the former out-of-line versions.
++inline void EeScheduler::accountCycles(uint32_t cycles) noexcept
++{
++    const uint64_t elapsed = cycles > 1u ? cycles : 1u;
++    m_eeCycle += elapsed;
++    m_pendingEeTimerInterrupts |= m_runtime.memory().advanceEeTimers(elapsed);
++    m_iopPendingEeCycles += elapsed;
++    if (m_iopPendingEeCycles >= m_iopBatchEeCycles)
++    {
++        flushIopDebt();
++    }
++    if (m_pendingEeTimerInterrupts != 0u)
++    {
++        m_checkpointPending.store(true, std::memory_order_release);
++    }
++}
++
++inline bool EeScheduler::checkpointDue(uint32_t cycles) noexcept
++{
++    accountCycles(cycles);
++    ++m_dispatchCount;
++    if (!m_checkpointPending.load(std::memory_order_relaxed) && m_eeCycle < m_nextFastPathCycle)
++    {
++        ++m_fastPathCount;
++        return false;
++    }
++    return checkpointDueSlow();
++}
+--- a/ps2xRuntime/include/runtime/ps2_memory.h
++++ b/ps2xRuntime/include/runtime/ps2_memory.h
+@@ -320,7 +320,7 @@
+ 
+     // EE timers advance from the scheduler's emulated EE-cycle clock. The
+     // returned mask uses bits 0..3 for newly raised TIM0..TIM3 interrupts.
+-    uint32_t advanceEeTimers(uint64_t eeCycles) noexcept;
++    inline uint32_t advanceEeTimers(uint64_t eeCycles) noexcept;
+     [[nodiscard]] uint64_t cyclesUntilNextEeTimerInterrupt() const noexcept;
+     void resetEeTimers() noexcept;
+ 
+@@ -498,7 +498,7 @@
+     uint64_t m_eeTimerPendingCycles = 0;
+     uint64_t m_eeTimerCyclesToEvent = std::numeric_limits<uint64_t>::max();
+     uint32_t m_pendingEeTimerInterruptMask = 0u;
+-    void creditEeTimers(uint64_t eeCycles) noexcept;
++    inline void creditEeTimers(uint64_t eeCycles) noexcept;
+     uint32_t applyEeTimers() noexcept;
+     uint32_t flushEeTimers() noexcept;
+     void refreshEeTimerEventBoundary() noexcept;
+@@ -507,4 +507,33 @@
+     void queueCompletedDmacCause(uint32_t cause);
+ };
+ 
++
++// Patch 0077: the per-dispatch part of the EE timer driver is defined here so that the scheduler's
++// fast path (called for every guest dispatch) inlines it; the arithmetic stays in applyEeTimers().
++inline uint32_t PS2Memory::advanceEeTimers(uint64_t eeCycles) noexcept
++{
++    creditEeTimers(eeCycles);
++    const uint32_t pending = m_pendingEeTimerInterruptMask;
++    m_pendingEeTimerInterruptMask = 0u;
++    return pending;
++}
++
++inline void PS2Memory::creditEeTimers(uint64_t eeCycles) noexcept
++{
++    if (eeCycles == 0u)
++    {
++        return;
++    }
++    // The cycles of this dispatch belong to the timers too: queue them before deciding whether the
++    // boundary was reached.
++    m_eeTimerPendingCycles += eeCycles;
++    if (m_eeTimerCyclesToEvent > eeCycles)
++    {
++        m_eeTimerCyclesToEvent -= eeCycles;
++        return;
++    }
++    m_eeTimerCyclesToEvent = 0u;
++    m_pendingEeTimerInterruptMask |= applyEeTimers();
++}
++
+ #endif // PS2_MEMORY_H
+--- a/ps2xRuntime/include/ps2_runtime.h
++++ b/ps2xRuntime/include/ps2_runtime.h
+@@ -20,6 +20,7 @@
+ #include <thread>
+ #include <array>
+ #include <mutex>
++#include <condition_variable>
+ #include <filesystem>
+ #include <memory>
+ #include <unordered_map>
+@@ -384,6 +385,9 @@
+     // TODO remove this later need to update all tests
+     bool registerFunction(uint32_t address, RecompiledFunction func);
+     RecompiledFunction lookupFunction(uint32_t address);
++    // Patch 0077: hasFunction() + lookupFunction() in one table access. nullptr when the address has no
++    // function; records the dispatch in the diagnostic history when it has (as lookupFunction does).
++    RecompiledFunction findFunction(uint32_t address);
+     bool hasFunction(uint32_t address) const;
+     bool dispatchGuestBranch(uint8_t *rdram,
+                              R5900Context *ctx,
+@@ -602,6 +606,20 @@
+     // True while the IOP emulator is running on this thread: its host callbacks come back through this
+     // object, and they must not flush the IOP's cycle debt from inside the emulator.
+     bool m_inIopCycles = false;
++    // Patch 0078 (DON_IOP_THREAD=1): the IOP emulator runs slice N on its own thread while the EE runs slice N+1.
++    // The effects the IOP has on the EE (EE RAM writes, SIF commands) are queued by the host adapter and applied
++    // by the EE thread at the next boundary, so the result depends on emulated cycles only.
++    bool m_iopThreadOn = false;
++    bool m_iopThreadChecked = false;
++    std::thread m_iopThread;
++    std::mutex m_iopMutex;
++    std::condition_variable m_iopCv;
++    uint64_t m_iopJobCycles = 0;
++    bool m_iopJobPending = false;
++    bool m_iopThreadStop = false;
++    void iopThreadMain();
++    void waitIopIdle();
++    void stopIopThread();
+ 
+     std::atomic<uint32_t> m_missingFunctionPolicy{static_cast<uint32_t>(MissingFunctionPolicy::ContinueToTarget)};
+     std::atomic<bool> m_missingFunctionReported{false};
+--- a/ps2xRuntime/src/lib/ps2_memory.cpp
++++ b/ps2xRuntime/src/lib/ps2_memory.cpp
+@@ -420,32 +420,6 @@
+ // loop over the four timers and the divisions in it (the hottest single instruction of the port's profile
+ // was a `div` here) only run when the next timer event is reached, and when a timer register is read or
+ // written, which flush first so the guest sees the same value the old per-dispatch advance produced.
+-uint32_t PS2Memory::advanceEeTimers(uint64_t eeCycles) noexcept
+-{
+-    creditEeTimers(eeCycles);
+-    const uint32_t pending = m_pendingEeTimerInterruptMask;
+-    m_pendingEeTimerInterruptMask = 0u;
+-    return pending;
+-}
+-
+-void PS2Memory::creditEeTimers(uint64_t eeCycles) noexcept
+-{
+-    if (eeCycles == 0u)
+-    {
+-        return;
+-    }
+-    // The cycles of this dispatch belong to the timers too: queue them before deciding whether the
+-    // boundary was reached (the first version of this patch dropped them when it flushed).
+-    m_eeTimerPendingCycles += eeCycles;
+-    if (m_eeTimerCyclesToEvent > eeCycles)
+-    {
+-        m_eeTimerCyclesToEvent -= eeCycles;
+-        return;
+-    }
+-    m_eeTimerCyclesToEvent = 0u;
+-    m_pendingEeTimerInterruptMask |= applyEeTimers();
+-}
+-
+ uint32_t PS2Memory::flushEeTimers() noexcept
+ {
+     return applyEeTimers();
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -156,7 +156,7 @@
+     {
+         DispatchHistory &h = g_dispatchHistory;
+         h.pcs[h.next] = pc;
+-        h.next = (h.next + 1u) % static_cast<uint32_t>(h.pcs.size());
++        h.next = (h.next + 1u) & (static_cast<uint32_t>(h.pcs.size()) - 1u); // 64 entries: a power of two
+         if (h.next == 0u)
+         {
+             h.wrapped = true;
+@@ -563,11 +563,14 @@
+     m_debugUiUserData = userData;
+ }
+ 
++thread_local bool g_ps2OnIopThread = false;
++
+ PS2Runtime::~PS2Runtime()
+ {
+     try
+     {
+         stopGameThread(); // never destroy a joinable std::thread (also requests the stop)
++        stopIopThread();
+         m_iopSubsystem.reset();
+         m_iopHost.reset();
+ #if defined(PLATFORM_VITA)
+@@ -656,8 +659,73 @@
+     m_iopSubsystem->onSifTransfer(transfer);
+ }
+ 
++void PS2Runtime::iopThreadMain()
++{
++    g_ps2OnIopThread = true;
++    std::unique_lock lock(m_iopMutex);
++    for (;;)
++    {
++        m_iopCv.wait(lock, [this]
++                     { return m_iopJobPending || m_iopThreadStop; });
++        if (!m_iopJobPending)
++            break;
++        const uint64_t cycles = m_iopJobCycles;
++        lock.unlock();
++        m_iopSubsystem->runEeCycles(cycles);
++        lock.lock();
++        m_iopJobPending = false;
++        m_iopCv.notify_all();
++    }
++}
++
++void PS2Runtime::waitIopIdle()
++{
++    if (!m_iopThread.joinable())
++        return;
++    std::unique_lock lock(m_iopMutex);
++    m_iopCv.wait(lock, [this]
++                 { return !m_iopJobPending; });
++}
++
++void PS2Runtime::stopIopThread()
++{
++    if (!m_iopThread.joinable())
++        return;
++    {
++        std::lock_guard lock(m_iopMutex);
++        m_iopThreadStop = true;
++    }
++    m_iopCv.notify_all();
++    m_iopThread.join();
++}
++
+ void PS2Runtime::advanceIopEeCycles(uint64_t eeCycles) noexcept
+ {
++    if (!m_iopThreadChecked)
++    {
++        m_iopThreadChecked = true;
++        const char *flag = std::getenv("DON_IOP_THREAD");
++        m_iopThreadOn = flag && flag[0] == '1';
++        if (m_iopThreadOn)
++        {
++            m_iopThread = std::thread([this]
++                                      { iopThreadMain(); });
++            std::cerr << "[don] IOP on its own thread (DON_IOP_THREAD=1)" << std::endl;
++        }
++    }
++    if (m_iopThreadOn)
++    {
++        // The boundary: slice N-1 must be finished and its effects on the EE applied before slice N starts.
++        waitIopIdle();
++        m_iopHost->drainDeferred();
++        {
++            std::lock_guard lock(m_iopMutex);
++            m_iopJobCycles = eeCycles;
++            m_iopJobPending = true;
++        }
++        m_iopCv.notify_all();
++        return;
++    }
+     // The IOP runs host callbacks that come back through this object (the memory accessors below): they
+     // must not flush the debt from inside the emulator, so the flag says "the IOP is on the stack".
+     m_inIopCycles = true;
+@@ -671,20 +739,29 @@
+ // the same accessors are its own host callbacks.
+ void PS2Runtime::flushIopDebtBeforeEeIopAccess() const
+ {
+-    if (m_inIopCycles || !m_eeScheduler)
++    if (m_inIopCycles || !m_eeScheduler || g_ps2OnIopThread)
+     {
+         return;
+     }
+     m_eeScheduler->flushIopDebt();
++    if (m_iopThreadOn)
++    {
++        // An EE-initiated entry is a barrier: the IOP is brought up to date, its effects applied, and the call
++        // then runs inline on the EE thread as it always did.
++        const_cast<PS2Runtime *>(this)->waitIopIdle();
++        m_iopHost->drainDeferred();
++    }
+ }
+ 
+ void PS2Runtime::resetIop()
+ {
++    waitIopIdle();
+     m_iopSubsystem->reset();
+ }
+ 
+ ps2x::iop::DebugSnapshot PS2Runtime::iopDebugSnapshot() const
+ {
++    const_cast<PS2Runtime *>(this)->waitIopIdle();
+     return m_iopSubsystem->debugSnapshot();
+ }
+ 
+@@ -1269,6 +1346,21 @@
+     }
+ }
+ 
++PS2Runtime::RecompiledFunction PS2Runtime::findFunction(uint32_t address)
++{
++    uint32_t slot = 0u;
++    if (generatedFunctionTableSlot(address, slot))
++    {
++        RecompiledFunction fn = g_ps2RecompiledFunctionTable[slot];
++        if (fn != nullptr)
++        {
++            pushDispatchPc(address);
++            return fn;
++        }
++    }
++    return nullptr;
++}
++
+ PS2Runtime::RecompiledFunction PS2Runtime::lookupFunction(uint32_t address)
+ {
+     pushDispatchPc(address);
+@@ -1507,7 +1599,8 @@
+         return false;
+     }
+ 
+-    if (!hasFunction(targetPc))
++    RecompiledFunction targetFn = findFunction(targetPc);
++    if (targetFn == nullptr)
+     {
+         reportMissingFunction(rdram, ctx, targetPc, sourcePc, kind, debugName);
+ 
+@@ -1529,7 +1622,6 @@
+         return false;
+     }
+ 
+-    RecompiledFunction targetFn = lookupFunction(targetPc);
+     const uint32_t entryPc = ctx->pc;
+     targetFn(rdram, ctx, this);
+ 
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -305,7 +305,8 @@
+             continue;
+         }
+ 
+-        if (!m_runtime.hasFunction(context.pc))
++        PS2Runtime::RecompiledFunction function = m_runtime.findFunction(context.pc);
++        if (function == nullptr)
+         {
+             if (!running->invocations.empty())
+             {
+@@ -324,8 +325,6 @@
+             }
+             continue;
+         }
+-        PS2Runtime::RecompiledFunction function = m_runtime.lookupFunction(context.pc);
+-
+         if (checkpointDue(kGuestDispatchCycles))
+         {
+             continue;
+@@ -408,21 +407,8 @@
+     m_eventCv.notify_one();
+ }
+ 
+-bool EeScheduler::checkpointDue(uint32_t cycles) noexcept
++bool EeScheduler::checkpointDueSlow() noexcept
+ {
+-    // Patch 0034: the common path. accountCycles keeps exactly the work it did before (the EE cycle
+-    // addition, the timer advance, the IOP batch) because the timers are read by the guest and their
+-    // interrupt timing is observable; everything else the old checkpointDue did - two more atomic
+-    // loads, the deadline comparison, the slice comparison and, above all, the call to
+-    // processPendingEvents that followed it in run() - now happens only when this flag is set or this
+-    // cycle is reached. The flag is the same word postEvent/requestStop/the timer path already set.
+-    accountCycles(cycles);
+-    ++m_dispatchCount;
+-    if (!m_checkpointPending.load(std::memory_order_relaxed) && m_eeCycle < m_nextFastPathCycle)
+-    {
+-        ++m_fastPathCount;
+-        return false;
+-    }
+     const bool due = slowPathCheckpoint();
+     m_unwinding = due;
+     return due;
+@@ -558,24 +544,6 @@
+            invocation.kind == GuestInvocationKind::GsCallback;
+ }
+ 
+-void EeScheduler::accountCycles(uint32_t cycles) noexcept
+-{
+-    const uint64_t elapsed = std::max<uint64_t>(1u, cycles);
+-    m_eeCycle += elapsed;
+-    m_pendingEeTimerInterrupts |= m_runtime.memory().advanceEeTimers(elapsed);
+-    // The IOP gets the same total as it did when it was fed every checkpoint (one IOP cycle per 8 EE
+-    // cycles, the console's ratio), but only in batches of at least one full emulator slice.
+-    m_iopPendingEeCycles += elapsed;
+-    if (m_iopPendingEeCycles >= m_iopBatchEeCycles)
+-    {
+-        flushIopDebt();
+-    }
+-    if (m_pendingEeTimerInterrupts != 0u)
+-    {
+-        m_checkpointPending.store(true, std::memory_order_release);
+-    }
+-}
+-
+ void EeScheduler::flushIopDebt() noexcept
+ {
+     const uint64_t debt = m_iopPendingEeCycles;

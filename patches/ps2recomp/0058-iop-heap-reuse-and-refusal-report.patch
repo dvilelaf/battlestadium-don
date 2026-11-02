@@ -1,0 +1,176 @@
+# 0058-iop-heap-reuse-and-refusal-report: the IOP heap reuses freed space, and a refused request is reported
+#
+# What it does: (1) IopMemory::allocate places a request in the first gap that fits, searching from HeapBase (before: from a cursor
+# that only moved up, so freed space was never offered again); maxFreeMemory() answers the largest gap (before: limit minus cursor);
+# totalFreeMemory() is new. (2) A refused request (size, alignment, fixed address, largest gap, total free) is written to stderr as
+# "[ps2xIOP] heap request refused ...": the first four of each size, then every hundredth. Before, the effects driver died of a
+# silent zero (journal 011). The heap base stays where patch 0057 put it; a fixed-address request behaves as before.
+# Who asked is not printed (not cheap to know in this layer; a gdb backtrace on IopMemory::allocate gives it).
+# Verified: tests/runtime/iop_heap_reuse_test fails (12 checks) without this patch and passes with it; iop_heap_capacity_test passes in both.
+#
+diff --git a/ps2xIOP/src/emulator/core/iop_memory.cpp b/ps2xIOP/src/emulator/core/iop_memory.cpp
+index 7fb36d9..c59fdce 100644
+--- a/ps2xIOP/src/emulator/core/iop_memory.cpp
++++ b/ps2xIOP/src/emulator/core/iop_memory.cpp
+@@ -3,6 +3,8 @@
+ #include "ps2x/iop/iop_host_spu2.h"
+ 
+ #include <algorithm>
++#include <cinttypes>
++#include <cstdio>
+ #include <cstring>
+ 
+ namespace ps2x::iop::detail
+@@ -371,6 +373,28 @@ namespace ps2x::iop::detail
+         return result;
+     }
+ 
++    std::vector<IopMemory::Allocation> IopMemory::sortedAllocations() const
++    {
++        std::vector<Allocation> blocks = m_allocations;
++        std::sort(blocks.begin(), blocks.end(),
++                  [](const Allocation &a, const Allocation &b)
++                  { return a.address < b.address; });
++        return blocks;
++    }
++
++    // Patch 0058: a refused request is never silent (the effects driver died for weeks on a zero returned here).
++    // The first four refusals of one size are printed in full, then every hundredth with its count.
++    void IopMemory::reportRefusal(uint32_t size, uint32_t alignment, std::optional<uint32_t> fixed)
++    {
++        const uint32_t count = ++m_refusals[size];
++        if (count > 4u && count % 100u != 0u)
++            return;
++        std::fprintf(stderr,
++                     "[ps2xIOP] heap request refused (#%" PRIu32 " of this size): size=%#" PRIx32 " alignment=%" PRIu32
++                     " fixed=%#" PRIx32 " largest free gap=%#" PRIx32 " total free=%#" PRIx32 "\n",
++                     count, size, alignment, fixed ? *fixed : 0u, maxFreeMemory(), totalFreeMemory());
++    }
++
+     uint32_t IopMemory::allocate(uint32_t size, uint32_t alignment, std::optional<uint32_t> fixed)
+     {
+         size = alignUp(std::max(size, 1u), 16u);
+@@ -378,38 +402,48 @@ namespace ps2x::iop::detail
+         if (fixed)
+         {
+             const uint32_t address = *fixed;
+-            if (address < HeapBase || address + size > HeapLimit)
+-                return 0u;
++            bool ok = address >= HeapBase && address + size <= HeapLimit;
+             for (const auto &block : m_allocations)
+-                if (address < block.address + block.size && block.address < address + size)
+-                    return 0u;
++                if (ok && address < block.address + block.size && block.address < address + size)
++                    ok = false;
++            if (!ok)
++            {
++                reportRefusal(size, alignment, fixed);
++                return 0u;
++            }
+             m_allocations.push_back({address, size});
+             markOwned(address, size);
+             return address;
+         }
+ 
+-        uint32_t candidate = alignUp(m_heapCursor, alignment);
+-        for (;;)
++        // First fit, from the heap's base: freed space is offered again.
++        uint32_t found = 0u;
++        uint32_t cursor = HeapBase;
++        for (const auto &block : sortedAllocations())
+         {
+-            bool overlap = false;
+-            for (const auto &block : m_allocations)
++            const uint32_t candidate = alignUp(cursor, alignment);
++            if (candidate <= block.address && size <= block.address - candidate)
+             {
+-                if (candidate < block.address + block.size && block.address < candidate + size)
+-                {
+-                    candidate = alignUp(block.address + block.size, alignment);
+-                    overlap = true;
+-                    break;
+-                }
+-            }
+-            if (!overlap)
++                found = candidate;
+                 break;
++            }
++            cursor = std::max(cursor, block.address + block.size);
++        }
++        if (found == 0u)
++        {
++            const uint32_t candidate = alignUp(cursor, alignment);
++            if (candidate <= HeapLimit && size <= HeapLimit - candidate)
++                found = candidate;
+         }
+-        if (candidate > HeapLimit || size > HeapLimit - candidate)
++        if (found == 0u)
++        {
++            reportRefusal(size, alignment, std::nullopt);
+             return 0u;
+-        m_allocations.push_back({candidate, size});
+-        markOwned(candidate, size);
+-        m_heapCursor = std::max(m_heapCursor, candidate + size);
+-        return candidate;
++        }
++        m_allocations.push_back({found, size});
++        markOwned(found, size);
++        m_heapCursor = std::max(m_heapCursor, found + size);
++        return found;
+     }
+ 
+     bool IopMemory::freeAllocation(uint32_t address)
+@@ -426,9 +460,29 @@ namespace ps2x::iop::detail
+         return true;
+     }
+ 
++    // The largest gap between live blocks (and below the heap's limit), not "limit minus the highest address".
+     uint32_t IopMemory::maxFreeMemory() const
+     {
+-        return m_heapCursor < HeapLimit ? HeapLimit - m_heapCursor : 0u;
++        uint32_t best = 0u;
++        uint32_t cursor = HeapBase;
++        for (const auto &block : sortedAllocations())
++        {
++            if (block.address > cursor)
++                best = std::max(best, block.address - cursor);
++            cursor = std::max(cursor, block.address + block.size);
++        }
++        if (cursor < HeapLimit)
++            best = std::max(best, HeapLimit - cursor);
++        return best;
++    }
++
++    uint32_t IopMemory::totalFreeMemory() const
++    {
++        uint32_t used = 0u;
++        for (const auto &block : m_allocations)
++            used += block.size;
++        const uint32_t total = HeapLimit - HeapBase;
++        return used < total ? total - used : 0u;
+     }
+ 
+     std::optional<IopMemory::Allocation> IopMemory::allocationContaining(uint32_t address) const
+diff --git a/ps2xIOP/src/emulator/core/iop_memory.h b/ps2xIOP/src/emulator/core/iop_memory.h
+index 6405a81..b3b56e8 100644
+--- a/ps2xIOP/src/emulator/core/iop_memory.h
++++ b/ps2xIOP/src/emulator/core/iop_memory.h
+@@ -60,6 +60,8 @@ namespace ps2x::iop::detail
+         [[nodiscard]] uint32_t allocate(uint32_t size, uint32_t alignment = 16u, std::optional<uint32_t> fixed = std::nullopt);
+         [[nodiscard]] bool freeAllocation(uint32_t address);
+         [[nodiscard]] uint32_t maxFreeMemory() const;
++        // Patch 0058: the sizes of the free space inside the heap (the gaps between live blocks).
++        [[nodiscard]] uint32_t totalFreeMemory() const;
+         [[nodiscard]] std::optional<Allocation> allocationContaining(uint32_t address) const;
+ 
+         [[nodiscard]] uint32_t interruptStatus() const noexcept { return m_interruptStatus; }
+@@ -91,6 +93,9 @@ namespace ps2x::iop::detail
+         std::unordered_map<uint32_t, uint32_t> m_hardware;
+         std::vector<Allocation> m_allocations;
+         uint32_t m_heapCursor = HeapBase;
++        std::unordered_map<uint32_t, uint32_t> m_refusals; // patch 0058: refused requests by size, to limit the reports
++        void reportRefusal(uint32_t size, uint32_t alignment, std::optional<uint32_t> fixed);
++        [[nodiscard]] std::vector<Allocation> sortedAllocations() const;
+         uint32_t m_interruptStatus = 0;
+         uint32_t m_interruptMask = 0;
+         uint32_t m_interruptControl = 1;

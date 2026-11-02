@@ -1,0 +1,7 @@
+/* Exports of libdon_spu2.so on Linux: only the C API. */
+{
+  global:
+    don_spu2_*;
+  local:
+    *;
+};

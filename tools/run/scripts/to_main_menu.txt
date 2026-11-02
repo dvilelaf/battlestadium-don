@@ -1,0 +1,34 @@
+# From power-on of the game to the main menu. Format: docs/INPUT_SCRIPTS.md. Frames are presented
+# frames (vertical blanks). On the console 60 frames are one second; in the port the same frames pass
+# slower (about 14 a second at these screens on the machine of 2026-10-13), so the route takes minutes.
+#
+# Translated from tools/ref/route.txt (the route of the reference emulator) and measured with the
+# recompiled game (T-114). The console's timeline from the answer to the memory-card dialog is:
+# 5-25 s the BANDAI logo, 25-105 s the opening video, 110 s the title screen; with Start pressed the
+# whole logos+video+title sequence is crossed in ~25 s (docs/knowledge/19 section 4).
+#
+# Measured in the port (shot folder work/shots/t114a, one probe every 300 frames):
+#   frame 240  the memory card dialog ("start the game as is?", cursor on the right option)
+#   frame 330  CIRCLE answers it (LEFT first moves the cursor to the left option)
+#   frame 600  the health warning (white)
+#   frames 900-1800  the BANDAI logo (bright)
+#   frame 2100  black: the opening video (the port decodes no video, journal 007)
+#   frame 2400  ONE Start tap -> the video is skipped
+#   frame 2700  the title screen ("BATTLE STADIUM D.O.N" / "PRESS START button"), purple background
+#   frame 2760  a second Start tap -> the main menu
+#   frame 3000  the main menu (ひとりでバトスタ / サバイバルチャレンジ / プラクティス)
+# So frame = 330 + 60 * (the console's seconds after the answer) holds for the logo (630-1830) and the
+# video (1830 onwards), and the skip is what makes the rest short.
+
+240   shot  memcard_prompt
+270   tap   LEFT    6
+330   tap   CIRCLE  6
+
+# The logo and the video run by themselves; ONE Start tap once the video is on screen skips it.
+2400  tap   START   6
+
+# The title, then its own Start for the menu. The two clean shots of this route.
+2700  shot  title
+2760  tap   START   6
+3000  shot  main_menu
+3300  quit

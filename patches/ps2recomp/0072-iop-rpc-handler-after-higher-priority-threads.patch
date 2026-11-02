@@ -1,0 +1,181 @@
+# 0072-iop-rpc-handler-after-higher-priority-threads: an RPC handler runs after the IOP threads that outrank its server thread
+#
+# What it fixes: the stall of fight_practice and survival_result after "E2004090216 : Specified handle is invalid"
+# (journal 034 follow-ups 18, 21, 22). The port runs an RPC handler synchronously, between IOP slices, on a fresh CPU, whatever
+# the IOP threads were doing. On the console the handler runs in the server thread (sceSifRpcLoop), which only gets the
+# processor when every thread of higher priority is blocked. CRI_ADXI's server thread has priority 48 and its SPU2 transfer
+# thread 39: request 0x409 (destroy a stream object) landed while the transfer thread was Ready in the middle of its walk over
+# six stream objects (measured: IOP thread 10 Ready at pc 0x73E28, 0x409 handled, the next call on the destroyed object
+# prints the error). Now handleRpc first runs the Ready threads whose priority number is at most the server thread's (at most
+# 200,000 IOP cycles), then the handler. The server thread is the one that called sceSifRpcLoop (or the id given to
+# sceSifSetRpcQueue) for the server's queue; a server with no known thread keeps the old behaviour.
+# Verified: fight_practice and survival_result (slow routes, FFmpeg build) fail before and pass after; test
+# tests/runtime/iop_rpc_server_priority_test.cpp fails without the change (handler saw the worker inside its run) and passes with it.
+# Not the console's mechanism in detail: the handler still runs on a fresh CPU, not on the server thread's stack.
+#
+diff --git a/ps2xIOP/src/emulator/core/iop_kernel.cpp b/ps2xIOP/src/emulator/core/iop_kernel.cpp
+index a4b5b74..35ad53c 100644
+--- a/ps2xIOP/src/emulator/core/iop_kernel.cpp
++++ b/ps2xIOP/src/emulator/core/iop_kernel.cpp
+@@ -670,7 +670,16 @@ namespace ps2x::iop::detail
+         cpu.yielded = true;
+     }
+ 
+-    IopThread *IopKernel::beginNextReady(uint64_t currentCycle)
++    bool IopKernel::threadPriority(int id, uint32_t &priority) const
++    {
++        const auto it = m_threads.find(id);
++        if (it == m_threads.end() || it->second.state == IopThreadState::Dead)
++            return false;
++        priority = it->second.priority;
++        return true;
++    }
++
++    IopThread *IopKernel::beginNextReady(uint64_t currentCycle, uint32_t maxPriority)
+     {
+         for (auto &[id, thread] : m_threads)
+         {
+@@ -692,7 +701,7 @@ namespace ps2x::iop::detail
+         {
+             if (held_next != nullptr)
+                 break;
+-            if (thread.state != IopThreadState::Ready)
++            if (thread.state != IopThreadState::Ready || thread.priority > maxPriority)
+                 continue;
+             if (next == nullptr || thread.priority < next->priority ||
+                 (thread.priority == next->priority && thread.id < next->id))
+diff --git a/ps2xIOP/src/emulator/core/iop_kernel.h b/ps2xIOP/src/emulator/core/iop_kernel.h
+index 9b9c269..ada514b 100644
+--- a/ps2xIOP/src/emulator/core/iop_kernel.h
++++ b/ps2xIOP/src/emulator/core/iop_kernel.h
+@@ -63,7 +63,10 @@ namespace ps2x::iop::detail
+         void sleepCurrent(IopCpuState &cpu);
+         void delayCurrentUntil(uint64_t wakeCycle, IopCpuState &cpu);
+ 
+-        [[nodiscard]] IopThread *beginNextReady(uint64_t currentCycle);
++        // maxPriority: only threads whose priority number is at most this one are taken (0xFFFFFFFF = any).
++        [[nodiscard]] IopThread *beginNextReady(uint64_t currentCycle, uint32_t maxPriority = 0xFFFFFFFFu);
++        [[nodiscard]] int currentThreadId() const noexcept { return m_currentThread != nullptr ? m_currentThread->id : 0; }
++        [[nodiscard]] bool threadPriority(int id, uint32_t &priority) const;
+         [[nodiscard]] uint64_t nextWakeCycle(uint64_t fallback) const;
+         void endTimeslice(IopThread &thread, uint32_t returnSentinel);
+         void cleanupDeadThreads();
+diff --git a/ps2xIOP/src/emulator/iop_emulator.cpp b/ps2xIOP/src/emulator/iop_emulator.cpp
+index ea9f4ed..9e0949b 100644
+--- a/ps2xIOP/src/emulator/iop_emulator.cpp
++++ b/ps2xIOP/src/emulator/iop_emulator.cpp
+@@ -523,6 +523,28 @@ namespace ps2x::iop::detail
+             return cpu.gpr[2];
+         }
+ 
++        void runThreadsUntilIdle(uint32_t maxPriority, uint64_t maxCycles) override
++        {
++            // Not from inside a thread's own slice or a handler: only the scheduler decides who runs.
++            if (activeCpu != nullptr || callDepth != 0u)
++                return;
++            const uint64_t limit = totalCycles + maxCycles;
++            while (totalCycles < limit)
++            {
++                syncHostSpu2();
++                servicePendingDmaInterrupts();
++                servicePendingGuestCallbacks();
++                IopThread *next = kernel.beginNextReady(totalCycles, maxPriority);
++                if (!next)
++                    break;
++                const uint64_t before = totalCycles;
++                runCpu(next->cpu, static_cast<uint32_t>(std::min<uint64_t>(kDefaultSlice, limit - totalCycles)));
++                kernel.endTimeslice(*next, kThreadReturnSentinel);
++                if (totalCycles == before)
++                    ++totalCycles;
++            }
++        }
++
+         uint32_t executeGuestFunction(uint32_t address,
+                                       uint32_t a0,
+                                       uint32_t a1,
+diff --git a/ps2xIOP/src/emulator/services/iop_rpc.cpp b/ps2xIOP/src/emulator/services/iop_rpc.cpp
+index cf4fdc6..4077e8e 100644
+--- a/ps2xIOP/src/emulator/services/iop_rpc.cpp
++++ b/ps2xIOP/src/emulator/services/iop_rpc.cpp
+@@ -13,6 +13,12 @@
+ 
+ namespace ps2x::iop::detail
+ {
++    namespace
++    {
++        // Most IOP cycles that the threads above an RPC server's priority may use before its handler runs anyway.
++        constexpr uint64_t kServerWaitCycles = 200'000u;
++    }
++
+     IopRpcBridge::IopRpcBridge(IopHost &host, IopMemory &memory, IopKernel &kernel) noexcept
+         : m_host(host), m_memory(memory), m_kernel(kernel)
+     {
+@@ -21,6 +27,7 @@ namespace ps2x::iop::detail
+     void IopRpcBridge::reset()
+     {
+         m_servers.clear();
++        m_queueThreads.clear();
+         m_nextDmaId = 1u;
+         m_sifInitialized = false;
+     }
+@@ -233,14 +240,17 @@ namespace ps2x::iop::detail
+         case 18:
+             setV0(0);
+             return true;
+-        case 19: // SetRpcQueue
++        case 19: // SetRpcQueue(queue, thread id)
++            m_queueThreads[cpu.gpr[4]] = static_cast<int>(cpu.gpr[5]);
+             setV0(cpu.gpr[4]);
+             return true;
+         case 20:
+         case 21:
+             setV0(0);
+             return true;
+-        case 22: // RpcLoop
++        case 22: // RpcLoop(queue)
++            if (m_kernel.currentThreadId() != 0)
++                m_queueThreads.emplace(cpu.gpr[4], m_kernel.currentThreadId());
+             m_kernel.sleepCurrent(cpu);
+             setV0(0);
+             return true;
+@@ -292,6 +302,13 @@ namespace ps2x::iop::detail
+             }
+         }
+ 
++        // The console runs the handler in the server thread, which only gets the processor when every thread of higher
++        // priority is blocked. Run those first: the handler must not land in the middle of what they do.
++        const auto queueThread = m_queueThreads.find(server.queue);
++        uint32_t serverPriority = 0u;
++        if (queueThread != m_queueThreads.end() && m_kernel.threadPriority(queueThread->second, serverPriority))
++            executor.runThreadsUntilIdle(serverPriority, kServerWaitCycles);
++
+         uint32_t returnPointer = executor.executeGuestFunction(server.function,
+                                                                request.function,
+                                                                server.buffer,
+diff --git a/ps2xIOP/src/emulator/services/iop_rpc.h b/ps2xIOP/src/emulator/services/iop_rpc.h
+index a4286ba..4dd902e 100644
+--- a/ps2xIOP/src/emulator/services/iop_rpc.h
++++ b/ps2xIOP/src/emulator/services/iop_rpc.h
+@@ -38,6 +38,14 @@ namespace ps2x::iop::detail
+         {
+             return executeGuestFunction(address, a0, a1, a2, a3, gp);
+         }
++
++        // Runs the IOP threads that the console would run before a thread of this priority: every Ready thread whose
++        // priority number is at most maxPriority, until none is left or the cycle budget is used.
++        virtual void runThreadsUntilIdle(uint32_t maxPriority, uint64_t maxCycles)
++        {
++            (void)maxPriority;
++            (void)maxCycles;
++        }
+     };
+ 
+     class IopRpcBridge
+@@ -72,6 +80,7 @@ namespace ps2x::iop::detail
+         IopMemory &m_memory;
+         IopKernel &m_kernel;
+         std::unordered_map<uint32_t, RpcServer> m_servers;
++        std::unordered_map<uint32_t, int> m_queueThreads; // RPC queue data -> id of the IOP thread that serves it
+         uint32_t m_nextDmaId = 1u;
+         bool m_sifInitialized = false;
+     };

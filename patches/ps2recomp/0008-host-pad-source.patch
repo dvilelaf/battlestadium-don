@@ -1,0 +1,619 @@
+Host pad source: the state of the PS2 controllers comes from the embedding program, not from raylib
+
+What it fixes: the pad state reached the guest only through raylib (IsKeyDown, IsGamepad*, axis reads)
+and the runtime knew exactly 2 ports with 1 slot each. A host that owns its window and input (SDL3)
+needs to feed the pads itself, with its own mapping, with up to 4 players and with unplugged pads.
+Adds:
+
+  runtime/ps2_host_pad.h   Ps2HostPad { user, port_count (<=2), slots_per_port[2] (<=4), read(user, port,
+        slot, Ps2HostPadState*) } and Ps2HostPadState { connected, buttons (active low, layout of bytes
+        2-3 of the pad buffer), rx/ry/lx/ly, has_pressure, pressure[12] in buffer-byte order 8..19 }.
+  PS2Runtime::setHostPad(const Ps2HostPad*)   copies the struct; nullptr removes it. Call while the game
+        thread is not running. The read callback runs on the game thread inside scePadRead / GetState /
+        InfoMode / InfoPressMode / InfoAct and must only copy a state published by the host's own thread.
+  PSPadBackend (ps2_pad.h/.cpp): setHostSource, setHostOwned (called by setHostOwnsWindow), hostMode,
+        hasHostSource, hostSource, readHost, portCount, slotCount. "Host mode" = a source is installed OR
+        the host owns the window. In host mode raylib is never called for input; without a source every
+        pad is "not connected". Not in host mode (no source, runtime owns its window) the old raylib body
+        is used unchanged (moved to readRaylibState), 2 ports, 1 slot.
+  Kernel/Stubs/Pad.cpp: per (port, slot) state (was per port: slots collide with a multitap shape);
+        scePadGetPortMax / scePadGetSlotMax(port) return the description; a (port, slot) outside it
+        cannot be opened (scePadPortOpen returns 0); a pad that is not connected makes scePadRead return
+        0 with the buffer filled as "disconnected" (byte 0 = 0xFF, buttons 0xFF 0xFF, sticks 0x80),
+        scePadGetState 0, scePadInfoMode/InfoPressMode/InfoAct 0. Pressure bytes come from
+        has_pressure/pressure[] when the source gives them (only after scePadEnterPressMode, as before),
+        else 0 or 255 from the buttons as before. setPadHostTopology() carries the description from
+        setHostPad into the Pad stubs.
+
+raylib call sites of the pad code: ps2_pad.cpp readRaylibState (only when not in host mode),
+Pad.cpp applyGamepadState / applyKeyboardState / findFirstGamepad (same), and the PS2_IF_AGRESSIVE_LOGS
+trace in scePadRead (IsKeyDown, IsGamepadButtonDown; now skipped in host mode). Together with patch 0007
+the runtime with a host-owned window calls no raylib function at all.
+
+Assumption, not verified against hardware or a game: the byte values of the "disconnected" pad buffer.
+
+How it was verified: tests/runtime/host_pad_source_test.cpp, with DISPLAY unset: a real PS2Runtime, the
+pad handlers called as the generated code calls them. 2 ports x 2 slots each carrying its own buttons and
+sticks; an unplugged pad (read 0, status 0xFF, GetState 0, InfoMode 0); ports/slots outside the
+description cannot be opened; {4} (multitap shape) and the return to 2x1 after setHostPad(nullptr);
+pressure bytes after scePadEnterPressMode; no source with a host-owned window = not connected and zero
+raylib calls (recorders); legacy path (no source, own window) = connected, 2x1, raylib asked for keys.
+
+Based on: original work for this project against PS2Recomp commit
+2c5fbb9389e11dd95693385969490c9e8e6f57b4, on top of patches 0001 to 0006 and 0007.
+
+diff --git a/ps2xRuntime/include/ps2_runtime.h b/ps2xRuntime/include/ps2_runtime.h
+index c4a3dd4..31975e5 100644
+--- a/ps2xRuntime/include/ps2_runtime.h
++++ b/ps2xRuntime/include/ps2_runtime.h
+@@ -33,6 +33,7 @@
+ #include "runtime/ps2_vu1.h"
+ #include "runtime/ps2_audio.h"
+ #include "runtime/ps2_pad.h"
++#include "runtime/ps2_host_pad.h"
+ #include "runtime/ps2_rom_device.h"
+ #include "runtime/ps2_vfs.h"
+ #include "ps2x/iop/iop_types.h"
+@@ -294,6 +295,10 @@ public:
+     // business (it receives the picture from its host GS, see setHostGs/Ps2HostGs::vsync).
+     // The runtime's own executable leaves this off and keeps its raylib window.
+     void setHostOwnsWindow(bool owns);
++    // Host pad source (runtime/ps2_host_pad.h). The struct is copied; nullptr removes it. With a source
++    // installed (or with setHostOwnsWindow(true)) raylib is never asked for input. Call while the game
++    // thread is not running.
++    void setHostPad(const Ps2HostPad *host);
+     inline bool hostOwnsWindow() const { return m_hostOwnsWindow; }
+ 
+     bool initialize(const char *title = "PS2 Game");
+diff --git a/ps2xRuntime/include/runtime/ps2_host_pad.h b/ps2xRuntime/include/runtime/ps2_host_pad.h
+new file mode 100644
+index 0000000..02cf2f0
+--- /dev/null
++++ b/ps2xRuntime/include/runtime/ps2_host_pad.h
+@@ -0,0 +1,58 @@
++#ifndef PS2_HOST_PAD_H
++#define PS2_HOST_PAD_H
++
++#include <cstdint>
++
++// Host pad source: the state of the PS2 controllers comes from the program that embeds the runtime
++// (installed with PS2Runtime::setHostPad()) instead of from raylib.
++//
++// The runtime asks for the state of one (port, slot) each time the guest reads or queries that pad
++// (scePadRead, scePadGetState, scePadInfoMode, scePadInfoPressMode, scePadInfoAct). The call is made on
++// the game thread, in the middle of the guest's frame: the host's read callback must only copy a state
++// that its own thread (the one that polls the devices) has published (an atomic or a mutex-protected
++// struct); it must not block or call into the runtime.
++//
++// Ports and slots. A PS2 has two ports; a multitap on a port gives it up to four slots. The source
++// states how many of each it has, so that a four-player setup is described either as port 0 with
++// four slots {4, 1} or as two ports with two slots each {2, 2}. port_count is 0..PS2_HOST_PAD_MAX_PORTS,
++// slots_per_port[p] is 0..PS2_HOST_PAD_MAX_SLOTS. scePadGetPortMax returns port_count and
++// scePadGetSlotMax(port) returns slots_per_port[port]; a (port, slot) outside the description is not
++// openable (scePadPortOpen returns 0) and reads as not connected. The multitap functions (sceMtap*)
++// are not implemented by this interface, it only makes room for them.
++#define PS2_HOST_PAD_MAX_PORTS 2
++#define PS2_HOST_PAD_MAX_SLOTS 4
++
++// Order of the pressure bytes: the order of the pad data buffer bytes 8..19, i.e.
++// Right, Left, Up, Down, Triangle, Circle, Cross, Square, L1, L2, R1, R2.
++#define PS2_HOST_PAD_PRESSURE_COUNT 12
++
++struct Ps2HostPadState
++{
++    // 0: nothing plugged in (or the host has no state for it): the guest sees a disconnected pad.
++    uint8_t connected = 0;
++    // Active low, the layout of bytes 2-3 of the pad data buffer: Select 1<<0, L3 1<<1, R3 1<<2,
++    // Start 1<<3, Up 1<<4, Right 1<<5, Down 1<<6, Left 1<<7, L2 1<<8, R2 1<<9, L1 1<<10, R1 1<<11,
++    // Triangle 1<<12, Circle 1<<13, Cross 1<<14, Square 1<<15. 0xFFFF = nothing pressed.
++    uint16_t buttons = 0xFFFFu;
++    // 0..255, 0x80 centre (right X, right Y, left X, left Y; Y grows downwards as on the PS2).
++    uint8_t rx = 0x80, ry = 0x80, lx = 0x80, ly = 0x80;
++    // 0: the pressure bytes are derived from the buttons (0 or 255, what the runtime did before);
++    // 1: pressure[] is used. Either way they only reach the guest after scePadEnterPressMode.
++    uint8_t has_pressure = 0;
++    uint8_t pressure[PS2_HOST_PAD_PRESSURE_COUNT] = {};
++};
++
++struct Ps2HostPad
++{
++    // Passed back as the first argument of read.
++    void *user = nullptr;
++
++    uint32_t port_count = 0;
++    uint32_t slots_per_port[PS2_HOST_PAD_MAX_PORTS] = {};
++
++    // Fills *out (initialised to "not connected, nothing pressed") for the pad at (port, slot). Called
++    // only for a (port, slot) inside the description above. Required: a source without read is ignored.
++    void (*read)(void *user, int port, int slot, Ps2HostPadState *out) = nullptr;
++};
++
++#endif
+diff --git a/ps2xRuntime/include/runtime/ps2_pad.h b/ps2xRuntime/include/runtime/ps2_pad.h
+index 7755fe6..cc91895 100644
+--- a/ps2xRuntime/include/runtime/ps2_pad.h
++++ b/ps2xRuntime/include/runtime/ps2_pad.h
+@@ -1,6 +1,8 @@
+ #ifndef PS2_PAD_H
+ #define PS2_PAD_H
+ 
++#include "runtime/ps2_host_pad.h"
++
+ #include <cstddef>
+ #include <cstdint>
+ 
+@@ -10,7 +12,37 @@ public:
+     PSPadBackend() = default;
+     ~PSPadBackend() = default;
+ 
++    // Fills the 32-byte buffer the pad handlers use (byte 1 mode marker, 2-3 buttons, 4-7 sticks,
++    // 8-19 pressure). Without a host source and without a host-owned window this is the runtime's own
++    // raylib mapping (gamepad 0 or the keyboard, port and slot ignored), as before. In host mode it
++    // is the host's state for (port, slot); returns false when that pad is not connected.
+     bool readState(int port, int slot, uint8_t *data, size_t size);
++
++    // Installs (copies) the host source; nullptr, or a source without read, removes it. Call while the
++    // game thread is not running.
++    void setHostSource(const Ps2HostPad *source);
++    // The window, and with it the input devices, belong to the host (PS2Runtime::setHostOwnsWindow).
++    void setHostOwned(bool owned) { m_hostOwned = owned; }
++
++    // true when the pads do not come from raylib: a source is installed, or the host owns the window
++    // (then, without a source, every pad is not connected and raylib is never called).
++    bool hostMode() const { return m_hasSource || m_hostOwned; }
++    bool hasHostSource() const { return m_hasSource; }
++    const Ps2HostPad *hostSource() const { return m_hasSource ? &m_source : nullptr; }
++
++    // Host mode: the state of (port, slot) with connected=0 when there is no source, the (port, slot)
++    // is outside the source's description, or the source says so. Never calls raylib.
++    void readHost(int port, int slot, Ps2HostPadState &out) const;
++
++    // Number of ports and of slots of a port in the source's description (the defaults of the
++    // runtime's own pads, 2 and 1, without a source).
++    uint32_t portCount() const;
++    uint32_t slotCount(int port) const;
++
++private:
++    Ps2HostPad m_source{};
++    bool m_hasSource = false;
++    bool m_hostOwned = false;
+ };
+ 
+ #endif
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
+index b50a4cf..8787982 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
+@@ -13,8 +13,13 @@ namespace ps2_stubs
+         constexpr int32_t kPadStateDisconnected = 0;
+         constexpr int32_t kPadStateExecCmd = 5;
+         constexpr int32_t kPadStateStable = 6;
+-        constexpr size_t kPadPortCount = 2;
+-        constexpr size_t kPadSlotCount = 1;
++        // Capacity of the pad table (a PS2 has two ports, a multitap gives a port up to four slots)...
++        constexpr size_t kPadPortCount = PS2_HOST_PAD_MAX_PORTS;
++        constexpr size_t kPadMaxSlotCount = PS2_HOST_PAD_MAX_SLOTS;
++        // ... and how many of them exist: 2 ports x 1 slot unless a host pad source describes more
++        // (setPadHostTopology).
++        constexpr uint32_t kPadDefaultPorts = 2;
++        constexpr uint32_t kPadDefaultSlots = 1;
+ 
+         constexpr uint16_t kPadBtnSelect = 1u << 0;
+         constexpr uint16_t kPadBtnL3 = 1u << 1;
+@@ -40,6 +45,8 @@ namespace ps2_stubs
+             uint8_t ry = kPadAnalogCenter;
+             uint8_t lx = kPadAnalogCenter;
+             uint8_t ly = kPadAnalogCenter;
++            bool hasPressure = false;      // host source gave real pressure values
++            uint8_t pressure[PS2_HOST_PAD_PRESSURE_COUNT]{};
+         };
+ 
+         struct PadPortState
+@@ -64,7 +71,10 @@ namespace ps2_stubs
+         std::mutex g_padStateMutex;
+         bool g_padOverrideEnabled = false;
+         PadInputState g_padOverrideState{};
+-        PadPortState g_padPorts[kPadPortCount]{};
++        PadPortState g_padPorts[kPadPortCount][kPadMaxSlotCount]{};
++        // Topology of the pads (guarded by g_padStateMutex).
++        uint32_t g_padPortLimit = kPadDefaultPorts;
++        uint32_t g_padSlotLimit[kPadPortCount] = {kPadDefaultSlots, kPadDefaultSlots};
+         int g_padReadLogCount = 0;
+ 
+         uint8_t axisToByte(float axis)
+@@ -194,23 +204,50 @@ namespace ps2_stubs
+ 
+         void resetPadStateLocked()
+         {
+-            for (PadPortState &portState : g_padPorts)
++            for (auto &slots : g_padPorts)
+             {
+-                portState = PadPortState{};
++                for (PadPortState &portState : slots)
++                {
++                    portState = PadPortState{};
++                }
+             }
+         }
+ 
+         PadPortState *lookupPadPortStateLocked(int port, int slot)
+         {
+-            if (port < 0 || port >= static_cast<int>(kPadPortCount))
++            if (port < 0 || port >= static_cast<int>(g_padPortLimit))
+             {
+                 return nullptr;
+             }
+-            if (slot < 0 || slot >= static_cast<int>(kPadSlotCount))
++            if (slot < 0 || slot >= static_cast<int>(g_padSlotLimit[port]))
+             {
+                 return nullptr;
+             }
+-            return &g_padPorts[port];
++            return &g_padPorts[port][slot];
++        }
++
++        // false when the pad at (port, slot) is not plugged in. Without a host source and with a window of
++        // the runtime's own (raylib input) every pad is connected, as it always was.
++        bool padConnected(PS2Runtime *runtime, int port, int slot)
++        {
++            if (!runtime || !runtime->padBackend().hostMode())
++            {
++                return true;
++            }
++            Ps2HostPadState hostState;
++            runtime->padBackend().readHost(port, slot, hostState);
++            return hostState.connected != 0;
++        }
++
++        // What scePadRead leaves in the buffer of a pad that is not plugged in: a non-zero status byte
++        // (the "OK" byte is 0), no mode, no button pressed, sticks centred.
++        void fillPadDisconnected(uint8_t *data)
++        {
++            std::memset(data, 0, 32);
++            data[0] = 0xFF;
++            data[2] = 0xFF;
++            data[3] = 0xFF;
++            data[4] = data[5] = data[6] = data[7] = kPadAnalogCenter;
+         }
+ 
+         void initializePadPortLocked(PadPortState &portState, uint32_t dmaAddr)
+@@ -229,7 +266,7 @@ namespace ps2_stubs
+             portState.transientState = static_cast<uint32_t>(kPadStateExecCmd);
+         }
+ 
+-        uint8_t pressureValue(const PadInputState &state, const PadPortState &portState, uint16_t mask)
++        uint8_t pressureValue(const PadInputState &state, const PadPortState &portState, uint16_t mask, size_t index)
+         {
+             if (!portState.pressureEnabled)
+             {
+@@ -239,6 +276,10 @@ namespace ps2_stubs
+             {
+                 return 0u;
+             }
++            if (state.hasPressure)
++            {
++                return state.pressure[index];
++            }
+             return ((state.buttons & mask) == 0u) ? 0xFFu : 0u;
+         }
+ 
+@@ -252,18 +293,18 @@ namespace ps2_stubs
+             data[5] = state.ry;
+             data[6] = state.lx;
+             data[7] = state.ly;
+-            data[8] = pressureValue(state, portState, kPadBtnRight);
+-            data[9] = pressureValue(state, portState, kPadBtnLeft);
+-            data[10] = pressureValue(state, portState, kPadBtnUp);
+-            data[11] = pressureValue(state, portState, kPadBtnDown);
+-            data[12] = pressureValue(state, portState, kPadBtnTriangle);
+-            data[13] = pressureValue(state, portState, kPadBtnCircle);
+-            data[14] = pressureValue(state, portState, kPadBtnCross);
+-            data[15] = pressureValue(state, portState, kPadBtnSquare);
+-            data[16] = pressureValue(state, portState, kPadBtnL1);
+-            data[17] = pressureValue(state, portState, kPadBtnL2);
+-            data[18] = pressureValue(state, portState, kPadBtnR1);
+-            data[19] = pressureValue(state, portState, kPadBtnR2);
++            data[8] = pressureValue(state, portState, kPadBtnRight, 0);
++            data[9] = pressureValue(state, portState, kPadBtnLeft, 1);
++            data[10] = pressureValue(state, portState, kPadBtnUp, 2);
++            data[11] = pressureValue(state, portState, kPadBtnDown, 3);
++            data[12] = pressureValue(state, portState, kPadBtnTriangle, 4);
++            data[13] = pressureValue(state, portState, kPadBtnCircle, 5);
++            data[14] = pressureValue(state, portState, kPadBtnCross, 6);
++            data[15] = pressureValue(state, portState, kPadBtnSquare, 7);
++            data[16] = pressureValue(state, portState, kPadBtnL1, 8);
++            data[17] = pressureValue(state, portState, kPadBtnL2, 9);
++            data[18] = pressureValue(state, portState, kPadBtnR1, 10);
++            data[19] = pressureValue(state, portState, kPadBtnR2, 11);
+         }
+ 
+         bool readPadPortData(int port, int slot, PS2Runtime *runtime, uint8_t *outData, uint32_t dataAddr)
+@@ -284,6 +325,17 @@ namespace ps2_stubs
+                 portState = *sharedPortState;
+             }
+ 
++            if (!padConnected(runtime, port, slot))
++            {
++                fillPadDisconnected(outData);
++                std::lock_guard<std::mutex> lock(g_padStateMutex);
++                if (PadPortState *sharedPortState = lookupPadPortStateLocked(port, slot))
++                {
++                    sharedPortState->lastReadOk = false;
++                }
++                return false;
++            }
++
+             PadInputState state;
+             bool useOverride = false;
+             {
+@@ -306,6 +358,16 @@ namespace ps2_stubs
+                     state.ry = backendData[5];
+                     state.lx = backendData[6];
+                     state.ly = backendData[7];
++                    if (runtime->padBackend().hostMode())
++                    {
++                        Ps2HostPadState hostState;
++                        runtime->padBackend().readHost(port, slot, hostState);
++                        if (hostState.has_pressure)
++                        {
++                            state.hasPressure = true;
++                            std::memcpy(state.pressure, hostState.pressure, sizeof(state.pressure));
++                        }
++                    }
+                     usedBackend = true;
+                 }
+                 else
+@@ -429,7 +491,8 @@ namespace ps2_stubs
+     {
+         (void)rdram;
+         (void)runtime;
+-        setReturnS32(ctx, 2);
++        std::lock_guard<std::mutex> lock(g_padStateMutex);
++        setReturnS32(ctx, static_cast<int32_t>(g_padPortLimit));
+     }
+ 
+     void scePadGetReqState(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+@@ -446,19 +509,23 @@ namespace ps2_stubs
+     {
+         (void)rdram;
+         (void)runtime;
+-        // Most games use one slot unless multitap is active.
+-        setReturnS32(ctx, 1);
++        // One slot unless the host reports a multitap on that port.
++        const int port = static_cast<int>(getRegU32(ctx, 4));
++        std::lock_guard<std::mutex> lock(g_padStateMutex);
++        setReturnS32(ctx, (port >= 0 && port < static_cast<int>(g_padPortLimit))
++                              ? static_cast<int32_t>(g_padSlotLimit[port])
++                              : 0);
+     }
+ 
+     void scePadGetState(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
+         (void)rdram;
+-        (void)runtime;
+         std::lock_guard<std::mutex> lock(g_padStateMutex);
+         PadPortState *portState = lookupPadPortStateLocked(static_cast<int>(getRegU32(ctx, 4)),
+                                                            static_cast<int>(getRegU32(ctx, 5)));
+         int32_t state = kPadStateDisconnected;
+-        if (portState && portState->open)
++        if (portState && portState->open &&
++            padConnected(runtime, static_cast<int>(getRegU32(ctx, 4)), static_cast<int>(getRegU32(ctx, 5))))
+         {
+             if (portState->transientState != 0u)
+             {
+@@ -479,7 +546,8 @@ namespace ps2_stubs
+         std::lock_guard<std::mutex> lock(g_padStateMutex);
+         const PadPortState *portState = lookupPadPortStateLocked(static_cast<int>(getRegU32(ctx, 4)),
+                                                                  static_cast<int>(getRegU32(ctx, 5)));
+-        if (!portState || !portState->open)
++        if (!portState || !portState->open ||
++            !padConnected(runtime, static_cast<int>(getRegU32(ctx, 4)), static_cast<int>(getRegU32(ctx, 5))))
+         {
+             setReturnS32(ctx, 0);
+             return;
+@@ -504,14 +572,14 @@ namespace ps2_stubs
+     void scePadInfoMode(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
+         (void)rdram;
+-        (void)runtime;
+ 
+         const int32_t infoMode = static_cast<int32_t>(getRegU32(ctx, 6)); // a2
+         const int32_t index = static_cast<int32_t>(getRegU32(ctx, 7));    // a3
+         std::lock_guard<std::mutex> lock(g_padStateMutex);
+         const PadPortState *portState = lookupPadPortStateLocked(static_cast<int>(getRegU32(ctx, 4)),
+                                                                  static_cast<int>(getRegU32(ctx, 5)));
+-        if (!portState || !portState->open)
++        if (!portState || !portState->open ||
++            !padConnected(runtime, static_cast<int>(getRegU32(ctx, 4)), static_cast<int>(getRegU32(ctx, 5))))
+         {
+             setReturnS32(ctx, 0);
+             return;
+@@ -552,11 +620,13 @@ namespace ps2_stubs
+     void scePadInfoPressMode(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
+         (void)rdram;
+-        (void)runtime;
+         std::lock_guard<std::mutex> lock(g_padStateMutex);
+         const PadPortState *portState = lookupPadPortStateLocked(static_cast<int>(getRegU32(ctx, 4)),
+                                                                  static_cast<int>(getRegU32(ctx, 5)));
+-        setReturnS32(ctx, (portState && portState->open) ? 1 : 0);
++        setReturnS32(ctx, (portState && portState->open &&
++                           padConnected(runtime, static_cast<int>(getRegU32(ctx, 4)), static_cast<int>(getRegU32(ctx, 5))))
++                              ? 1
++                              : 0);
+     }
+ 
+     void scePadInit(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+@@ -644,7 +714,8 @@ namespace ps2_stubs
+         }
+ 
+         PS2_IF_AGRESSIVE_LOGS({
+-            if (g_padReadLogCount < 48)
++            // The debug trace asks raylib for the keyboard: never with a host source or a host-owned window.
++            if (g_padReadLogCount < 48 && !(runtime && runtime->padBackend().hostMode()))
+             {
+                 const int gamepad = findFirstGamepad();
+                 const bool gamepadStartPressed =
+@@ -818,7 +889,7 @@ namespace ps2_stubs
+             {
+                 for (size_t slot = 0; slot < kPadDebugSlotCount; ++slot)
+                 {
+-                    const PadPortState &src = g_padPorts[port];
++                    const PadPortState &src = g_padPorts[port % kPadPortCount][slot % kPadMaxSlotCount];
+                     PadDebugPortSnapshot &dst = snapshot.ports[port][slot];
+                     dst.open = src.open;
+                     dst.analogMode = src.analogMode;
+@@ -860,4 +931,16 @@ namespace ps2_stubs
+         g_padOverrideEnabled = false;
+         g_padOverrideState = PadInputState{};
+     }
++
++    void setPadHostTopology(uint32_t ports, const uint32_t *slotsPerPort)
++    {
++        std::lock_guard<std::mutex> lock(g_padStateMutex);
++        g_padPortLimit = std::min<uint32_t>(ports, kPadPortCount);
++        for (uint32_t port = 0; port < kPadPortCount; ++port)
++        {
++            g_padSlotLimit[port] = (slotsPerPort && port < g_padPortLimit)
++                                       ? std::min<uint32_t>(slotsPerPort[port], kPadMaxSlotCount)
++                                       : kPadDefaultSlots;
++        }
++    }
+ }
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.h b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.h
+index c4de234..cd35f9d 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.h
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.h
+@@ -78,4 +78,6 @@ namespace ps2_stubs
+     PadDebugSnapshot getPadDebugSnapshot();
+     void setPadOverrideState(uint16_t buttons, uint8_t lx, uint8_t ly, uint8_t rx, uint8_t ry);
+     void clearPadOverrideState();
++    // Ports (max 2) and slots per port (max 4) the guest sees. Set from PS2Runtime::setHostPad.
++    void setPadHostTopology(uint32_t ports, const uint32_t *slotsPerPort);
+ }
+diff --git a/ps2xRuntime/src/lib/ps2_pad.cpp b/ps2xRuntime/src/lib/ps2_pad.cpp
+index 8590f14..67e8a45 100644
+--- a/ps2xRuntime/src/lib/ps2_pad.cpp
++++ b/ps2xRuntime/src/lib/ps2_pad.cpp
+@@ -1,5 +1,6 @@
+ #include "runtime/ps2_pad.h"
+ #include "ps2_host_backend.h"
++#include <algorithm>
+ #include <cstring>
+ 
+ namespace
+@@ -25,7 +26,10 @@ namespace
+     constexpr uint16_t PAD_L2 = 0x0100u;
+ }
+ 
+-bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t size)
++namespace
++{
++// The runtime's own raylib mapping (gamepad 0 or the keyboard; port and slot are ignored).
++bool readRaylibState(uint8_t *data, size_t size)
+ {
+     if (!data || size < 32)
+         return false;
+@@ -123,3 +127,67 @@ bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t s
+     data[3] = static_cast<uint8_t>(btns >> 8);
+     return true;
+ }
++}
++
++void PSPadBackend::setHostSource(const Ps2HostPad *source)
++{
++    if (source && source->read)
++    {
++        m_source = *source;
++        m_source.port_count = std::min<uint32_t>(m_source.port_count, PS2_HOST_PAD_MAX_PORTS);
++        for (uint32_t port = 0; port < PS2_HOST_PAD_MAX_PORTS; ++port)
++        {
++            m_source.slots_per_port[port] =
++                (port < m_source.port_count) ? std::min<uint32_t>(m_source.slots_per_port[port], PS2_HOST_PAD_MAX_SLOTS) : 0u;
++        }
++        m_hasSource = true;
++    }
++    else
++    {
++        m_source = Ps2HostPad{};
++        m_hasSource = false;
++    }
++}
++
++uint32_t PSPadBackend::portCount() const
++{
++    return m_hasSource ? m_source.port_count : 2u;
++}
++
++uint32_t PSPadBackend::slotCount(int port) const
++{
++    if (port < 0 || port >= static_cast<int>(portCount()))
++        return 0u;
++    return m_hasSource ? m_source.slots_per_port[port] : 1u;
++}
++
++void PSPadBackend::readHost(int port, int slot, Ps2HostPadState &out) const
++{
++    out = Ps2HostPadState{};
++    if (!m_hasSource || slot < 0 || static_cast<uint32_t>(slot) >= slotCount(port))
++        return;
++    m_source.read(m_source.user, port, slot, &out);
++}
++
++bool PSPadBackend::readState(int port, int slot, uint8_t *data, size_t size)
++{
++    if (!hostMode())
++        return readRaylibState(data, size);
++
++    if (!data || size < 32)
++        return false;
++    Ps2HostPadState state;
++    readHost(port, slot, state);
++    std::memset(data, 0, 32);
++    data[0] = 0x01;
++    data[1] = kPadAnalogMarker;
++    data[2] = static_cast<uint8_t>(state.buttons & 0xFFu);
++    data[3] = static_cast<uint8_t>(state.buttons >> 8);
++    data[4] = state.rx;
++    data[5] = state.ry;
++    data[6] = state.lx;
++    data[7] = state.ly;
++    if (state.has_pressure)
++        std::memcpy(data + 8, state.pressure, PS2_HOST_PAD_PRESSURE_COUNT);
++    return state.connected != 0;
++}
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index cdc5659..0b39208 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -10,6 +10,7 @@
+ #include "Kernel/Stubs/Audio.h"
+ #include "Kernel/Stubs/GS.h"
+ #include "Kernel/Stubs/MPEG.h"
++#include "Kernel/Stubs/Pad.h"
+ #include "ps2_host_backend.h"
+ #include "ps2_iop_host.h"
+ #include "ps2x/iop/iop_subsystem.h"
+@@ -717,6 +718,22 @@ bool PS2Runtime::syncCoreSubsystems()
+ void PS2Runtime::setHostOwnsWindow(bool owns)
+ {
+     m_hostOwnsWindow = owns;
++    m_padBackend.setHostOwned(owns);
++}
++
++void PS2Runtime::setHostPad(const Ps2HostPad *host)
++{
++    m_padBackend.setHostSource(host);
++    if (m_padBackend.hasHostSource())
++    {
++        const Ps2HostPad &source = *m_padBackend.hostSource();
++        ps2_stubs::setPadHostTopology(source.port_count, source.slots_per_port);
++    }
++    else
++    {
++        const uint32_t slots[2] = {1u, 1u};
++        ps2_stubs::setPadHostTopology(2u, slots);
++    }
+ }
+ 
+ bool PS2Runtime::initialize(const char *title)

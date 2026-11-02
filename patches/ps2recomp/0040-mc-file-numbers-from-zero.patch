@@ -1,0 +1,118 @@
+Memory card: file numbers start at 0, the lowest free number is reused, three files at most.
+
+What it fixes: the runtime's open handed out `g_mcNextFd++` starting at 1 and only counting up, with room for
+32 files. The console's memory-card manager as this game ships it (disc/MODULES/MCMAN.IRX) keeps a table of three
+entries of 0x30 bytes (the loops over it run `slti ..., 3` with a 0x30 stride) and the open function scans it
+from entry 0 and returns the index of the first free one; with none free it returns -7
+(sceMcResUpLimitHandle, which the runtime already has as kMcResultUpLimitHandle). So the first open of the
+game's save gives file number 0, and the game writes to 0. With the runtime's 1 that write answered -4
+(unknown file number) and the save left a 0-byte file (docs/journal/022).
+Now: the open returns the lowest free number from 0, a close frees its number (g_mcNextFd, shown by the debug
+panel, is kept as "the number the next open would get": 0 at start and at sceMcInit/sceMcEnd, recomputed after
+every open and close and after the files of a port are closed), and an open with three files in use fails with -7.
+
+How it was verified: tests/runtime/mc_file_numbers_test.cpp calls the handlers as the guest does (mkdir, chdir,
+open with 0x202, sync, write 992 bytes to number 0, ...). On the tree without this patch: 10 checks fail (the first
+open gives 1, the write to 0 returns -4, the file has 0 bytes); with it: all checks pass.
+
+Based on no other project's work.
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/MemoryCard.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/MemoryCard.cpp
+index 564d873..26f3528 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/MemoryCard.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/MemoryCard.cpp
+@@ -35,7 +35,7 @@ namespace ps2_stubs
+         constexpr int32_t kMcUnformatted = 0;
+         constexpr int32_t kMcFreeClusters = 0x2000;
+         constexpr size_t kMcMaxPathLen = 1024;
+-        constexpr size_t kMcMaxOpenFiles = 32;
++        constexpr size_t kMcMaxOpenFiles = 3; // MCMAN.IRX: three entries of 0x30 bytes
+ 
+         constexpr uint16_t kMcAttrReadable = 0x0001;
+         constexpr uint16_t kMcAttrWriteable = 0x0002;
+@@ -83,7 +83,7 @@ namespace ps2_stubs
+         };
+ 
+         std::mutex g_mcStateMutex;
+-        int32_t g_mcNextFd = 1;
++        int32_t g_mcNextFd = 0; // the file number the next open will get (lowest free)
+         int32_t g_mcLastCmd = 0;
+         bool g_mcCommandPending = false;
+         int32_t g_mcLastResult = 0;
+@@ -367,6 +367,8 @@ namespace ps2_stubs
+             g_mcCommandPending = true;
+         }
+ 
++        void updateMcNextFdLocked();
++
+         void closeMcFilesLocked()
+         {
+             for (auto &[fd, openFile] : g_mcFiles)
+@@ -397,6 +399,18 @@ namespace ps2_stubs
+                     ++it;
+                 }
+             }
++            updateMcNextFdLocked();
++        }
++
++        // g_mcNextFd (shown by the debug panel) is the number the next open would get.
++        void updateMcNextFdLocked()
++        {
++            int32_t fd = 0;
++            while (fd < static_cast<int32_t>(kMcMaxOpenFiles) && g_mcFiles.find(fd) != g_mcFiles.end())
++            {
++                ++fd;
++            }
++            g_mcNextFd = fd;
+         }
+ 
+         int32_t allocateMcFdLocked(FILE *file, int32_t port, const std::filesystem::path &hostPath)
+@@ -410,20 +424,16 @@ namespace ps2_stubs
+                 return kMcResultUpLimitHandle;
+             }
+ 
+-            for (int attempt = 0; attempt < 0x10000; ++attempt)
++            // The console's module returns the index of the lowest free entry of its table, from 0.
++            for (int32_t fd = 0; fd < static_cast<int32_t>(kMcMaxOpenFiles); ++fd)
+             {
+-                if (g_mcNextFd <= 0)
+-                {
+-                    g_mcNextFd = 1;
+-                }
+-
+-                const int32_t fd = g_mcNextFd++;
+                 if (g_mcFiles.find(fd) != g_mcFiles.end())
+                 {
+                     continue;
+                 }
+ 
+                 g_mcFiles.emplace(fd, McOpenFile{file, port, hostPath});
++                updateMcNextFdLocked();
+                 return fd;
+             }
+ 
+@@ -575,6 +585,7 @@ namespace ps2_stubs
+                     result = kMcResultSucceed;
+                 }
+                 g_mcFiles.erase(it);
++                updateMcNextFdLocked();
+             }
+             setMcCommandResultLocked(kMcCmdClose, result);
+         }
+@@ -634,7 +645,7 @@ namespace ps2_stubs
+         {
+             std::lock_guard<std::mutex> lock(g_mcStateMutex);
+             closeMcFilesLocked();
+-            g_mcNextFd = 1;
++            g_mcNextFd = 0;
+             g_mcLastCmd = 0;
+             g_mcLastResult = 0;
+             g_mcCommandPending = false;
+@@ -921,7 +932,7 @@ namespace ps2_stubs
+         {
+             std::lock_guard<std::mutex> lock(g_mcStateMutex);
+             closeMcFilesLocked();
+-            g_mcNextFd = 1;
++            g_mcNextFd = 0;
+             g_mcLastCmd = 0;
+             g_mcLastResult = 0;
+             g_mcCommandPending = false;

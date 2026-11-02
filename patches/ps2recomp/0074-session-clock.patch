@@ -1,0 +1,331 @@
+# 0074-session-clock: the guest's clock comes from the session, not the PC (netplay determinism)
+#
+# What it fixes: host time leaks into the guest state in several places, so two players on different PCs (or two
+# runs on one PC with a different TZ) see different times and desync. sceCdReadClock reads the PC's local time;
+# the OSD time zone at boot is the PC's; the memory card's GetDir dates use the PC's clock and the card folder's
+# file timestamps; fioGetstat reports the host disk's file times. With PS2Runtime::setSessionClock(epoch) set,
+# every host time the guest can see becomes epoch + vsync_tick / 60 in UTC (time-zone offset 0 minutes):
+# sceCdReadClock (in BCD, UTC), the OSD time zone (0), the memory card dates (the "." / ".." entries and the file
+# times) and fioGetstat's file times. Unset, nothing changes. DON_SESSION_EPOCH=<seconds> sets the clock at runtime
+# start, for the determinism checks without netplay.
+# How it was verified: tests/runtime/session_clock_test.cpp (sceCdReadClock gives epoch in BCD UTC, the OSD offset
+# is 0, GetDir dates equal the session time, and unset keeps the old behaviour); the multiplayer_match route with
+# DON_SESSION_EPOCH=1700000000 and DON_TRACE_STATE=60 gives identical state lines with TZ=UTC and TZ=Asia/Tokyo.
+# Original work (no other project).
+#
+diff --git a/ps2xRuntime/include/ps2_runtime.h b/ps2xRuntime/include/ps2_runtime.h
+index fcd03fc..ef29b49 100644
+--- a/ps2xRuntime/include/ps2_runtime.h
++++ b/ps2xRuntime/include/ps2_runtime.h
+@@ -3,6 +3,7 @@
+ 
+ #include <cstring>
+ #include <cstdint>
++#include <ctime>
+ #include <vector>
+ #include <string>
+ #include <string_view>
+@@ -302,6 +303,15 @@ public:
+     void setHostPad(const Ps2HostPad *host);
+     inline bool hostOwnsWindow() const { return m_hostOwnsWindow; }
+ 
++    // Session clock (patch 0074, docs/knowledge/22-netplay.md section 8): once set, every host time the
++    // guest can see comes from epoch_seconds + vsync_tick / 60 (UTC), never from the PC. Unset, nothing
++    // changes. Call while the game thread is not running.
++    void setSessionClock(uint64_t epoch_seconds);
++    bool hasSessionClock() const;
++    uint64_t sessionEpoch() const;
++    // The session time at the current vertical blank: epoch + vsync_tick / 60, as a UTC time_t. 0 when unset.
++    std::time_t sessionTimeNow() const;
++
+     bool initialize(const char *title = "PS2 Game");
+     bool syncCoreSubsystems();
+     bool loadELF(const std::string &elfPath);
+@@ -555,6 +565,8 @@ private:
+     Ps2HostGs m_hostGsStorage;
+     bool m_hostGs = false;
+     bool m_hostOwnsWindow = false;
++    uint64_t m_sessionEpoch = 0;
++    bool m_sessionClockSet = false;
+     std::thread m_gameThread;
+     std::atomic<bool> m_gameThreadFinished{true};
+     std::atomic<bool> m_gameThreadFailed{false};
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index cd0303c..7202f03 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -511,6 +511,39 @@ PS2Runtime::PS2Runtime()
+     m_asyncCallbackStackTop = kInvocationStackBase;
+     m_kernelHeapBase = 0x00100000u;
+     m_kernelHeapEnd = PS2_RAM_SIZE;
++
++    // DON_SESSION_EPOCH=<seconds> sets the session clock without netplay (patch 0074), so that the
++    // determinism checks can compare two runs with different host clocks or time zones.
++    if (const char *epoch = std::getenv("DON_SESSION_EPOCH"); epoch != nullptr && epoch[0] != '\0')
++    {
++        setSessionClock(std::strtoull(epoch, nullptr, 0));
++    }
++}
++
++void PS2Runtime::setSessionClock(uint64_t epoch_seconds)
++{
++    m_sessionEpoch = epoch_seconds;
++    m_sessionClockSet = true;
++}
++
++bool PS2Runtime::hasSessionClock() const
++{
++    return m_sessionClockSet;
++}
++
++uint64_t PS2Runtime::sessionEpoch() const
++{
++    return m_sessionEpoch;
++}
++
++std::time_t PS2Runtime::sessionTimeNow() const
++{
++    if (!m_sessionClockSet)
++    {
++        return 0;
++    }
++    const uint64_t tick = m_eeScheduler != nullptr ? m_eeScheduler->currentVSyncTick() : 0u;
++    return static_cast<std::time_t>(m_sessionEpoch + tick / 60u);
+ }
+ 
+ void PS2Runtime::setDebugUiCallbacks(DebugUiCallback initCallback,
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/CD.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/CD.cpp
+index 56a978e..d0fc3e1 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/CD.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/CD.cpp
+@@ -517,12 +517,19 @@ namespace ps2_stubs
+             return;
+         }
+ 
+-        std::time_t now = std::time(nullptr);
++        const bool session = runtime != nullptr && runtime->hasSessionClock();
++        std::time_t now = session ? runtime->sessionTimeNow() : std::time(nullptr);
+         std::tm localTm{};
+ #ifdef _WIN32
+-        localtime_s(&localTm, &now);
++        if (session)
++            gmtime_s(&localTm, &now);
++        else
++            localtime_s(&localTm, &now);
+ #else
+-        localtime_r(&now, &localTm);
++        if (session)
++            gmtime_r(&now, &localTm);
++        else
++            localtime_r(&now, &localTm);
+ #endif
+ 
+         // sceCdCLOCK format (BCD fields).
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/MemoryCard.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/MemoryCard.cpp
+index 9446448..8895018 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/MemoryCard.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/MemoryCard.cpp
+@@ -290,6 +290,15 @@ namespace ps2_stubs
+ #endif
+         }
+ 
++        bool gmtimeSafeMc(const std::time_t *value, std::tm *out)
++        {
++#ifdef _WIN32
++            return gmtime_s(out, value) == 0;
++#else
++            return gmtime_r(value, out) != nullptr;
++#endif
++        }
++
+         std::time_t fileTimeToTimeTMc(std::filesystem::file_time_type value)
+         {
+             const auto systemTime = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+@@ -313,10 +322,11 @@ namespace ps2_stubs
+             std::memcpy(dst, value.c_str(), value.size() + 1u);
+         }
+ 
+-        void writeMcDateTime(SceMcStDateTime &out, std::time_t value)
++        void writeMcDateTime(SceMcStDateTime &out, std::time_t value, bool utc)
+         {
+             std::tm tm{};
+-            if (!localtimeSafeMc(&value, &tm))
++            const bool ok = utc ? gmtimeSafeMc(&value, &tm) : localtimeSafeMc(&value, &tm);
++            if (!ok)
+             {
+                 std::memset(&out, 0, sizeof(out));
+                 return;
+@@ -335,11 +345,12 @@ namespace ps2_stubs
+                                  const std::string &name,
+                                  bool isDirectory,
+                                  uint32_t sizeBytes,
+-                                 std::time_t modifiedTime)
++                                 std::time_t modifiedTime,
++                                 bool utc)
+         {
+             std::memset(&entry, 0, sizeof(entry));
+-            writeMcDateTime(entry._Create, modifiedTime);
+-            writeMcDateTime(entry._Modify, modifiedTime);
++            writeMcDateTime(entry._Create, modifiedTime, utc);
++            writeMcDateTime(entry._Modify, modifiedTime, utc);
+             entry.FileSizeByte = isDirectory ? 0u : sizeBytes;
+             entry.AttrFile = static_cast<uint16_t>(kMcAttrReadable |
+                                                    kMcAttrWriteable |
+@@ -804,7 +815,8 @@ namespace ps2_stubs
+                     if (std::filesystem::exists(hostDir, ec) && !ec &&
+                         std::filesystem::is_directory(hostDir, ec))
+                     {
+-                        const std::time_t now = std::time(nullptr);
++                        const bool session = runtime != nullptr && runtime->hasSessionClock();
++                        const std::time_t now = session ? runtime->sessionTimeNow() : std::time(nullptr);
+                         auto appendSpecial = [&](const std::string &name)
+                         {
+                             if (!wildcardMatch(pattern, name))
+@@ -812,7 +824,7 @@ namespace ps2_stubs
+                                 return;
+                             }
+                             SceMcTblGetDir entry{};
+-                            fillMcDirTableEntry(entry, name, true, 0u, now);
++                            fillMcDirTableEntry(entry, name, true, 0u, now, session);
+                             entries.push_back(entry);
+                         };
+ 
+@@ -851,13 +863,18 @@ namespace ps2_stubs
+                             const uint32_t sizeBytes =
+                                 isDirectory ? 0u : static_cast<uint32_t>(entry.file_size(entryEc));
+                             entryEc.clear();
+-                            const std::time_t modifiedTime = fileTimeToTimeTMc(entry.last_write_time(entryEc));
++                            // With a session clock the file times are the session time (never the host
++                            // disk's timestamps); without one they are the card folder's own timestamps.
++                            const std::time_t modifiedTime = session
++                                                                 ? now
++                                                                 : (entryEc ? now : fileTimeToTimeTMc(entry.last_write_time(entryEc)));
+                             SceMcTblGetDir tableEntry{};
+                             fillMcDirTableEntry(tableEntry,
+                                                 name,
+                                                 isDirectory,
+                                                 sizeBytes,
+-                                                entryEc ? now : modifiedTime);
++                                                modifiedTime,
++                                                session);
+                             entries.push_back(tableEntry);
+                         }
+ 
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/Helpers/Runtime.h b/ps2xRuntime/src/lib/Kernel/Syscalls/Helpers/Runtime.h
+index 8452b9d..9ae60a6 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/Helpers/Runtime.h
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/Helpers/Runtime.h
+@@ -153,10 +153,13 @@ static bool localtimeSafe(const std::time_t *t, std::tm *out)
+ #endif
+ }
+ 
+-static void encodePs2Time(std::time_t t, uint8_t out[8])
++static bool gmtimeSafe(const std::time_t *t, std::tm *out);
++
++static void encodePs2Time(std::time_t t, uint8_t out[8], bool utc)
+ {
+     std::tm tm{};
+-    if (!localtimeSafe(&t, &tm))
++    const bool ok = utc ? gmtimeSafe(&t, &tm) : localtimeSafe(&t, &tm);
++    if (!ok)
+     {
+         std::memset(out, 0, 8);
+         return;
+@@ -189,8 +192,12 @@ static bool gmtimeSafe(const std::time_t *t, std::tm *out)
+ #endif
+ }
+ 
+-static int getTimezoneOffsetMinutes()
++static int getTimezoneOffsetMinutes(bool sessionClock)
+ {
++    // With a session clock the guest is on UTC (offset 0 minutes); its local time is the session time.
++    if (sessionClock)
++        return 0;
++
+     std::time_t now = std::time(nullptr);
+     std::tm local{};
+     std::tm gmt{};
+@@ -306,13 +313,13 @@ static uint32_t makeReadableOsdConfig2RawLocked()
+     return sanitizeOsdConfig2Raw(raw);
+ }
+ 
+-static void ensureOsdConfigInitialized()
++static void ensureOsdConfigInitialized(bool sessionClock)
+ {
+     std::lock_guard<std::mutex> lock(g_osd_mutex);
+     if (g_osd_config_initialized)
+         return;
+ 
+-    int tz = clampTimezoneOffset(getTimezoneOffsetMinutes());
++    int tz = clampTimezoneOffset(getTimezoneOffsetMinutes(sessionClock));
+     uint32_t spdifMode = 1;   // disabled
+     uint32_t screenType = 0;  // 4:3
+     uint32_t videoOutput = 0; // RGB
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp b/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
+index f53f461..d2df16f 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
+@@ -150,7 +150,7 @@ namespace ps2_syscalls
+ 
+         uint32_t *param = reinterpret_cast<uint32_t *>(getMemPtr(rdram, paramAddr));
+ 
+-        ensureOsdConfigInitialized();
++        ensureOsdConfigInitialized(runtime != nullptr && runtime->hasSessionClock());
+         uint32_t raw;
+         {
+             std::lock_guard<std::mutex> lock(g_osd_mutex);
+@@ -189,11 +189,10 @@ namespace ps2_syscalls
+ 
+     void SetOsdConfigParam2(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
+-        (void)runtime;
+         const uint32_t paramAddr = getRegU32(ctx, 4); // $a0 - Config2Param*
+         const uint32_t size = getRegU32(ctx, 5);      // $a1 - sizeof(Config2Param), normally 4
+ 
+-        ensureOsdConfigInitialized();
++        ensureOsdConfigInitialized(runtime != nullptr && runtime->hasSessionClock());
+ 
+         if (size == 0u)
+         {
+@@ -253,11 +252,10 @@ namespace ps2_syscalls
+ 
+     void GetOsdConfigParam2(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
+-        (void)runtime;
+         const uint32_t paramAddr = getRegU32(ctx, 4); // $a0 - Config2Param*
+         const uint32_t size = getRegU32(ctx, 5);      // $a1 - sizeof(Config2Param), normally 4
+ 
+-        ensureOsdConfigInitialized();
++        ensureOsdConfigInitialized(runtime != nullptr && runtime->hasSessionClock());
+ 
+         if (size == 0u)
+         {
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/FileIO.cpp b/ps2xRuntime/src/lib/Kernel/Syscalls/FileIO.cpp
+index ccfca5e..1cbd05f 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/FileIO.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/FileIO.cpp
+@@ -368,13 +368,21 @@ namespace ps2_syscalls
+             return;
+         }
+ 
++        // With a session clock the file times are the session time (never the host disk's timestamps),
++        // and they are written in UTC.
++        const bool session = runtime->hasSessionClock();
++        if (session)
++        {
++            status.created = status.accessed = status.modified = runtime->sessionTimeNow();
++        }
++
+         io_stat_t guest{};
+         guest.mode = (status.directory ? kFioSoIfDir : kFioSoIfReg) | kFioSoIROth | kFioSoIXOth | (status.readOnly ? 0u : kFioSoIWOth);
+         guest.size = static_cast<uint32_t>(status.size & 0xFFFFFFFFu);
+         guest.hisize = static_cast<uint32_t>(status.size >> 32u);
+-        encodePs2Time(status.created, guest.ctime);
+-        encodePs2Time(status.accessed, guest.atime);
+-        encodePs2Time(status.modified, guest.mtime);
++        encodePs2Time(status.created, guest.ctime, session);
++        encodePs2Time(status.accessed, guest.atime, session);
++        encodePs2Time(status.modified, guest.mtime, session);
+         std::memcpy(ps2StatBuf, &guest, sizeof(guest));
+         ps2TraceGuestRangeWrite(rdram, statBufAddr, sizeof(guest), "fioGetstat", ctx);
+         setReturnS32(ctx, 0);

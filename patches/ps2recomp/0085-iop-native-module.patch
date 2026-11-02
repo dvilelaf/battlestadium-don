@@ -1,0 +1,715 @@
+Patch 0085: the IOP emulator can run one ahead-of-time translated module natively.
+What: ps2x::iop::registerNativeModule() registers one module (IopNativeModule in include/ps2x/iop/iop_native_module.h:
+code range, entry pcs, FNV-1a hash of the code, run function, optional stale/resetStale). In runCpu, at an entry pc
+with no branch or load pending, no queued guest callback, no interrupt deliverable and the next DMA completion
+not yet due, the emulator calls run(cpu, memory, budget) with budget = min(slice left, cycles to the next DMA
+completion) and adds the returned count to totalInstructions and totalCycles (one instruction == one cycle, as in the
+interpreter). The code hash is checked once, before first use (a mismatch disables the module); from then on
+IopMemory watches the code range (one extra compare in markOwned(), the single point of every RAM write) and any
+write into it, by the guest, a loader or a DMA, or a store that run() handed to the interpreter (stale()), disables
+the module for good. With no module registered the hook costs one bool test in the interpreter loops.
+DON_IOP_NATIVE=0 turns the module off; DON_IOP_NATIVE_VERIFY=1 replays every native stretch from the same state in the
+interpreter, compares CPU state and the whole RAM, keeps the interpreter's result and prints `[don-iop] native verify
+... DIFFERENCE ...` (first 20) and a summary line every 65536 calls. Messages: `[don-iop] native module NAME
+active|disabled: ...`.
+Verified (before the fix below): ps2xIOP builds (Release, g++); all five ps2xIOP test programs pass, including the new
+tests/iop_native_module_tests.cpp (hand-written module over a synthetic program: same result and instruction count as the
+interpreter, hash guard, disable on write, DON_IOP_NATIVE=0, verify mode with a correct and a wrong module); and
+tests/test_iop_emit.py::test_generated_module_through_the_emulator_matches_the_interpreter (the emitter's output for a
+synthetic loop, registered and run through IopEmulator: interpreter, native and verify give the same start result and
+instruction count, 0 verify differences, 8004 native instructions). Not run with the game yet.
+Original to this project. Applies after 0082.
+Fix of 2026-10-19 (found with the state hash of tools/run/perf_fight.py, which first differed at blank 2520 by one IOP cycle):
+(1) A native stretch is clamped to the next DMA completion, so after it totalCycles == nextDmaCycle. The interpreter
+services a due completion at the end of its tight loop, before the next instruction; runCpu's native path at the loop
+head did `continue` and ran one more instruction through step() first, so the completion (and the handler it runs)
+came one cycle late. Now the head path services DMA completions and guest callbacks right after a native stretch.
+(2) Verify mode was itself corrupting the run: restoreRamRaw() cleared the whole pre-decoded table, and the tight loop
+holds a pointer to the entry it decoded before calling tryNative(); when the stretch ran 0 instructions the loop
+executed the cleared entry (reserved instruction, jump to 0x80000080, the thread ran a nop slide: ~5x the
+instructions). It now only marks the entries invalid. Verify also did not model the interpreter's bookkeeping: it now
+replays each stretch with the tight loop's own conditions and counting (executeDecoded, schedulePendingDma, one
+instruction and one cycle each; the replay is the only thing that advances totalInstructions/totalCycles) and compares
+CPU, RAM, instruction and cycle deltas and the event state (next DMA completion unchanged, no DMA started, no callback,
+no deliverable interrupt, no import stub or sentinel inside the stretch).
+Verified: a71d52ac... state hash with the module on and with DON_IOP_NATIVE=0 (perf_fight.py), see the journal.
+
+--- a/ps2xIOP/CMakeLists.txt
++++ b/ps2xIOP/CMakeLists.txt
+@@ -62,6 +62,11 @@
+     target_include_directories(ps2_iop_import_version_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+     add_test(NAME ps2_iop_import_version_tests COMMAND ps2_iop_import_version_tests)
+ 
++    add_executable(ps2_iop_native_module_tests tests/iop_native_module_tests.cpp)
++    target_link_libraries(ps2_iop_native_module_tests PRIVATE ps2_iop)
++    target_include_directories(ps2_iop_native_module_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/src/emulator ${CMAKE_CURRENT_SOURCE_DIR}/src/emulator/core)
++    add_test(NAME ps2_iop_native_module_tests COMMAND ps2_iop_native_module_tests)
++
+ endif()
+ 
+ install(TARGETS ps2_iop
+--- a/ps2xIOP/src/emulator/core/iop_memory.h
++++ b/ps2xIOP/src/emulator/core/iop_memory.h
+@@ -111,7 +111,37 @@
+         // address: any IOP address that maps to main RAM (word aligned); nullptr otherwise.
+         [[nodiscard]] const DecodedInsn *decoded(uint32_t address);
+ 
++        // Patch 0085: watch of one RAM range (the code of a native module). Any write into [lo, lo + size) through
++        // markOwned() (guest stores, loads, DMA, zeroing) sets the hit flag for good, until the next watchCode().
++        // Unwatched: the range is empty and the check in markOwned() is one failed compare.
++        void watchCode(uint32_t lo, uint32_t size) noexcept
++        {
++            m_watchLo = lo;
++            m_watchHi = lo + size;
++            m_watchHit = false;
++        }
++        void unwatchCode() noexcept
++        {
++            m_watchLo = 0u;
++            m_watchHi = 0u;
++            m_watchHit = false;
++        }
++        [[nodiscard]] bool codeWatchHit() const noexcept { return m_watchHit; }
++        // Verify mode only: replaces the whole RAM image without the side effects of a guest write.
++        void restoreRamRaw(std::span<const uint8_t> image) noexcept
++        {
++            if (image.size() == m_ram.size())
++                std::copy(image.begin(), image.end(), m_ram.begin());
++            // Only marked invalid, not cleared: a caller may hold a pointer to an entry (runCpu's tight loop) and must
++            // still find a complete instruction there.
++            for (DecodedInsn &d : m_decoded)
++                d.valid = 0;
++        }
++
+     private:
++        uint32_t m_watchLo = 0;
++        uint32_t m_watchHi = 0;
++        bool m_watchHit = false;
+         [[nodiscard]] uint32_t readHardware32(uint32_t address) const;
+         void writeHardware32(uint32_t address, uint32_t value);
+         inline void markOwned(uint32_t address, size_t size);
+@@ -152,6 +182,8 @@
+             return;
+         std::fill(m_owned.begin() + address, m_owned.begin() + address + size, uint8_t{1});
+         invalidateDecoded(address, size);
++        if (address < m_watchHi && address + size > m_watchLo)
++            m_watchHit = true;
+     }
+ 
+     inline uint8_t IopMemory::read8(uint32_t address) const
+--- a/ps2xIOP/src/emulator/core/iop_memory.cpp
++++ b/ps2xIOP/src/emulator/core/iop_memory.cpp
+@@ -50,6 +50,7 @@
+         std::fill(m_decoded.begin(), m_decoded.end(), DecodedInsn{});
+         std::fill(m_scratch.begin(), m_scratch.end(), uint8_t{0});
+         m_hardware.clear();
++        unwatchCode();
+         m_allocations.clear();
+         m_heapCursor = HeapBase;
+         m_interruptStatus = 0;
+--- a/ps2xIOP/src/emulator/iop_emulator.cpp
++++ b/ps2xIOP/src/emulator/iop_emulator.cpp
+@@ -17,9 +17,13 @@
+ #include "imports/iop_vblank.h"
+ #include "iop_emulator_const.h"
+ #include "ps2x/iop/iop_host_spu2.h"
++#include "ps2x/iop/iop_native_module.h"
+ 
+ #include <algorithm>
+ #include <cctype>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
+ #include <map>
+ #include <optional>
+ #include <span>
+@@ -68,6 +72,10 @@
+ 
+     }
+ 
++    // Patch 0085: the one registered native module (process wide, read by every emulator at reset) and its counters.
++    static const IopNativeModule *g_nativeModule = nullptr;
++    static IopNativeStats g_nativeStats;
++
+     class IopEmulator::Impl final : public IopGuestExecutor
+     {
+     public:
+@@ -150,6 +158,253 @@
+             secrMcCommandHandler = {};
+             secrMcDevIdHandler = {};
+             checkKelfPathCallback = {};
++            setupNative();
++        }
++
++        // ---- native module (patch 0085) ----------------------------------------------------------------------
++        void setupNative()
++        {
++            nativeLive = false;
++            native = NativeState{};
++            memory.unwatchCode();
++            g_nativeStats = IopNativeStats{};
++            const IopNativeModule *module = g_nativeModule;
++            if (!module || !module->run || !module->entryPcs || module->codeSize == 0u || (module->codeLo & 3u) != 0u)
++                return;
++            const char *off = std::getenv("DON_IOP_NATIVE");
++            if (off && std::strcmp(off, "0") == 0)
++                return;
++            const char *verify = std::getenv("DON_IOP_NATIVE_VERIFY");
++            native.verify = verify && std::strcmp(verify, "1") == 0;
++            native.module = module;
++            native.entryBits.assign(module->codeSize / 4u, uint8_t{0});
++            for (uint32_t i = 0; i < module->numEntryPcs; ++i)
++            {
++                const uint32_t off32 = module->entryPcs[i] - module->codeLo;
++                if (off32 < module->codeSize && (off32 & 3u) == 0u)
++                    native.entryBits[off32 >> 2u] = 1;
++            }
++            if (module->resetStale)
++                module->resetStale();
++            nativeLive = true;
++        }
++
++        void disableNative(const char *reason)
++        {
++            if (native.module)
++            {
++                std::ostringstream out;
++                out << "[don-iop] native module " << native.module->name << " disabled: " << reason;
++                log(LogLevel::Warning, out.str());
++            }
++            nativeLive = false;
++            native.active = false;
++            memory.unwatchCode();
++            g_nativeStats.active = false;
++            g_nativeStats.disabled = true;
++        }
++
++        bool nativeHashMatches(const IopNativeModule &module)
++        {
++            uint64_t h = 0xCBF29CE484222325ull;
++            const std::span<const uint8_t> ram = memory.ram();
++            const uint32_t lo = module.codeLo;
++            if (lo >= ram.size() || module.codeSize > ram.size() - lo)
++                return false;
++            for (uint32_t i = 0; i < module.codeSize; ++i)
++                h = (h ^ ram[lo + i]) * 0x100000001B3ull;
++            return h == module.codeHash;
++        }
++
++        void reportNativeDifference(const IopNativeModule &module, const CpuState &pre, const CpuState &nat,
++                                    const CpuState &ref, uint32_t n, std::span<const uint8_t> natRam, uint32_t k,
++                                    uint64_t refInstructions, uint64_t refCycles, bool sameEvents, const char *stop)
++        {
++            ++g_nativeStats.verifyDifferences;
++            if (g_nativeStats.verifyDifferences > 20u)
++                return;
++            std::ostringstream out;
++            out << std::hex << "[don-iop] native verify " << module.name << ": DIFFERENCE call " << std::dec
++                << g_nativeStats.calls << std::hex << " entry pc=0x" << pre.pc << " instructions=" << std::dec << n
++                << std::hex << " pc native=0x" << nat.pc << " interpreter=0x" << ref.pc << std::dec
++                << " native instructions=" << n << " interpreter instructions=" << k << "/" << refInstructions
++                << " cycles=" << refCycles << (sameEvents ? "" : " event state changed") << (stop ? " (" : "")
++                << (stop ? stop : "") << (stop ? ")" : "") << std::hex;
++            for (uint32_t r = 0; r < 32u; ++r)
++                if (nat.gpr[r] != ref.gpr[r])
++                    out << " r" << std::dec << r << std::hex << " native=0x" << nat.gpr[r] << " interpreter=0x" << ref.gpr[r];
++            if (nat.hi != ref.hi || nat.lo != ref.lo)
++                out << " hi/lo native=0x" << nat.hi << "/0x" << nat.lo << " interpreter=0x" << ref.hi << "/0x" << ref.lo;
++            if (nat.branchPending != ref.branchPending || nat.branchTarget != ref.branchTarget)
++                out << " branch native=" << nat.branchPending << "/0x" << nat.branchTarget << " interpreter="
++                    << ref.branchPending << "/0x" << ref.branchTarget;
++            if (nat.pendingLoad != ref.pendingLoad || nat.pendingLoadReg != ref.pendingLoadReg ||
++                nat.pendingLoadValue != ref.pendingLoadValue)
++                out << " load native=" << nat.pendingLoad << "/r" << nat.pendingLoadReg << "=0x" << nat.pendingLoadValue
++                    << " interpreter=" << ref.pendingLoad << "/r" << ref.pendingLoadReg << "=0x" << ref.pendingLoadValue;
++            const std::span<const uint8_t> refRam = memory.ram();
++            unsigned shown = 0;
++            for (size_t i = 0; i + 4u <= refRam.size() && i + 4u <= natRam.size() && shown < 4u; i += 4u)
++            {
++                if (std::memcmp(refRam.data() + i, natRam.data() + i, 4u) != 0)
++                {
++                    uint32_t a = 0, b = 0;
++                    std::memcpy(&a, natRam.data() + i, 4u);
++                    std::memcpy(&b, refRam.data() + i, 4u);
++                    out << " ram[0x" << i << "] native=0x" << a << " interpreter=0x" << b;
++                    ++shown;
++                }
++            }
++            log(LogLevel::Warning, out.str());
++        }
++
++        // Verify mode: runs the native module, then replays the same stretch from the same start in the interpreter
++        // with the interpreter's own bookkeeping (tight loop of runCpu: the conditions tested between instructions,
++        // executeDecoded, schedulePendingDma, one instruction and one cycle each) and compares CPU state, the whole
++        // RAM, the instruction and cycle counts and the event state (next DMA completion, no DMA started, no
++        // callback, no interrupt deliverable, no import stub or sentinel inside the stretch). The interpreter's
++        // result is the one kept, and its replay is the only thing that advances totalInstructions/totalCycles:
++        // the caller must not count the returned value again. Returns the instructions the interpreter executed.
++        uint32_t runNativeVerified(CpuState &cpu, uint32_t budget)
++        {
++            const IopNativeModule &module = *native.module;
++            const CpuState pre = cpu;
++            const uint64_t preCycles = totalCycles;
++            const uint64_t preInstructions = totalInstructions;
++            const uint64_t preNextDma = nextDmaCycle;
++            {
++                const std::span<const uint8_t> ram = memory.ram();
++                native.preRam.assign(ram.begin(), ram.end());
++            }
++            const uint32_t n = module.run(cpu, memory, budget);
++            const CpuState nat = cpu;
++            {
++                const std::span<const uint8_t> ram = memory.ram();
++                native.natRam.assign(ram.begin(), ram.end());
++            }
++            cpu = pre;
++            memory.restoreRamRaw(native.preRam);
++            uint32_t k = 0;
++            const char *stop = nullptr;
++            for (; k < n; ++k)
++            {
++                if (totalCycles >= nextDmaCycle || !pendingGuestCallbacks.empty())
++                {
++                    stop = "a DMA completion or guest callback was due inside the stretch";
++                    break;
++                }
++                const uint32_t pc = cpu.pc;
++                if (pc == kThreadReturnSentinel || pc == kCallReturnSentinel)
++                {
++                    stop = "the stretch ran into a return sentinel";
++                    break;
++                }
++                const IopMemory::DecodedInsn *decodedInsn = memory.decoded(pc);
++                if (!decodedInsn)
++                {
++                    stop = "the stretch left RAM";
++                    break;
++                }
++                if (decodedInsn->word == 0x03E00008u && imports.decode(pc))
++                {
++                    stop = "the stretch ran through an import stub";
++                    break;
++                }
++                if ((cpu.cop0[12] & 3u) == 1u && memory.interruptControl() != 0u &&
++                    (memory.interruptStatus() & memory.interruptMask()) != 0u)
++                {
++                    stop = "an interrupt was deliverable inside the stretch";
++                    break;
++                }
++                const bool running = cpuCore.executeDecoded(cpu, *decodedInsn);
++                schedulePendingDma();
++                ++totalInstructions;
++                ++totalCycles;
++                if (!running)
++                {
++                    ++k;
++                    stop = "the interpreter stopped";
++                    break;
++                }
++            }
++            const bool sameCpu = nat.gpr == cpu.gpr && nat.hi == cpu.hi && nat.lo == cpu.lo && nat.pc == cpu.pc &&
++                                 nat.cop0 == cpu.cop0 && nat.branchPending == cpu.branchPending &&
++                                 (!nat.branchPending || nat.branchTarget == cpu.branchTarget) &&
++                                 nat.pendingLoad == cpu.pendingLoad &&
++                                 (!nat.pendingLoad || (nat.pendingLoadReg == cpu.pendingLoadReg && nat.pendingLoadValue == cpu.pendingLoadValue)) &&
++                                 nat.stopped == cpu.stopped && nat.yielded == cpu.yielded && nat.exception == cpu.exception;
++            const std::span<const uint8_t> refRam = memory.ram();
++            const bool sameRam = refRam.size() == native.natRam.size() &&
++                                 std::memcmp(refRam.data(), native.natRam.data(), refRam.size()) == 0;
++            const bool sameCounts = k == n && totalInstructions - preInstructions == n && totalCycles - preCycles == n;
++            const bool sameEvents = nextDmaCycle == preNextDma && !memory.dmaStartPending() && pendingGuestCallbacks.empty();
++            if (!sameCpu || !sameRam || !sameCounts || !sameEvents || stop)
++                reportNativeDifference(module, pre, nat, cpu, n, native.natRam, k, totalInstructions - preInstructions,
++                                       totalCycles - preCycles, sameEvents, stop);
++            if (((g_nativeStats.calls + 1u) & 0xFFFFu) == 0u)
++            {
++                std::ostringstream out;
++                out << "[don-iop] native verify " << module.name << ": " << (g_nativeStats.calls + 1u) << " calls, "
++                    << (g_nativeStats.instructions + k) << " instructions, " << g_nativeStats.verifyDifferences
++                    << " differences";
++                log(LogLevel::Info, out.str());
++            }
++            return k;
++        }
++
++        // 0: not taken (the interpreter goes on), 1: ran native code, 2: an interrupt was taken instead (no
++        // instruction consumed, as in step()). The caller has checked totalCycles < nextDmaCycle and that no guest
++        // callback is queued; `left` is what remains of the slice.
++        int tryNative(CpuState &cpu, uint64_t left, bool interruptChecked)
++        {
++            const IopNativeModule &module = *native.module;
++            const uint32_t off = cpu.pc - module.codeLo;
++            if (off >= module.codeSize || (off & 3u) != 0u || native.entryBits[off >> 2u] == 0u)
++                return 0;
++            if (cpu.branchPending || cpu.pendingLoad)
++                return 0;
++            if (!native.active)
++            {
++                if (!nativeHashMatches(module))
++                {
++                    disableNative("code hash differs from the translated one");
++                    return 0;
++                }
++                native.active = true;
++                memory.watchCode(module.codeLo, module.codeSize);
++                g_nativeStats.active = true;
++                std::ostringstream out;
++                out << "[don-iop] native module " << module.name << " active (" << module.numEntryPcs
++                    << " entry points" << (native.verify ? ", verify" : "") << ")";
++                log(LogLevel::Info, out.str());
++            }
++            if (memory.codeWatchHit())
++            {
++                disableNative("its code was written");
++                return 0;
++            }
++            if (!interruptChecked && checkInterrupt(cpu))
++                return 2;
++            uint64_t budget = left;
++            if (nextDmaCycle != kNoDmaCycle)
++                budget = std::min(budget, nextDmaCycle - totalCycles);
++            budget = std::min<uint64_t>(budget, 0xFFFFFFFFu);
++            if (budget == 0u)
++                return 0;
++            const uint32_t n = native.verify ? runNativeVerified(cpu, static_cast<uint32_t>(budget))
++                                             : module.run(cpu, memory, static_cast<uint32_t>(budget));
++            if ((module.stale && module.stale()) || memory.codeWatchHit())
++                disableNative("its code was written");
++            if (n == 0u)
++                return 0;
++            if (!native.verify) // verify mode: the interpreter's replay has counted them already
++            {
++                totalInstructions += n;
++                totalCycles += n;
++            }
++            ++g_nativeStats.calls;
++            g_nativeStats.instructions += n;
++            return 1;
+         }
+ 
+         uint8_t read8(uint32_t address) const
+@@ -492,6 +747,25 @@
+             const uint64_t start = totalInstructions;
+             while (!cpu.stopped && !cpu.yielded && totalInstructions - start < instructionBudget)
+             {
++                if (nativeLive && totalCycles < nextDmaCycle && pendingGuestCallbacks.empty())
++                {
++                    const int native = tryNative(cpu, instructionBudget - (totalInstructions - start), false);
++                    if (native != 0)
++                    {
++                        // After a native stretch the interpreter's own order holds: the stretch was clamped to the
++                        // next DMA completion, so it may be due now and is serviced here, before the next
++                        // instruction, exactly where the end of the tight loop below services it. (A plain
++                        // `continue` ran one more instruction first: the completion came one cycle late.)
++                        if (native == 1)
++                        {
++                            if (totalCycles >= nextDmaCycle && !servicingDmaInterrupts)
++                                servicePendingDmaInterrupts();
++                            if (!servicingGuestCallbacks && !pendingGuestCallbacks.empty())
++                                servicePendingGuestCallbacks();
++                        }
++                        continue;
++                    }
++                }
+                 if (!step(cpu))
+                     break;
+                 // Tight loop: while nothing is due, run the instructions of an ordinary stretch without the
+@@ -513,6 +787,8 @@
+                         break;
+                     if (checkInterrupt(cpu))
+                         continue; // as step(): taking the interrupt costs no instruction or cycle
++                    if (nativeLive && tryNative(cpu, instructionBudget - (totalInstructions - start), true) != 0)
++                        continue;
+                     tightRunning = cpuCore.executeDecoded(cpu, *decodedInsn);
+                     schedulePendingDma();
+                     ++totalInstructions;
+@@ -840,6 +1116,17 @@
+             return true;
+         }
+ 
++        struct NativeState
++        {
++            const IopNativeModule *module = nullptr;
++            std::vector<uint8_t> entryBits; // one per code word
++            bool active = false;            // hash checked and accepted, code watched
++            bool verify = false;
++            std::vector<uint8_t> preRam, natRam; // verify mode scratch
++        };
++        NativeState native;
++        bool nativeLive = false; // a module is registered and not disabled
++
+         IopHost &host;
+         IopMemory memory;
+         IopSysmem sysmem;
+@@ -995,3 +1282,16 @@
+     }
+ 
+ }
++
++namespace ps2x::iop
++{
++    void registerNativeModule(const IopNativeModule *module)
++    {
++        detail::g_nativeModule = module;
++    }
++
++    IopNativeStats nativeModuleStats()
++    {
++        return detail::g_nativeStats;
++    }
++}
+--- /dev/null
++++ b/ps2xIOP/include/ps2x/iop/iop_native_module.h
+@@ -0,0 +1,46 @@
++#pragma once
++
++#include <cstdint>
++
++// One ahead-of-time translated IOP module (patch 0085). The emulator calls `run` instead of interpreting when the
++// guest reaches one of `entryPcs` and nothing prevents it (no branch or load pending, no interrupt deliverable).
++// `run` returns the number of instructions it executed, which are also its cycles, never more than `budget`, and
++// leaves the CPU exactly as the interpreter would after that many instructions (see tools/iop_recomp/emit_adxi.py).
++//   DON_IOP_NATIVE=0           the module is never used
++//   DON_IOP_NATIVE_VERIFY=1    every native stretch is replayed by the interpreter and compared; differences are
++//                              reported as `[don-iop] native verify ...` and the interpreter's result is kept
++namespace ps2x::iop
++{
++    namespace detail
++    {
++        struct IopCpuState;
++        class IopMemory;
++    }
++
++    struct IopNativeModule
++    {
++        const char *name = "";
++        uint32_t codeLo = 0;   // guest address of the first translated word
++        uint32_t codeSize = 0; // bytes
++        uint64_t codeHash = 0; // FNV-1a (64 bit) of the code bytes, checked once before first use
++        const uint32_t *entryPcs = nullptr;
++        uint32_t numEntryPcs = 0;
++        uint32_t (*run)(detail::IopCpuState &, detail::IopMemory &, uint32_t budget) = nullptr;
++        bool (*stale)() = nullptr;      // optional: true after a store into the code was handed to the interpreter
++        void (*resetStale)() = nullptr; // optional
++    };
++
++    struct IopNativeStats
++    {
++        uint64_t calls = 0;        // run() calls that executed at least one instruction
++        uint64_t instructions = 0; // instructions executed natively
++        uint64_t verifyDifferences = 0;
++        bool active = false; // registered, hash accepted and not disabled
++        bool disabled = false;
++    };
++
++    // Registers the module for every emulator created or reset afterwards (one module; a second call replaces it).
++    // The pointed-to descriptor must outlive the emulator. Pass nullptr to unregister.
++    void registerNativeModule(const IopNativeModule *module);
++    [[nodiscard]] IopNativeStats nativeModuleStats();
++}
+--- /dev/null
++++ b/ps2xIOP/tests/iop_native_module_tests.cpp
+@@ -0,0 +1,203 @@
++// Mechanics of the native-module hook (patch 0085) with a hand-written "translated" module over a tiny synthetic
++// program: the same result and instruction count as the interpreter, the hash guard, the disable-on-write rule,
++// DON_IOP_NATIVE=0 and the verify mode. The real translator is tested by tests/test_iop_emit.py in the DON repository.
++#include "iop_compat_test_support.h"
++
++#include "core/iop_cpu.h"
++#include "core/iop_memory.h"
++#include "ps2x/iop/iop_native_module.h"
++
++#include <cstdlib>
++#include <iostream>
++
++namespace
++{
++    using namespace ps2x::iop;
++    using ps2x::iop::detail::IopCpuState;
++    using ps2x::iop::detail::IopMemory;
++
++    constexpr uint32_t kBase = 0x10000u;
++    constexpr uint32_t kEntry = kBase + 4u;
++    constexpr uint32_t kWords[] = {
++        0x24020000u, // 10000 addiu v0, zero, 0
++        0x24420001u, // 10004 addiu v0, v0, 1   <- native entry
++        0x24420001u, // 10008 addiu v0, v0, 1
++        0x24420001u, // 1000c addiu v0, v0, 1
++        0x24420001u, // 10010 addiu v0, v0, 1
++        0x03E00008u, // 10014 jr ra
++        0x00000000u, // 10018 nop
++    };
++    constexpr uint32_t kCodeBytes = sizeof(kWords);
++
++    uint64_t fnv(const uint32_t *words, size_t count)
++    {
++        uint64_t h = 0xCBF29CE484222325ull;
++        for (size_t i = 0; i < count; ++i)
++            for (int b = 0; b < 4; ++b)
++                h = (h ^ ((words[i] >> (8 * b)) & 0xFFu)) * 0x100000001B3ull;
++        return h;
++    }
++
++    uint32_t runGood(IopCpuState &cpu, IopMemory &, uint32_t budget)
++    {
++        if (cpu.pc != kEntry || cpu.branchPending || cpu.pendingLoad || budget < 4u)
++            return 0u;
++        cpu.gpr[2] += 4u;
++        cpu.pc = kBase + 0x14u;
++        return 4u;
++    }
++
++    uint32_t runBad(IopCpuState &cpu, IopMemory &mem, uint32_t budget)
++    {
++        const uint32_t n = runGood(cpu, mem, budget);
++        if (n != 0u)
++            cpu.gpr[2] += 1u; // a wrong result
++        return n;
++    }
++
++    const uint32_t kEntries[] = {kEntry};
++
++    IopNativeModule module(uint32_t (*run)(IopCpuState &, IopMemory &, uint32_t), bool goodHash = true)
++    {
++        IopNativeModule m;
++        m.name = "synthetic";
++        m.codeLo = kBase;
++        m.codeSize = kCodeBytes;
++        m.codeHash = fnv(kWords, kCodeBytes / 4u) ^ (goodHash ? 0ull : 1ull);
++        m.entryPcs = kEntries;
++        m.numEntryPcs = 1;
++        m.run = run;
++        return m;
++    }
++
++    void setEnv(const char *name, const char *value)
++    {
++#ifdef _WIN32
++        _putenv_s(name, value ? value : "");
++#else
++        if (value)
++            setenv(name, value, 1);
++        else
++            unsetenv(name);
++#endif
++    }
++
++    struct Outcome
++    {
++        int32_t start = 0;
++        uint64_t instructions = 0;
++        IopNativeStats stats;
++        bool logged = false;
++    };
++
++    // Loads the program as an IRX (it runs as the module's start function) and returns what happened.
++    Outcome load(IopSubsystem &iop, iop_test::Host &host)
++    {
++        iop_test::Irx image;
++        image.words(0u, {kWords[0], kWords[1], kWords[2], kWords[3], kWords[4], kWords[5], kWords[6]});
++        image.install(host);
++        const uint64_t before = iop.debugSnapshot().emulatorInstructions;
++        const ModuleLoadResult r = iop.loadModuleBuffer(0x1000u);
++        Outcome o;
++        o.start = r.startResult;
++        o.instructions = iop.debugSnapshot().emulatorInstructions - before;
++        o.stats = nativeModuleStats();
++        for (const std::string &line : host.logs)
++            if (line.find("[don-iop] native") != std::string::npos)
++                o.logged = true;
++        return o;
++    }
++
++    int failures = 0;
++    void expect(bool ok, const char *what)
++    {
++        if (!ok)
++        {
++            std::cerr << "FAIL: " << what << "\n";
++            ++failures;
++        }
++    }
++}
++
++int main()
++{
++    // Baseline: no module registered.
++    registerNativeModule(nullptr);
++    uint64_t baseline = 0;
++    {
++        iop_test::Host host;
++        IopSubsystem iop(host);
++        const Outcome o = load(iop, host);
++        expect(o.start == 4, "baseline start result");
++        expect(o.stats.calls == 0 && !o.stats.active, "no module: no native calls");
++        baseline = o.instructions;
++    }
++
++    const IopNativeModule good = module(runGood);
++    {
++        registerNativeModule(&good);
++        iop_test::Host host;
++        IopSubsystem iop(host);
++        const Outcome o = load(iop, host);
++        expect(o.start == 4, "native: same start result");
++        expect(o.instructions == baseline, "native: same instruction count as the interpreter");
++        expect(o.stats.active && !o.stats.disabled, "native: module active");
++        expect(o.stats.calls == 1 && o.stats.instructions == 4, "native: run() executed the 4 instructions once");
++        expect(o.logged, "native: activation is logged");
++
++        // Overwriting the code (the same program loaded again) disables the module for good.
++        const Outcome again = load(iop, host);
++        expect(again.start == 4 && again.instructions == baseline, "after a write: same result and count");
++        expect(again.stats.disabled && !again.stats.active, "a write into the code disables the module");
++        expect(again.stats.instructions == 4, "no native instruction after the write");
++    }
++    {
++        const IopNativeModule wrongHash = module(runGood, false);
++        registerNativeModule(&wrongHash);
++        iop_test::Host host;
++        IopSubsystem iop(host);
++        const Outcome o = load(iop, host);
++        expect(o.start == 4 && o.instructions == baseline, "wrong hash: interpreter result");
++        expect(o.stats.disabled && o.stats.calls == 0, "wrong hash: module disabled, never run");
++    }
++    {
++        registerNativeModule(&good);
++        setEnv("DON_IOP_NATIVE", "0");
++        iop_test::Host host;
++        IopSubsystem iop(host);
++        const Outcome o = load(iop, host);
++        expect(o.start == 4 && o.instructions == baseline, "DON_IOP_NATIVE=0: interpreter result");
++        expect(!o.stats.active && o.stats.calls == 0, "DON_IOP_NATIVE=0: module not used");
++        setEnv("DON_IOP_NATIVE", nullptr);
++    }
++    {
++        setEnv("DON_IOP_NATIVE_VERIFY", "1");
++        registerNativeModule(&good);
++        {
++            iop_test::Host host;
++            IopSubsystem iop(host);
++            const Outcome o = load(iop, host);
++            expect(o.start == 4 && o.instructions == baseline, "verify, correct module: result");
++            expect(o.stats.calls == 1 && o.stats.verifyDifferences == 0, "verify, correct module: no difference");
++        }
++        const IopNativeModule bad = module(runBad);
++        registerNativeModule(&bad);
++        {
++            iop_test::Host host;
++            IopSubsystem iop(host);
++            const Outcome o = load(iop, host);
++            expect(o.start == 4, "verify, wrong module: the interpreter's result is kept");
++            expect(o.stats.verifyDifferences == 1, "verify, wrong module: the difference is counted");
++            bool printed = false;
++            for (const std::string &line : host.logs)
++                if (line.find("[don-iop] native verify") != std::string::npos && line.find("DIFFERENCE") != std::string::npos)
++                    printed = true;
++            expect(printed, "verify, wrong module: the difference is reported");
++        }
++        setEnv("DON_IOP_NATIVE_VERIFY", nullptr);
++    }
++    registerNativeModule(nullptr);
++    if (failures == 0)
++        std::cout << "iop native module tests passed\n";
++    return failures == 0 ? 0 : 1;
++}

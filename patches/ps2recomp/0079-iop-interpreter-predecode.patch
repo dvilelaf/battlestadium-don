@@ -1,0 +1,627 @@
+Patch 0079: the IOP interpreter pre-decodes its instructions.
+What: (1) IopMemory keeps a table of pre-decoded instructions for main RAM, one entry per word, filled on first
+execution and invalidated by markOwned() (every RAM write: guest stores, module loads, SIF/SPU2 DMA, zeroing)
+and reset(); (2) executeDecoded() runs from the entry and dispatches with one flat switch on the handler index
+(64+funct SPECIAL, 128+rt REGIMM, 192+rs COP0) instead of nested switches, bodies unchanged; (3) read/write 8/16/32
+hit main RAM inline (one range check on the masked address) and fall back to the *Slow generic path for
+everything else; (4) runCpu runs ordinary stretches in a tight loop that leaves to the general step() as soon as a
+DMA completion cycle, a guest callback, an interrupt, a sentinel/non-RAM pc or a `jr ra` is at hand, so events
+happen at the same cycles.
+Verified: linux-dev build only so far (no state-hash or timing run yet).
+Original to this project.
+
+--- a/ps2xIOP/src/emulator/core/iop_memory.h
++++ b/ps2xIOP/src/emulator/core/iop_memory.h
+@@ -1,7 +1,9 @@
+ #pragma once
+ 
++#include <algorithm>
+ #include <cstddef>
+ #include <cstdint>
++#include <cstring>
+ #include <optional>
+ #include <span>
+ #include <string>
+@@ -43,12 +45,20 @@
+ 
+         void reset();
+ 
+-        [[nodiscard]] uint8_t read8(uint32_t address) const;
+-        [[nodiscard]] uint16_t read16(uint32_t address) const;
+-        [[nodiscard]] uint32_t read32(uint32_t address) const;
+-        void write8(uint32_t address, uint8_t value);
+-        void write16(uint32_t address, uint16_t value);
+-        void write32(uint32_t address, uint32_t value);
++        // RAM hits are inline (one range check on the masked address); everything else - scratchpad, hardware
++        // registers, the SIF window, SPU2, unaligned or straddling accesses - takes the *Slow generic path.
++        [[nodiscard]] inline uint8_t read8(uint32_t address) const;
++        [[nodiscard]] uint8_t read8Slow(uint32_t address) const;
++        [[nodiscard]] inline uint16_t read16(uint32_t address) const;
++        [[nodiscard]] uint16_t read16Slow(uint32_t address) const;
++        [[nodiscard]] inline uint32_t read32(uint32_t address) const;
++        [[nodiscard]] uint32_t read32Slow(uint32_t address) const;
++        inline void write8(uint32_t address, uint8_t value);
++        void write8Slow(uint32_t address, uint8_t value);
++        inline void write16(uint32_t address, uint16_t value);
++        void write16Slow(uint32_t address, uint16_t value);
++        inline void write32(uint32_t address, uint32_t value);
++        void write32Slow(uint32_t address, uint32_t value);
+ 
+         [[nodiscard]] bool readRam(uint32_t address, void *destination, size_t size) const;
+         [[nodiscard]] bool writeRam(uint32_t address, const void *source, size_t size);
+@@ -80,17 +90,38 @@
+         // moves MADR to the end of the transfer. Returns false if the guest had already cleared TR (no interrupt).
+         [[nodiscard]] bool completeSpu2Dma(int core);
+ 
+-        [[nodiscard]] static uint32_t physicalAddress(uint32_t address) noexcept;
++        [[nodiscard]] static constexpr uint32_t physicalAddress(uint32_t address) noexcept { return address & 0x1FFFFFFFu; }
++
++        // Pre-decoded instruction table for main RAM: one entry per 4-byte word, filled lazily by decoded() the
++        // first time a word is asked for, and invalidated for the affected words by every RAM write (the single
++        // point is markOwned(): guest stores, module loads, SIF/SPU2 DMA, zeroing) and by reset(). Not used by
++        // the executor yet. `handler` is a dense index: the opcode (0..63) for most instructions, 64 + funct for
++        // SPECIAL, 128 + rt for REGIMM, 192 + rs for COP0.
++        struct DecodedInsn
++        {
++            uint32_t word = 0;
++            uint16_t handler = 0;
++            uint8_t rs = 0;
++            uint8_t rt = 0;
++            uint8_t rd = 0;
++            uint8_t sa = 0;
++            uint8_t funct = 0;
++            uint8_t valid = 0;
++        };
++        // address: any IOP address that maps to main RAM (word aligned); nullptr otherwise.
++        [[nodiscard]] const DecodedInsn *decoded(uint32_t address);
+ 
+     private:
+         [[nodiscard]] uint32_t readHardware32(uint32_t address) const;
+         void writeHardware32(uint32_t address, uint32_t value);
+-        void markOwned(uint32_t address, size_t size);
++        inline void markOwned(uint32_t address, size_t size);
+         [[nodiscard]] static bool isHostSpu2Register(uint32_t phys) noexcept;
+         void startSpu2Dma(uint32_t chcrAddress, uint32_t chcr);
+ 
+         std::vector<uint8_t> m_ram;
+         std::vector<uint8_t> m_owned;
++        std::vector<DecodedInsn> m_decoded; // RamSize / 4 entries; valid == 0 until decoded()
++        inline void invalidateDecoded(uint32_t phys, size_t size) noexcept;
+         std::vector<uint8_t> m_scratch;
+         std::unordered_map<uint32_t, uint32_t> m_hardware;
+         std::vector<Allocation> m_allocations;
+@@ -104,4 +135,90 @@
+         std::optional<DmaStart> m_dmaStart;
+         uint32_t m_spu2DmaEnd[2] = {};
+     };
++
++    inline void IopMemory::invalidateDecoded(uint32_t phys, size_t size) noexcept
++    {
++        if (size == 0u || m_decoded.empty())
++            return;
++        const size_t first = phys >> 2u;
++        const size_t last = (static_cast<size_t>(phys) + size - 1u) >> 2u;
++        for (size_t i = first; i <= last && i < m_decoded.size(); ++i)
++            m_decoded[i].valid = 0;
++    }
++
++    inline void IopMemory::markOwned(uint32_t address, size_t size)
++    {
++        if (address > RamSize || size > RamSize - address)
++            return;
++        std::fill(m_owned.begin() + address, m_owned.begin() + address + size, uint8_t{1});
++        invalidateDecoded(address, size);
++    }
++
++    inline uint8_t IopMemory::read8(uint32_t address) const
++    {
++        const uint32_t phys = physicalAddress(address);
++        if (phys < RamSize)
++            return m_ram[phys];
++        return read8Slow(address);
++    }
++
++    inline uint16_t IopMemory::read16(uint32_t address) const
++    {
++        const uint32_t phys = physicalAddress(address);
++        if (phys + 1u < RamSize)
++        {
++            uint16_t value;
++            std::memcpy(&value, m_ram.data() + phys, sizeof(value));
++            return value;
++        }
++        return read16Slow(address);
++    }
++
++    inline uint32_t IopMemory::read32(uint32_t address) const
++    {
++        const uint32_t phys = physicalAddress(address);
++        if ((phys & 3u) == 0u && phys + 3u < RamSize)
++        {
++            uint32_t value;
++            std::memcpy(&value, m_ram.data() + phys, sizeof(value));
++            return value;
++        }
++        return read32Slow(address);
++    }
++
++    inline void IopMemory::write8(uint32_t address, uint8_t value)
++    {
++        const uint32_t phys = physicalAddress(address);
++        if (phys < RamSize)
++        {
++            m_ram[phys] = value;
++            markOwned(phys, sizeof(value));
++            return;
++        }
++        write8Slow(address, value);
++    }
++
++    inline void IopMemory::write16(uint32_t address, uint16_t value)
++    {
++        const uint32_t phys = physicalAddress(address);
++        if (phys + 1u < RamSize)
++        {
++            std::memcpy(m_ram.data() + phys, &value, sizeof(value));
++            markOwned(phys, sizeof(value));
++            return;
++        }
++        write16Slow(address, value);
++    }
++
++    inline void IopMemory::write32(uint32_t address, uint32_t value)
++    {
++        const uint32_t phys = physicalAddress(address);
++        if ((phys & 3u) == 0u && phys + 3u < RamSize)
++        {
++            std::memcpy(m_ram.data() + phys, &value, sizeof(value));
++            markOwned(phys, sizeof(value));
++            return;
++        }
++        write32Slow(address, value);
++    }
+ }
+--- a/ps2xIOP/src/emulator/core/iop_memory.cpp
++++ b/ps2xIOP/src/emulator/core/iop_memory.cpp
+@@ -38,7 +38,7 @@
+     }
+ 
+     IopMemory::IopMemory()
+-        : m_ram(RamSize), m_owned(RamSize), m_scratch(ScratchSize)
++        : m_ram(RamSize), m_owned(RamSize), m_decoded(RamSize / 4u), m_scratch(ScratchSize)
+     {
+         reset();
+     }
+@@ -47,6 +47,7 @@
+     {
+         std::fill(m_ram.begin(), m_ram.end(), uint8_t{0});
+         std::fill(m_owned.begin(), m_owned.end(), uint8_t{0});
++        std::fill(m_decoded.begin(), m_decoded.end(), DecodedInsn{});
+         std::fill(m_scratch.begin(), m_scratch.end(), uint8_t{0});
+         m_hardware.clear();
+         m_allocations.clear();
+@@ -57,12 +58,7 @@
+         m_dmaStart.reset();
+     }
+ 
+-    uint32_t IopMemory::physicalAddress(uint32_t address) noexcept
+-    {
+-        return address & 0x1FFFFFFFu;
+-    }
+-
+-    uint8_t IopMemory::read8(uint32_t address) const
++    uint8_t IopMemory::read8Slow(uint32_t address) const
+     {
+         const uint32_t phys = physicalAddress(address);
+         if (phys < RamSize)
+@@ -75,7 +71,7 @@
+         return static_cast<uint8_t>(value >> ((phys & 3u) * 8u));
+     }
+ 
+-    uint16_t IopMemory::read16(uint32_t address) const
++    uint16_t IopMemory::read16Slow(uint32_t address) const
+     {
+         const uint32_t phys = physicalAddress(address);
+         if (phys + 1u < RamSize)
+@@ -89,7 +85,7 @@
+         return static_cast<uint16_t>(read8(address) | (static_cast<uint16_t>(read8(address + 1u)) << 8u));
+     }
+ 
+-    uint32_t IopMemory::read32(uint32_t address) const
++    uint32_t IopMemory::read32Slow(uint32_t address) const
+     {
+         const uint32_t phys = physicalAddress(address);
+         if ((phys & 3u) == 0u && phys + 3u < RamSize)
+@@ -118,7 +114,7 @@
+                (static_cast<uint32_t>(read8(address + 3u)) << 24u);
+     }
+ 
+-    void IopMemory::write8(uint32_t address, uint8_t value)
++    void IopMemory::write8Slow(uint32_t address, uint8_t value)
+     {
+         const uint32_t phys = physicalAddress(address);
+         if (phys < RamSize)
+@@ -148,7 +144,7 @@
+         writeHardware32(aligned, current);
+     }
+ 
+-    void IopMemory::write16(uint32_t address, uint16_t value)
++    void IopMemory::write16Slow(uint32_t address, uint16_t value)
+     {
+         const uint32_t phys = physicalAddress(address);
+         if (phys + 1u < RamSize)
+@@ -166,7 +162,7 @@
+         write8(address + 1u, static_cast<uint8_t>(value >> 8u));
+     }
+ 
+-    void IopMemory::write32(uint32_t address, uint32_t value)
++    void IopMemory::write32Slow(uint32_t address, uint32_t value)
+     {
+         const uint32_t phys = physicalAddress(address);
+         if ((phys & 3u) == 0u && phys + 3u < RamSize)
+@@ -243,11 +239,30 @@
+                            { return value != 0u; });
+     }
+ 
+-    void IopMemory::markOwned(uint32_t address, size_t size)
++    const IopMemory::DecodedInsn *IopMemory::decoded(uint32_t address)
+     {
+-        if (address > RamSize || size > RamSize - address)
+-            return;
+-        std::fill(m_owned.begin() + address, m_owned.begin() + address + size, uint8_t{1});
++        const uint32_t phys = physicalAddress(address);
++        if ((phys & 3u) != 0u || phys + 3u >= RamSize)
++            return nullptr;
++        DecodedInsn &d = m_decoded[phys >> 2u];
++        if (d.valid == 0u)
++        {
++            uint32_t w;
++            std::memcpy(&w, m_ram.data() + phys, sizeof(w));
++            d.word = w;
++            const uint32_t op = w >> 26u;
++            d.rs = static_cast<uint8_t>((w >> 21u) & 31u);
++            d.rt = static_cast<uint8_t>((w >> 16u) & 31u);
++            d.rd = static_cast<uint8_t>((w >> 11u) & 31u);
++            d.sa = static_cast<uint8_t>((w >> 6u) & 31u);
++            d.funct = static_cast<uint8_t>(w & 63u);
++            d.handler = static_cast<uint16_t>(op == 0u ? 64u + d.funct
++                                              : op == 1u ? 128u + d.rt
++                                              : op == 0x10u ? 192u + d.rs
++                                                            : op);
++            d.valid = 1;
++        }
++        return &d;
+     }
+ 
+     bool IopMemory::isHardwareAddress(uint32_t address) const
+--- a/ps2xIOP/src/emulator/core/iop_cpu.h
++++ b/ps2xIOP/src/emulator/core/iop_cpu.h
+@@ -1,5 +1,7 @@
+ #pragma once
+ 
++#include "iop_memory.h"
++
+ #include <array>
+ #include <cstdint>
+ #include <optional>
+@@ -33,6 +35,8 @@
+         [[nodiscard]] bool executeInstruction(IopCpuState &cpu);
+         // Same, with the word at cpu.pc already fetched by the caller.
+         [[nodiscard]] bool executeInstruction(IopCpuState &cpu, uint32_t instruction);
++        // The executor proper: the word and its register fields come pre-decoded (IopMemory::decoded()).
++        [[nodiscard]] bool executeDecoded(IopCpuState &cpu, const IopMemory::DecodedInsn &decodedInsn);
+         void raiseException(IopCpuState &cpu, uint32_t code, uint32_t faultPc, bool delaySlot, std::optional<uint32_t> badAddress = std::nullopt) const;
+ 
+     private:
+--- a/ps2xIOP/src/emulator/core/iop_cpu.cpp
++++ b/ps2xIOP/src/emulator/core/iop_cpu.cpp
+@@ -54,11 +54,25 @@
+ 
+     bool IopCpuCore::executeInstruction(IopCpuState &cpu)
+     {
++        if (const IopMemory::DecodedInsn *d = m_memory.decoded(cpu.pc))
++            return executeDecoded(cpu, *d);
+         return executeInstruction(cpu, m_memory.read32(cpu.pc));
+     }
+ 
+     bool IopCpuCore::executeInstruction(IopCpuState &cpu, uint32_t instruction)
+     {
++        IopMemory::DecodedInsn d;
++        d.word = instruction;
++        d.rs = static_cast<uint8_t>((instruction >> 21u) & 31u);
++        d.rt = static_cast<uint8_t>((instruction >> 16u) & 31u);
++        d.rd = static_cast<uint8_t>((instruction >> 11u) & 31u);
++        d.sa = static_cast<uint8_t>((instruction >> 6u) & 31u);
++        d.funct = static_cast<uint8_t>(instruction & 63u);
++        return executeDecoded(cpu, d);
++    }
++
++    bool IopCpuCore::executeDecoded(IopCpuState &cpu, const IopMemory::DecodedInsn &decodedInsn)
++    {
+         const uint32_t pc = cpu.pc;
+         const bool wasDelaySlot = cpu.branchPending;
+         const uint32_t priorBranchTarget = cpu.branchTarget;
+@@ -67,12 +81,13 @@
+         cpu.exception = false;
+         cpu.yielded = false;
+ 
++        const uint32_t instruction = decodedInsn.word;
+         const uint32_t opcode = instruction >> 26u;
+-        const uint32_t rs = (instruction >> 21u) & 31u;
+-        const uint32_t rt = (instruction >> 16u) & 31u;
+-        const uint32_t rd = (instruction >> 11u) & 31u;
+-        const uint32_t sa = (instruction >> 6u) & 31u;
+-        const uint32_t funct = instruction & 63u;
++        const uint32_t rs = decodedInsn.rs;
++        const uint32_t rt = decodedInsn.rt;
++        const uint32_t rd = decodedInsn.rd;
++        const uint32_t sa = decodedInsn.sa;
++        const uint32_t funct = decodedInsn.funct;
+         const uint32_t imm = instruction & 0xFFFFu;
+         const int32_t simm = static_cast<int16_t>(imm);
+         const uint32_t nextPc = pc + 4u;
+@@ -118,71 +133,68 @@
+         };
+ 
+         // TODO kill this magic number and make it a constant somewhere
+-        switch (opcode)
++        switch (decodedInsn.handler)
+         {
+-        case 0x00:
+-            switch (funct)
+-            {
+-            case 0x00:
++        case 64u + 0x00:
+                 write(rd, cpu.gpr[rt] << sa);
+                 break;
+-            case 0x02:
++        case 64u + 0x02:
+                 write(rd, cpu.gpr[rt] >> sa);
+                 break;
+-            case 0x03:
++        case 64u + 0x03:
+                 write(rd, static_cast<uint32_t>(static_cast<int32_t>(cpu.gpr[rt]) >> sa));
+                 break;
+-            case 0x04:
++        case 64u + 0x04:
+                 write(rd, cpu.gpr[rt] << (cpu.gpr[rs] & 31u));
+                 break;
+-            case 0x06:
++        case 64u + 0x06:
+                 write(rd, cpu.gpr[rt] >> (cpu.gpr[rs] & 31u));
+                 break;
+-            case 0x07:
++        case 64u + 0x07:
+                 write(rd, static_cast<uint32_t>(static_cast<int32_t>(cpu.gpr[rt]) >> (cpu.gpr[rs] & 31u)));
+                 break;
+-            case 0x08:
++        case 64u + 0x08:
+                 newBranch = true;
+                 newBranchTarget = cpu.gpr[rs];
+                 break;
+-            case 0x09:
++        case 64u + 0x09:
+                 write(rd ? rd : 31u, pc + 8u);
+                 newBranch = true;
+                 newBranchTarget = cpu.gpr[rs];
+                 break;
+-            case 0x0C:
++        case 64u + 0x0C:
+                 raiseException(cpu, 8u, pc, wasDelaySlot);
+                 break;
+-            case 0x0D:
++        case 64u + 0x0D:
+                 raiseException(cpu, 9u, pc, wasDelaySlot);
+                 break;
+-            case 0x10:
++        case 64u + 0x10:
+                 write(rd, cpu.hi);
+                 break;
+-            case 0x11:
++        case 64u + 0x11:
+                 cpu.hi = cpu.gpr[rs];
+                 break;
+-            case 0x12:
++        case 64u + 0x12:
+                 write(rd, cpu.lo);
+                 break;
+-            case 0x13:
++        case 64u + 0x13:
+                 cpu.lo = cpu.gpr[rs];
+                 break;
+-            case 0x18:
++        case 64u + 0x18:
+             {
+                 const int64_t result = static_cast<int64_t>(static_cast<int32_t>(cpu.gpr[rs])) * static_cast<int64_t>(static_cast<int32_t>(cpu.gpr[rt]));
+                 cpu.lo = static_cast<uint32_t>(result);
+                 cpu.hi = static_cast<uint32_t>(static_cast<uint64_t>(result) >> 32u);
+                 break;
+             }
+-            case 0x19:
++        case 64u + 0x19:
+             {
+                 const uint64_t result = static_cast<uint64_t>(cpu.gpr[rs]) * cpu.gpr[rt];
+                 cpu.lo = static_cast<uint32_t>(result);
+                 cpu.hi = static_cast<uint32_t>(result >> 32u);
+                 break;
+             }
+-            case 0x1A:
++        case 64u + 0x1A:
+             {
+                 const int32_t lhs = static_cast<int32_t>(cpu.gpr[rs]);
+                 const int32_t rhs = static_cast<int32_t>(cpu.gpr[rt]);
+@@ -203,7 +215,7 @@
+                 }
+                 break;
+             }
+-            case 0x1B:
++        case 64u + 0x1B:
+                 if (cpu.gpr[rt] == 0u)
+                 {
+                     cpu.lo = 0xFFFFFFFFu;
+@@ -215,63 +227,50 @@
+                     cpu.hi = cpu.gpr[rs] % cpu.gpr[rt];
+                 }
+                 break;
+-            case 0x20:
++        case 64u + 0x20:
+                 overflowAdd(static_cast<int32_t>(cpu.gpr[rs]), static_cast<int32_t>(cpu.gpr[rt]), rd);
+                 break;
+-            case 0x21:
++        case 64u + 0x21:
+                 write(rd, cpu.gpr[rs] + cpu.gpr[rt]);
+                 break;
+-            case 0x22:
++        case 64u + 0x22:
+                 overflowSub(static_cast<int32_t>(cpu.gpr[rs]), static_cast<int32_t>(cpu.gpr[rt]), rd);
+                 break;
+-            case 0x23:
++        case 64u + 0x23:
+                 write(rd, cpu.gpr[rs] - cpu.gpr[rt]);
+                 break;
+-            case 0x24:
++        case 64u + 0x24:
+                 write(rd, cpu.gpr[rs] & cpu.gpr[rt]);
+                 break;
+-            case 0x25:
++        case 64u + 0x25:
+                 write(rd, cpu.gpr[rs] | cpu.gpr[rt]);
+                 break;
+-            case 0x26:
++        case 64u + 0x26:
+                 write(rd, cpu.gpr[rs] ^ cpu.gpr[rt]);
+                 break;
+-            case 0x27:
++        case 64u + 0x27:
+                 write(rd, ~(cpu.gpr[rs] | cpu.gpr[rt]));
+                 break;
+-            case 0x2A:
++        case 64u + 0x2A:
+                 write(rd, static_cast<int32_t>(cpu.gpr[rs]) < static_cast<int32_t>(cpu.gpr[rt]) ? 1u : 0u);
+                 break;
+-            case 0x2B:
++        case 64u + 0x2B:
+                 write(rd, cpu.gpr[rs] < cpu.gpr[rt] ? 1u : 0u);
+                 break;
+-            default:
+-                raiseException(cpu, 10u, pc, wasDelaySlot);
+-                break;
+-            }
+-            break;
+-        case 0x01:
+-            switch (rt)
+-            {
+-            case 0x00:
++        case 128u + 0x00:
+                 branch(static_cast<int32_t>(cpu.gpr[rs]) < 0);
+                 break;
+-            case 0x01:
++        case 128u + 0x01:
+                 branch(static_cast<int32_t>(cpu.gpr[rs]) >= 0);
+                 break;
+-            case 0x10:
++        case 128u + 0x10:
+                 write(31u, pc + 8u);
+                 branch(static_cast<int32_t>(cpu.gpr[rs]) < 0);
+                 break;
+-            case 0x11:
++        case 128u + 0x11:
+                 write(31u, pc + 8u);
+                 branch(static_cast<int32_t>(cpu.gpr[rs]) >= 0);
+                 break;
+-            default:
+-                raiseException(cpu, 10u, pc, wasDelaySlot);
+-                break;
+-            }
+-            break;
+         case 0x02:
+             newBranch = true;
+             newBranchTarget = (nextPc & 0xF0000000u) | ((instruction & 0x03FFFFFFu) << 2u);
+@@ -317,14 +316,14 @@
+         case 0x0F:
+             write(rt, imm << 16u);
+             break;
+-        case 0x10:
+-        {
+-            const uint32_t copRs = rs;
+-            if (copRs == 0x00)
+-                load(rt, cpu.cop0[rd]);
+-            else if (copRs == 0x04)
+-                cpu.cop0[rd] = cpu.gpr[rt];
+-            else if (copRs == 0x10 && funct == 0x10)
++        case 192u + 0x00: // mfc0
++            load(rt, cpu.cop0[rd]);
++            break;
++        case 192u + 0x04: // mtc0
++            cpu.cop0[rd] = cpu.gpr[rt];
++            break;
++        case 192u + 0x10: // rfe
++            if (funct == 0x10)
+             {
+                 const uint32_t status = cpu.cop0[12];
+                 cpu.cop0[12] = (status & ~0x0Fu) | ((status >> 2u) & 0x0Fu);
+@@ -332,7 +331,6 @@
+             else
+                 raiseException(cpu, 10u, pc, wasDelaySlot);
+             break;
+-        }
+         case 0x20:
+         case 0x24:
+         {
+--- a/ps2xIOP/src/emulator/iop_emulator.cpp
++++ b/ps2xIOP/src/emulator/iop_emulator.cpp
+@@ -461,8 +461,10 @@
+             if (checkInterrupt(cpu))
+                 return true;
+ 
+-            // One fetch per instruction: only a `jr ra` can be an import stub, and the word is handed on to the CPU.
+-            const uint32_t word = memory.read32(cpu.pc);
++            // One fetch per instruction, from the pre-decoded table (decoded once per word, invalidated by every
++            // RAM write); only a `jr ra` can be an import stub. An unaligned pc has no entry: plain fetch.
++            const IopMemory::DecodedInsn *decodedInsn = memory.decoded(cpu.pc);
++            const uint32_t word = decodedInsn ? decodedInsn->word : memory.read32(cpu.pc);
+             if (word == 0x03E00008u)
+             if (const auto import = imports.decode(cpu.pc))
+             {
+@@ -476,7 +478,7 @@
+                 return !cpu.stopped;
+             }
+ 
+-            const bool running = cpuCore.executeInstruction(cpu, word);
++            const bool running = decodedInsn ? cpuCore.executeDecoded(cpu, *decodedInsn) : cpuCore.executeInstruction(cpu, word);
+             schedulePendingDma();
+             ++totalInstructions;
+             ++totalCycles;
+@@ -492,6 +494,32 @@
+             {
+                 if (!step(cpu))
+                     break;
++                // Tight loop: while nothing is due, run the instructions of an ordinary stretch without the
++                // general step(). Every condition step() and the two checks below would test between
++                // instructions is tested here at the head of each iteration (the next DMA completion cycle, a
++                // queued guest callback, an interrupt, a sentinel or non-RAM pc) and leaves the loop to the
++                // general path when it holds; a `jr ra` (a possible import stub) is also left to step(). So every
++                // DMA completion, interrupt and callback happens at the same cycle as before.
++                bool tightRunning = true;
++                while (tightRunning && !cpu.stopped && !cpu.yielded &&
++                       totalInstructions - start < instructionBudget &&
++                       totalCycles < nextDmaCycle && pendingGuestCallbacks.empty())
++                {
++                    const uint32_t pc = cpu.pc;
++                    if (pc == kThreadReturnSentinel || pc == kCallReturnSentinel)
++                        break;
++                    const IopMemory::DecodedInsn *decodedInsn = memory.decoded(pc);
++                    if (!decodedInsn || decodedInsn->word == 0x03E00008u)
++                        break;
++                    if (checkInterrupt(cpu))
++                        continue; // as step(): taking the interrupt costs no instruction or cycle
++                    tightRunning = cpuCore.executeDecoded(cpu, *decodedInsn);
++                    schedulePendingDma();
++                    ++totalInstructions;
++                    ++totalCycles;
++                }
++                if (!tightRunning)
++                    break;
+                 if (totalCycles >= nextDmaCycle && !servicingDmaInterrupts)
+                     servicePendingDmaInterrupts();
+                 if (!servicingGuestCallbacks && !pendingGuestCallbacks.empty())

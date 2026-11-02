@@ -1,0 +1,296 @@
+Patch 0088: the function table is a static const {address, function} array plus don_game_module(), not a static constructor.
+What: the emitter (function_table_emitter.cpp) writes `static const DonFunctionEntry g_donFunctionEntries[]` and
+`const DonGameModule &don_game_module()` instead of GeneratedFunctionTableInitializer. ps2_runtime.h declares DonFunctionEntry,
+DonGameModule and don_game_module(). The PS2Runtime constructor copies the array into the writable g_ps2RecompiledFunctionTable
+(unchanged name and size, still defined by the generated file); replaceFunction/overrides keep writing there. The runner fallback
+and the unit-test table return an empty module. The constructor copies through ps2FillRecompiledFunctionTable(), which prints
+"[don] function table entry N has address 0x... outside [...)" and aborts for an address outside the table or not word-aligned.
+Tests: code_generator_tests and ps2_recompiler_tests expectations follow the new text. The fill has three cases: the in-range fill (resets the table at its end), and two aborts checked in a forked child (SIGABRT) for an address outside the table and for an unaligned address; POSIX only, skipped on Windows.
+Verified: ps2x_tests with this patch: 431 pass, 10 fail (pre-existing, the same cases as at the pinned base). With the check removed from the fill, the two abort cases fail (12 fail).
+Route: game regenerated and built; fight_practice:
+all 32 `[don] state blank` lines equal work/baseline/fight_practice.state (screenshot md5s differ in the sandbox even unpatched).
+Origin: original to this project.
+diff --git a/ps2xRecomp/src/lib/function_table_emitter.cpp b/ps2xRecomp/src/lib/function_table_emitter.cpp
+index b82b259..1290607 100644
+--- a/ps2xRecomp/src/lib/function_table_emitter.cpp
++++ b/ps2xRecomp/src/lib/function_table_emitter.cpp
+@@ -157,19 +157,20 @@ namespace ps2recomp
+         ss << "extern const uint32_t g_ps2RecompiledFunctionTableSlotCount = " << std::dec << slotCount << "u;\n";
+         ss << "PS2Runtime::RecompiledFunction g_ps2RecompiledFunctionTable[" << std::dec << (slotCount == 0u ? 1u : slotCount) << "u] = {};\n\n";
+ 
+-        ss << "namespace {\n";
+-        ss << "struct GeneratedFunctionTableInitializer {\n";
+-        ss << "    GeneratedFunctionTableInitializer() {\n";
++        ss << "static const DonFunctionEntry g_donFunctionEntries[" << std::dec << (entries.empty() ? 1u : entries.size())
++           << "u] = {\n";
+         for (const auto &[address, name] : entries)
+         {
+-            const uint32_t slot = (address - tableBase) >> 2;
+-            ss << "        g_ps2RecompiledFunctionTable[" << std::dec << slot << "] = " << name
+-               << "; // 0x" << std::hex << address << std::dec << "\n";
++            ss << "    {0x" << std::hex << address << "u, " << name << "},\n";
+         }
+-        ss << "    }\n";
+-        ss << "};\n";
+-        ss << "static const GeneratedFunctionTableInitializer g_generatedFunctionTableInitializer;\n";
+-        ss << "}\n";
++        if (entries.empty())
++        {
++            ss << "    {0u, nullptr},\n";
++        }
++        ss << "};\n\n";
++        ss << "const DonGameModule &don_game_module()\n{\n";
++        ss << "    static const DonGameModule module = {g_donFunctionEntries, " << std::dec << entries.size() << "u};\n";
++        ss << "    return module;\n}\n";
+ 
+         return ss.str();
+     }
+diff --git a/ps2xRuntime/include/ps2_runtime.h b/ps2xRuntime/include/ps2_runtime.h
+index 6c1ee3d..a23c315 100644
+--- a/ps2xRuntime/include/ps2_runtime.h
++++ b/ps2xRuntime/include/ps2_runtime.h
+@@ -669,6 +669,26 @@ extern const uint32_t g_ps2RecompiledFunctionTableEnd;
+ extern const uint32_t g_ps2RecompiledFunctionTableSlotCount;
+ extern PS2Runtime::RecompiledFunction g_ps2RecompiledFunctionTable[];
+ 
++// The generated code holds a constant {address, function} array; the PS2Runtime constructor copies it into the
++// writable table above, where overrides keep writing.
++struct DonFunctionEntry
++{
++    uint32_t address;
++    PS2Runtime::RecompiledFunction function;
++};
++
++struct DonGameModule
++{
++    const DonFunctionEntry *entries;
++    uint32_t count;
++};
++
++const DonGameModule &don_game_module();
++
++// Copies a module's entries into g_ps2RecompiledFunctionTable. An address outside the table (or not word-aligned)
++// prints a [don] message with the address and aborts. Called by the PS2Runtime constructor.
++void ps2FillRecompiledFunctionTable(const DonGameModule &module);
++
+ // Whether the last 64 dispatched guest addresses are recorded (DON_DISPATCH_HISTORY=1; they only appear in the
+ // missing-function report). Read once at start-up; plain bool so the dispatch fast path pays one load.
+ extern bool g_ps2DispatchHistoryEnabled;
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index f001e50..089eb4d 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -483,6 +483,24 @@ static void UploadFrame(Texture2D &tex, PS2Runtime *rt, uint32_t &outWidth, uint
+ }
+ #endif // PS2X_NO_RAYLIB
+ 
++void ps2FillRecompiledFunctionTable(const DonGameModule &module)
++{
++    for (uint32_t i = 0; i < module.count; ++i)
++    {
++        const uint32_t address = module.entries[i].address;
++        const uint32_t slot = (address - g_ps2RecompiledFunctionTableBase) >> 2;
++        if (address < g_ps2RecompiledFunctionTableBase || (address & 3u) != 0u ||
++            slot >= g_ps2RecompiledFunctionTableSlotCount)
++        {
++            std::fprintf(stderr, "[don] function table entry %u has address 0x%08X outside [0x%08X, 0x%08X) (%u slots)\n",
++                         i, address, g_ps2RecompiledFunctionTableBase, g_ps2RecompiledFunctionTableEnd,
++                         g_ps2RecompiledFunctionTableSlotCount);
++            std::abort();
++        }
++        g_ps2RecompiledFunctionTable[slot] = module.entries[i].function;
++    }
++}
++
+ PS2Runtime::PS2Runtime()
+ {
+     m_memory.bindHotState(&m_donHot);
+@@ -491,6 +509,7 @@ PS2Runtime::PS2Runtime()
+     m_donHot.fnTableEnd = g_ps2RecompiledFunctionTableEnd;
+     m_donHot.fnTableSlots = g_ps2RecompiledFunctionTableSlotCount;
+     m_donHot.fnTable = g_ps2RecompiledFunctionTable;
++    ps2FillRecompiledFunctionTable(don_game_module());
+     m_iopHost = std::make_unique<PS2IopHostAdapter>(*this);
+     m_iopSubsystem = std::make_unique<ps2x::iop::IopSubsystem>(*m_iopHost);
+ 
+diff --git a/ps2xRuntime/src/runner/register_functions.cpp b/ps2xRuntime/src/runner/register_functions.cpp
+index 85cc2e3..1f83c34 100644
+--- a/ps2xRuntime/src/runner/register_functions.cpp
++++ b/ps2xRuntime/src/runner/register_functions.cpp
+@@ -4,4 +4,10 @@
+ extern const uint32_t g_ps2RecompiledFunctionTableBase = 0x00000000u;
+ extern const uint32_t g_ps2RecompiledFunctionTableEnd = 0x01000000u;
+ extern const uint32_t g_ps2RecompiledFunctionTableSlotCount = (g_ps2RecompiledFunctionTableEnd - g_ps2RecompiledFunctionTableBase) >> 2;
+-PS2Runtime::RecompiledFunction g_ps2RecompiledFunctionTable[g_ps2RecompiledFunctionTableSlotCount] = {};
+\ No newline at end of file
++PS2Runtime::RecompiledFunction g_ps2RecompiledFunctionTable[g_ps2RecompiledFunctionTableSlotCount] = {};
++
++const DonGameModule &don_game_module()
++{
++    static const DonGameModule module = {nullptr, 0u};
++    return module;
++}
+diff --git a/ps2xTest/src/code_generator_tests.cpp b/ps2xTest/src/code_generator_tests.cpp
+index 74ac58f..79b2e15 100644
+--- a/ps2xTest/src/code_generator_tests.cpp
++++ b/ps2xTest/src/code_generator_tests.cpp
+@@ -264,7 +264,7 @@ void register_code_generator_tests()
+                                                           analysis.resumeEntryPoints.end())}});
+         const std::string registration = gen.generateFunctionRegistration({func}, {});
+         t.IsTrue(registration.find(
+-                     "g_ps2RecompiledFunctionTable[1] = syscall_resume_entry_0x9100; // 0x9104") !=
++                     "{0x9104u, syscall_resume_entry_0x9100}") !=
+                      std::string::npos,
+                  "the syscall continuation must register to the owner wrapper");
+     });
+@@ -728,9 +728,9 @@ void register_code_generator_tests()
+         std::string registration = gen.generateFunctionRegistration({func}, {});
+         printGeneratedCode("resume entry targets register to the owner wrapper", registration);
+ 
+-        t.IsTrue(registration.find("g_ps2RecompiledFunctionTable[2] = resume_owner_0x7000; // 0x7008") != std::string::npos,
++        t.IsTrue(registration.find("{0x7008u, resume_owner_0x7000}") != std::string::npos,
+                  "resume entry pc should register to the owner wrapper");
+-        t.IsTrue(registration.find("g_ps2RecompiledFunctionTable[3] = resume_owner_0x7000; // 0x700c") != std::string::npos,
++        t.IsTrue(registration.find("{0x700cu, resume_owner_0x7000}") != std::string::npos,
+                  "multiple resume pcs should register to the same owner wrapper");
+     });
+ 
+@@ -768,9 +768,9 @@ void register_code_generator_tests()
+                  "the owner must enter directly at the first installed handler");
+         t.IsTrue(generated.find("case 0x7018u: goto label_7018;") != std::string::npos,
+                  "the owner must enter directly at the second installed handler");
+-        t.IsTrue(registration.find("sdk_bootstrap_owner_0x7000; // 0x7008") != std::string::npos,
++        t.IsTrue(registration.find("{0x7008u, sdk_bootstrap_owner_0x7000}") != std::string::npos,
+                  "the first handler address must dispatch to its owner wrapper");
+-        t.IsTrue(registration.find("sdk_bootstrap_owner_0x7000; // 0x7018") != std::string::npos,
++        t.IsTrue(registration.find("{0x7018u, sdk_bootstrap_owner_0x7000}") != std::string::npos,
+                  "the second handler address must dispatch to its owner wrapper");
+     });
+ 
+@@ -815,7 +815,7 @@ void register_code_generator_tests()
+         std::string registration = gen.generateFunctionRegistration({owner}, {});
+         printGeneratedCode("external mid-function entry can register to the owner wrapper", registration);
+ 
+-        t.IsTrue(registration.find("g_ps2RecompiledFunctionTable[1] = owner_0x5000; // 0x5004") != std::string::npos,
++        t.IsTrue(registration.find("{0x5004u, owner_0x5000}") != std::string::npos,
+                  "mid-function external entry should register back to the owner wrapper");
+     });
+ 
+diff --git a/ps2xTest/src/ps2_recompiler_tests.cpp b/ps2xTest/src/ps2_recompiler_tests.cpp
+index 201b71e..528fe36 100644
+--- a/ps2xTest/src/ps2_recompiler_tests.cpp
++++ b/ps2xTest/src/ps2_recompiler_tests.cpp
+@@ -1461,7 +1461,7 @@ void register_ps2_recompiler_tests()
+                 const std::string registration{
+                     std::istreambuf_iterator<char>(registrationFile),
+                     std::istreambuf_iterator<char>()};
+-                t.IsTrue(registration.find("// 0x100010") != std::string::npos,
++                t.IsTrue(registration.find("{0x100010u,") != std::string::npos,
+                          "synthesized entry address should be registered for guest dispatch");
+                 t.IsTrue(recompiler.reportCounters().additionalEntryPoints >= 1u,
+                          "synthesized entry should be visible in the report");
+@@ -1502,7 +1502,7 @@ void register_ps2_recompiler_tests()
+                 const std::string registration{
+                     std::istreambuf_iterator<char>(registrationFile),
+                     std::istreambuf_iterator<char>()};
+-                t.IsTrue(registration.find("// 0x100008") != std::string::npos,
++                t.IsTrue(registration.find("{0x100008u,") != std::string::npos,
+                          "JAL return address inside a standalone entry_ block should be registered as a resume point");
+             }
+ 
+diff --git a/ps2xTest/src/ps2_runtime_expansion_tests.cpp b/ps2xTest/src/ps2_runtime_expansion_tests.cpp
+index 4772f3f..c0dea7e 100644
+--- a/ps2xTest/src/ps2_runtime_expansion_tests.cpp
++++ b/ps2xTest/src/ps2_runtime_expansion_tests.cpp
+@@ -19,11 +19,18 @@
+ 
+ #include <atomic>
+ #include <cstdint>
++#include <cstdio>
+ #include <cstring>
+ #include <exception>
+ #include <string>
+ #include <vector>
+ 
++#ifndef _WIN32
++#include <csignal>
++#include <sys/wait.h>
++#include <unistd.h>
++#endif
++
+ using namespace ps2recomp;
+ using namespace ps2_syscalls;
+ 
+@@ -311,10 +318,58 @@ namespace
+ 
+ }
+ 
++void reset_ps2_test_function_table();
++
++#ifndef _WIN32
++// The fill aborts on a bad entry, so the check runs in a child process. Returns true when the child was killed by SIGABRT.
++static bool fillAbortsInChild(const DonGameModule &module)
++{
++    const pid_t pid = fork();
++    if (pid == 0)
++    {
++        ps2FillRecompiledFunctionTable(module);
++        _exit(0);
++    }
++    int status = 0;
++    waitpid(pid, &status, 0);
++    return WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT;
++}
++#endif
++
+ void register_ps2_runtime_expansion_tests()
+ {
+     MiniTest::Case("PS2RuntimeExpansion", [](TestCase &tc)
+     {
++        tc.Run("function table fill places each entry in the slot of its address", [](TestCase &t)
++        {
++            static const DonFunctionEntry entries[] = {{0x0u, (PS2Runtime::RecompiledFunction)0x10},
++                                                       {0x1004u, (PS2Runtime::RecompiledFunction)0x20}};
++            const DonGameModule module = {entries, 2u};
++            ps2FillRecompiledFunctionTable(module);
++            t.IsTrue(g_ps2RecompiledFunctionTable[0] == entries[0].function, "address 0 fills slot 0");
++            t.IsTrue(g_ps2RecompiledFunctionTable[0x1004u >> 2] == entries[1].function, "address 0x1004 fills slot 0x401");
++            t.IsTrue(g_ps2RecompiledFunctionTable[1] == nullptr, "other slots stay empty");
++            reset_ps2_test_function_table();
++        });
++
++#ifndef _WIN32
++        tc.Run("function table fill aborts on an address outside the table", [](TestCase &t)
++        {
++            const DonFunctionEntry entries[] = {{g_ps2RecompiledFunctionTableEnd, (PS2Runtime::RecompiledFunction)0x30}};
++            const DonGameModule module = {entries, 1u};
++            t.IsTrue(fillAbortsInChild(module), "entry at the end of the table aborts the fill with SIGABRT");
++        });
++
++        tc.Run("function table fill aborts on an unaligned address", [](TestCase &t)
++        {
++            const DonFunctionEntry entries[] = {{0x1002u, (PS2Runtime::RecompiledFunction)0x40}};
++            const DonGameModule module = {entries, 1u};
++            t.IsTrue(fillAbortsInChild(module), "unaligned entry aborts the fill with SIGABRT");
++        });
++#else
++        std::printf("[don] skipped: function table fill abort tests need fork() (not on Windows)\n");
++#endif
++
+         tc.Run("differential decoder/codegen gpr-write contract for MULT and DIV families", [](TestCase &t)
+         {
+             R5900Decoder decoder;
+diff --git a/ps2xTest/src/test_function_table.cpp b/ps2xTest/src/test_function_table.cpp
+index be6a888..d9b4bfc 100644
+--- a/ps2xTest/src/test_function_table.cpp
++++ b/ps2xTest/src/test_function_table.cpp
+@@ -16,3 +16,9 @@ void reset_ps2_test_function_table()
+               g_ps2RecompiledFunctionTable + g_ps2RecompiledFunctionTableSlotCount,
+               nullptr);
+ }
++
++const DonGameModule &don_game_module()
++{
++    static const DonGameModule module = {nullptr, 0u};
++    return module;
++}

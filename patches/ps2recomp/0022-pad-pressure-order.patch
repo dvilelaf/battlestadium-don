@@ -1,0 +1,58 @@
+Pad data buffer: pressure bytes 16..19 are L1, R1, L2, R2 (the DualShock 2 order)
+
+What it fixes: fillPadStatus (ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp) wrote the pressure bytes of
+the 32-byte pad buffer as byte 16 = L1, 17 = L2, 18 = R1, 19 = R2. On a DualShock 2 they are L1, R1,
+L2, R2. A game that reads the shoulder buttons through the pressure bytes (after scePadEnterPressMode)
+got R1 and L2 swapped, whether the pressure came from the buttons (0 or 255) or from a host source.
+Now byte 17 follows R1 and byte 18 follows L2 (the buttons mask and the derived 0/255 value of each).
+This is the only place that fills bytes 16..19: the raylib path only produces the button word and
+sticks, and the buffer is built by this function; the host source's pressure[] is copied index for index
+(pressure[i] -> byte 8+i), so only its documented meaning changes: pressure[8..11] are L1, R1, L2, R2
+(runtime/ps2_host_pad.h comment; the struct is unchanged).
+
+How it was verified: tests/runtime/host_pad_source_test.cpp now checks the order explicitly: a source
+state with pressure[8..11] = 0x11, 0x22, 0x33, 0x44 gives bytes 16..19 = L1, R1, L2, R2 in that order, and
+each shoulder button pressed alone without source pressure sets only its own byte. Against the tree
+without this patch the test fails ("R1 pressed alone sets only byte 17", "L2 pressed alone sets only
+byte 18"); with the patch it passes, and the other tests of tests/runtime (host_gs_hook, host_loop,
+host_vu1_hook, iop_host_spu2, module_buffer_load) pass, built with PS2X_WITH_RAYLIB=OFF, DISPLAY unset.
+Other references: PCSX2's DualShock 2 (third_party/pcsx2/pcsx2/SIO/Pad/PadDualshock2.cpp, after Square
+come PAD_L1, PAD_R1, PAD_L2, PAD_R2; GPL-3.0).
+
+Origin: the finding and the fix of the byte order come from KillzoneRecomp's patch
+patches/ps2recomp/0026-pad-pressure-order.patch (https://github.com/drakolordx7/KillzoneRecomp, commit 5f0700079f9ac4e14799d66d01747dbcdcec55f6 of the local reference copy of that
+repository, GPL-3.0). Their patch swaps the two writes and adds a comment; this one does the same and
+also ties the indexes 9 and 10 of the host source's pressure[] to R1 and L2 (the byte of each stays 8+i)
+and fixes the documentation of runtime/ps2_host_pad.h, which their runtime did not have.
+
+diff --git a/ps2xRuntime/include/runtime/ps2_host_pad.h b/ps2xRuntime/include/runtime/ps2_host_pad.h
+index 02cf2f0..0c59217 100644
+--- a/ps2xRuntime/include/runtime/ps2_host_pad.h
++++ b/ps2xRuntime/include/runtime/ps2_host_pad.h
+@@ -23,7 +23,8 @@
+ #define PS2_HOST_PAD_MAX_SLOTS 4
+ 
+ // Order of the pressure bytes: the order of the pad data buffer bytes 8..19, i.e.
+-// Right, Left, Up, Down, Triangle, Circle, Cross, Square, L1, L2, R1, R2.
++// Right, Left, Up, Down, Triangle, Circle, Cross, Square, L1, R1, L2, R2 (the DualShock 2 order: bytes
++// 16..19 are L1, R1, L2, R2), so pressure[8] is L1, [9] R1, [10] L2, [11] R2.
+ #define PS2_HOST_PAD_PRESSURE_COUNT 12
+ 
+ struct Ps2HostPadState
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
+index 2571b3a..4ff3c6e 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
+@@ -308,9 +308,10 @@ namespace ps2_stubs
+             data[13] = pressureValue(state, portState, kPadBtnCircle, 5);
+             data[14] = pressureValue(state, portState, kPadBtnCross, 6);
+             data[15] = pressureValue(state, portState, kPadBtnSquare, 7);
++            // DualShock 2 order of bytes 16..19: L1, R1, L2, R2 (pressure[8..11] of the host source follow it).
+             data[16] = pressureValue(state, portState, kPadBtnL1, 8);
+-            data[17] = pressureValue(state, portState, kPadBtnL2, 9);
+-            data[18] = pressureValue(state, portState, kPadBtnR1, 10);
++            data[17] = pressureValue(state, portState, kPadBtnR1, 9);
++            data[18] = pressureValue(state, portState, kPadBtnL2, 10);
+             data[19] = pressureValue(state, portState, kPadBtnR2, 11);
+         }
+ 

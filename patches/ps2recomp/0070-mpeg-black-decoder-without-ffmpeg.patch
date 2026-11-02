@@ -1,0 +1,94 @@
+# 0070-mpeg-black-decoder-without-ffmpeg: with no FFmpeg the MPEG stub decodes black pictures
+#
+# What it fixes: a runtime built without FFmpeg has a decoder stub whose feed() fails, so no picture is ever
+# made. With patch 0064 the game's player (CRI Sofdec) sends its movie over DMA channel 4 and asks
+# sceMpegGetPicture for pictures; the stub waited for ever for pictures nothing could make, and the port's own
+# movie skip (Start held after 240 blanks) stalled (journal 034, follow-ups 14 and 15). On the console the decoder
+# always delivers, and the player cares about pictures arriving, not about their content.
+# The no-FFmpeg MpegFfmpegDecoder now behaves like a decoder that outputs black pictures: it reads the picture size
+# from the stream's sequence header and makes one black picture (RGB 0, as many as the stream has picture start
+# codes, also across two feeds) per picture start code. Everything after it (pacing, the Nodata callback at the
+# end of channel 4, the sequence end) is the path of a real decoder. The stream is taken from channel 4 by 0064.
+# The FFmpeg build is unchanged.
+#
+# How it was verified: tests/runtime/mpeg_black_decoder_test.cpp (a synthetic 64x32 stream with three picture
+# start codes through a channel-4 chain): crashes without the patch (segfault, the stub has no frame), passes with
+# it (64x32, counter 0, black, channel 4 completed). Game: see journal 034, follow-up 15. Depends on 0063 and 0064
+# for the game; the hunk applies on its own. Original work; no outside source.
+#
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+index 2e8e9de..d76c942 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+@@ -444,19 +444,54 @@ namespace ps2_stubs
+             bool m_drained = false;
+         };
+ #else
+-        // TODO
++        // No FFmpeg: a decoder that outputs black pictures. It reads the picture size from the sequence
++        // header and makes one black picture per picture start code, so the stream is consumed, the
++        // picture requests are answered, and the stream ends by the same path as with a real decoder
++        // (the game's player waits for pictures, not for their content). Patch 0070.
+         class MpegFfmpegDecoder
+         {
+         public:
+-            bool feed(const uint8_t *, size_t, std::deque<MpegDecodedFrame> &, int64_t = -1, int64_t = -1)
++            bool feed(const uint8_t *data, size_t size, std::deque<MpegDecodedFrame> &out, int64_t pts90k = -1, int64_t = -1)
+             {
+                 static bool s_warnedNoFfmpeg = false;
+                 if (!s_warnedNoFfmpeg)
+                 {
+-                    std::cerr << "[MPEG] runtime built without FFmpeg; MPEG video decode is disabled." << std::endl;
++                    std::cerr << "[MPEG] runtime built without FFmpeg; the video is decoded as black pictures." << std::endl;
+                     s_warnedNoFfmpeg = true;
+                 }
+-                return false;
++                // Start codes can straddle two feeds: look at the last three bytes of the previous one too.
++                std::vector<uint8_t> joined(m_tail, m_tail + m_tailSize);
++                joined.insert(joined.end(), data, data + size);
++                for (size_t i = 0; i + 3u < joined.size(); ++i)
++                {
++                    if (joined[i] != 0x00u || joined[i + 1u] != 0x00u || joined[i + 2u] != 0x01u)
++                    {
++                        continue;
++                    }
++                    if (joined[i + 3u] == 0xB3u && i + 6u < joined.size())
++                    {
++                        m_width = (static_cast<int>(joined[i + 4u]) << 4) | (joined[i + 5u] >> 4);
++                        m_height = ((joined[i + 5u] & 0x0F) << 8) | joined[i + 6u];
++                    }
++                    else if (joined[i + 3u] == 0x00u && m_width > 0 && m_height > 0)
++                    {
++                        MpegDecodedFrame frame;
++                        frame.width = m_width;
++                        frame.height = m_height;
++                        frame.pts90k = pts90k;
++                        frame.rgba.assign(static_cast<size_t>(m_width) * static_cast<size_t>(m_height) * 4u, 0u);
++                        for (size_t a = 3u; a < frame.rgba.size(); a += 4u)
++                        {
++                            frame.rgba[a] = 0xFFu;
++                        }
++                        out.push_back(std::move(frame));
++                    }
++                }
++                // Keep the bytes a start code could still begin in; a start code found above is not
++                // looked at again because only 3 bytes are kept and a code needs 4.
++                m_tailSize = std::min<size_t>(3u, joined.size());
++                std::copy(joined.end() - static_cast<std::ptrdiff_t>(m_tailSize), joined.end(), m_tail);
++                return true;
+             }
+ 
+             bool flush(std::deque<MpegDecodedFrame> &)
+@@ -465,6 +500,12 @@ namespace ps2_stubs
+             }
+ 
+             void reset() {}
++
++        private:
++            int m_width = 0;
++            int m_height = 0;
++            uint8_t m_tail[3] = {};
++            size_t m_tailSize = 0u;
+         };
+ #endif
+ 

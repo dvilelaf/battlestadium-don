@@ -1,0 +1,260 @@
+{
+ "routes": [
+  {
+   "name": "default_title_idle",
+   "script": "tools/run/scripts/default_title_idle.txt",
+   "variant": "en-jpvoice",
+   "env": {},
+   "landmarks": [
+    {
+     "blank": 600,
+     "name": "warning",
+     "md5": "6fb35d98fe6202ad9e5c93a8ee01e6f4",
+     "what": "the health warning"
+    },
+    {
+     "blank": 2400,
+     "name": "title",
+     "md5": "70c6872d4646dcbfb91defbc430d8550",
+     "what": "the title, up by itself after the port ended the video"
+    },
+    {
+     "blank": 6000,
+     "name": "title_wait_4",
+     "md5": "ea4ced51f3db233f4ff80a496384e46d",
+     "what": "the title after a minute idle"
+    },
+    {
+     "blank": 6900,
+     "name": "menu",
+     "md5": "2401536197d0e63e6bd4c0f1199a33b0",
+     "what": "after Start: the main menu"
+    }
+   ]
+  },
+  {
+   "name": "fight_practice",
+   "script": "tools/run/scripts/fight_practice.txt",
+   "variant": "en-jpvoice",
+   "env": {
+    "DON_PLAY_MOVIES": "1"
+   },
+   "landmarks": [
+    {
+     "blank": 5880,
+     "name": "stage_select",
+     "md5": "a7afa375d31ae17ea7dbc09f410b2ee3",
+     "what": "the stage / difficulty screen"
+    },
+    {
+     "blank": 6540,
+     "name": "match_load_2",
+     "md5": "358090a81ef5a3e2584b42712cdb7b6c",
+     "what": "the match loading"
+    },
+    {
+     "blank": 6800,
+     "name": "f6800",
+     "md5": "55e88ccc7e0f943f6611d0677be2b225",
+     "what": "the fight, timer 180 (177 before journal 037: the sound bank load was refused)"
+    },
+    {
+     "blank": 7076,
+     "name": "f7076",
+     "md5": "2d9a536f55612143bef8bf4ed5710478",
+     "what": "the blank where the fight used to stop (patch 0054)"
+    },
+    {
+     "blank": 7500,
+     "name": "f7500",
+     "md5": "5a170198bfafca2ebba4759b6fa07887",
+     "what": "the fight going on"
+    },
+    {
+     "blank": 7800,
+     "name": "f7800",
+     "md5": "af46a98d654421ec11a731c73a355fcc",
+     "what": "the fight going on"
+    }
+   ]
+  },
+  {
+   "name": "multiplayer_match",
+   "script": "tools/run/scripts/multiplayer_match.txt",
+   "variant": "en-jpvoice",
+   "env": {
+    "DON_PLAY_MOVIES": "1"
+   },
+   "landmarks": [
+    {
+     "blank": 3400,
+     "name": "logo_after_circle",
+     "md5": "def596cc86cb5cb2f40350f25ef007d5",
+     "what": "the DON logo screen right after Circle on Multiplayer (the entry screen is not up yet)"
+    },
+    {
+     "blank": 3800,
+     "name": "logo_greyed",
+     "md5": "4ae3bec313be690953e404d348b8b217",
+     "what": "the logo screen greying out, 400 blanks later"
+    },
+    {
+     "blank": 5000,
+     "name": "gaara_card",
+     "md5": "7e62958d24f26e94bd6237d397dd33db",
+     "what": "Gaara's name card before the match"
+    },
+    {
+     "blank": 16020,
+     "name": "countdown_3",
+     "md5": "55226803db0095b2077647d4a8ee7b78",
+     "what": "the match's last seconds: the big 3 of the countdown"
+    },
+    {
+     "blank": 16140,
+     "name": "timer_003",
+     "md5": "9bde44b8a82df7a4bbda139304723400",
+     "what": "the match at timer 003, the fighters still moving"
+    },
+    {
+     "blank": 16560,
+     "name": "winner_screen",
+     "md5": "3bfe82efda9b69c98f61810e14069450",
+     "what": "WINNER (Frieza), the match over"
+    }
+   ]
+  },
+  {
+   "name": "survival_result",
+   "script": "tools/run/scripts/survival_result.txt",
+   "variant": "en-jpvoice",
+   "env": {
+    "DON_PLAY_MOVIES": "1"
+   },
+   "landmarks": [
+    {
+     "blank": 3900,
+     "name": "menu_survival",
+     "md5": "f516a60afcd1dcf64b9e4ab07437baca",
+     "what": "main menu on Survival Challenge"
+    },
+    {
+     "blank": 4200,
+     "name": "charselect",
+     "md5": "d0948f1885c4dd2b50084a731022ef43",
+     "what": "the Survival score and character select"
+    },
+    {
+     "blank": 4650,
+     "name": "fight",
+     "md5": "ce3167d3884e4e9e63691bf9aee84321",
+     "what": "the first Survival fight"
+    },
+    {
+     "blank": 5400,
+     "name": "winner",
+     "md5": "1bc781b2315ebedce3dbb4dc967b4086",
+     "what": "WINNER of the first fight"
+    },
+    {
+     "blank": 5850,
+     "name": "result",
+     "md5": "54d6e5640b70ae98ed3d1c1119b328ea",
+     "what": "the RESULT screen"
+    }
+   ]
+  },
+  {
+   "name": "main_mode_match2",
+   "script": "tools/run/scripts/main_mode_match2.txt",
+   "variant": "en-jpvoice",
+   "env": {
+    "DON_PLAY_MOVIES": "1"
+   },
+   "landmarks": [
+    {
+     "blank": 3280,
+     "name": "charselect",
+     "md5": "9e42aed6a02e4738037cb0b2a8daf8ae",
+     "what": "main mode's character select, Naruto highlighted"
+    },
+    {
+     "blank": 3480,
+     "name": "difficulty",
+     "md5": "878614523596b23af1c1d294e310a868",
+     "what": "main mode's difficulty box (Easy / Normal)"
+    },
+    {
+     "blank": 19500,
+     "name": "mission",
+     "md5": "8ab8a3932632f6cd8806867439791f0e",
+     "what": "match 1 won; match 2's mission box (Ring yourself out 3 times!) over the ship stage"
+    },
+    {
+     "blank": 19860,
+     "name": "match2_fight",
+     "md5": "1475a17b6a6f11581da065b243c7af7b",
+     "what": "match 2's first fight frames (timer 177)"
+    }
+   ]
+  },
+  {
+   "name": "save_and_load",
+   "script": "tools/run/scripts/save_and_load_save.txt",
+   "variant": "en-jpvoice",
+   "card": true,
+   "env": {
+    "DON_PLAY_MOVIES": "1"
+   },
+   "landmarks": [
+    {
+     "blank": 240,
+     "name": "nocard_dialog",
+     "md5": "9a4e7248bbb051bc5486463fa24d294d",
+     "what": "the start dialog on an empty card: There is no game data on the memory card"
+    },
+    {
+     "blank": 3400,
+     "name": "options_default",
+     "md5": "0a59d5db5dae1e859ff63fcacb17803e",
+     "what": "the options screen, BGM 3 and SE 3 (white)"
+    },
+    {
+     "blank": 3620,
+     "name": "options_set",
+     "md5": "25cedab75a561dafd5377fda924c8ced",
+     "what": "BGM 1 and SE 2 set"
+    },
+    {
+     "blank": 3860,
+     "name": "save_yes",
+     "md5": "96c1b9807f9ed0a167e6cbaa621cec72",
+     "what": "the save question with the cursor moved to YES"
+    },
+    {
+     "blank": 4000,
+     "name": "save_done",
+     "md5": "4fc5c5b18afec10ea3fd9685e29faa19",
+     "what": "Save ... completed"
+    }
+   ],
+   "then": {
+    "script": "tools/run/scripts/save_and_load_load.txt",
+    "landmarks": [
+     {
+      "blank": 240,
+      "name": "load_dialog",
+      "md5": "473ae9bb241662c3fb1f462610e2f761",
+      "what": "a second process on the same card: Load from memory card slot 1 is completed"
+     },
+     {
+      "blank": 3400,
+      "name": "options_loaded",
+      "md5": "6691a8795162666825226a29e6f2969c",
+      "what": "the options show BGM 1 and SE 2: the saved values were loaded"
+     }
+    ]
+   }
+  }
+ ]
+}

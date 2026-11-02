@@ -1,0 +1,57 @@
+Recompiler and runtime: min.s and max.s order the bit patterns as signed integers, like the console.
+
+What it fixes: the emitted text was std::min / std::max on floats, so -0 and +0 compared equal (and the first operand won) and
+a denormal pattern was a zero. The reference emulator's interpreter (third_party/pcsx2/pcsx2/FPU.cpp, fp_max and fp_min,
+:92-100) compares the two patterns as signed integers (two negative ones the other way round): max(+0, -0) is +0, min is -0 and a
+denormal pattern is a larger number than zero. Two helpers in the runtime header do that; the emitted text calls them.
+
+How it was verified: tests/conformance family "fpu", max.s and min.s: 237 and 373 of 2,648 cases differed before, none after.
+29 sites in the game (23 max.s, 6 min.s); the difference needs a signed zero or a denormal as an operand.
+
+Original work for this repository (no code from another project).
+
+diff --git a/ps2xRecomp/src/lib/fpu_translator.cpp b/ps2xRecomp/src/lib/fpu_translator.cpp
+--- a/ps2xRecomp/src/lib/fpu_translator.cpp
++++ b/ps2xRecomp/src/lib/fpu_translator.cpp
+@@ -100,9 +100,13 @@
+             case COP1_S_MSUBA:
+                 return fmt::format("FPU_SET_ACC(ctx, FPU_SUB_S(ctx->f_acc, FPU_MUL_S(ctx->f[{}], ctx->f[{}])));", fs, ft);
+             case COP1_S_MAX:
+-                return fmt::format("ctx->f[{}] = std::max(ctx->f[{}], ctx->f[{}]);", fd, fs, ft);
++                // The reference compares the two bit patterns as signed integers (FPU.cpp: fp_max), so -0 < +0 and a denormal
++                // pattern is not a zero.
++                return fmt::format("{{ uint32_t a_, b_; std::memcpy(&a_, &ctx->f[{}], sizeof(a_)); std::memcpy(&b_, &ctx->f[{}], sizeof(b_)); "
++                                   "uint32_t r_ = ps2_fpu_max_bits(a_, b_); std::memcpy(&ctx->f[{}], &r_, sizeof(r_)); }}", fs, ft, fd);
+             case COP1_S_MIN:
+-                return fmt::format("ctx->f[{}] = std::min(ctx->f[{}], ctx->f[{}]);", fd, fs, ft);
++                return fmt::format("{{ uint32_t a_, b_; std::memcpy(&a_, &ctx->f[{}], sizeof(a_)); std::memcpy(&b_, &ctx->f[{}], sizeof(b_)); "
++                                   "uint32_t r_ = ps2_fpu_min_bits(a_, b_); std::memcpy(&ctx->f[{}], &r_, sizeof(r_)); }}", fs, ft, fd);
+             case COP1_S_C_F:
+                 return fmt::format("ctx->fcr31 &= ~0x800000;");
+             case COP1_S_C_UN:
+diff --git a/ps2xRuntime/include/ps2_runtime_macros.h b/ps2xRuntime/include/ps2_runtime_macros.h
+--- a/ps2xRuntime/include/ps2_runtime_macros.h
++++ b/ps2xRuntime/include/ps2_runtime_macros.h
+@@ -634,6 +634,22 @@
+     return (u & 0x80000000u) ? INT32_MIN : INT32_MAX;
+ }
+ #define FPU_CVT_W_S(a) ps2_fpu_cvt_w_s((float)(a))
++
++// max.s and min.s (FPU.cpp: fp_max, fp_min): the bit patterns as signed integers; two negative ones are ordered the other way.
++static inline uint32_t ps2_fpu_max_bits(uint32_t a, uint32_t b)
++{
++    const int32_t sa = (int32_t)a, sb = (int32_t)b;
++    if (sa < 0 && sb < 0)
++        return (uint32_t)(sa < sb ? sa : sb);
++    return (uint32_t)(sa > sb ? sa : sb);
++}
++static inline uint32_t ps2_fpu_min_bits(uint32_t a, uint32_t b)
++{
++    const int32_t sa = (int32_t)a, sb = (int32_t)b;
++    if (sa < 0 && sb < 0)
++        return (uint32_t)(sa > sb ? sa : sb);
++    return (uint32_t)(sa < sb ? sa : sb);
++}
+ #define FPU_CVT_L_S(a) ((int64_t)(float)(a))
+ #define FPU_C_F_S(a, b) (0)
+ #define FPU_C_UN_S(a, b) (isnan((float)(a)) || isnan((float)(b)))

@@ -1,0 +1,45 @@
+# Seeds for tools/funcmap/ghidra/ClaimOrphanCode.java, used by tools/funcmap/ghidra_export.sh.
+# Addresses that are known to be the start of code that Ghidra's own analysis does not reach
+# (pointer targets inside stretches of the main text that nothing it follows leads to).
+# Maintained by hand. An address can be added when a run of the game reports a jump to an
+# address that is not the start of a row of config/functions.ghidra.csv.
+# Format: one 0x........ per line; only lines whose comment starts with "new_code" are used.
+0x00100000  # new_code data
+0x001086D0  # new_code data
+0x0014C08C  # new_code data
+0x00185D94  # new_code data
+0x001DC1A0  # new_code code_pair
+0x001DD030  # new_code code_pair
+0x001DDED0  # new_code code_pair
+0x00200558  # new_code data
+0x002005D8  # new_code data
+0x002B0678  # new_code data
+0x002B2A70  # new_code data
+0x002B3B30  # new_code data
+0x002B48E8  # new_code data
+0x002DBEF8  # new_code data
+0x002E19E0  # new_code data
+0x002E1A04  # new_code data
+0x002E1A30  # new_code data
+0x002E1A38  # new_code data
+0x002E1A54  # new_code data
+0x002E1D70  # new_code data
+0x002E1F38  # new_code data
+0x002E2028  # new_code data
+0x002E8050  # new_code data
+0x002EA060  # new_code data
+0x002EA158  # new_code data
+0x002EB9B8  # new_code data
+0x002EC8D8  # new_code data
+0x002F6174  # new_code data
+0x00326370  # new_code data
+0x003265A0  # new_code data
+0x00326B08  # new_code data
+0x00326C98  # new_code data
+0x00327E00  # new_code data
+0x00328178  # new_code data
+0x00328720  # new_code data
+0x0032A728  # new_code data
+0x0032AC00  # new_code data
+0x0032BF50  # new_code code_pair
+0x00355748  # new_code data

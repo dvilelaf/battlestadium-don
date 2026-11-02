@@ -1,0 +1,13 @@
+Source code offer (GPL-3.0)
+===========================
+
+This program is free software under the GNU General Public License v3.0 or later (see LICENSE).
+The complete corresponding source of the binaries in this archive is:
+
+  repository: https://github.com/dvilelaf/battlestadium-don
+  commit:     @COMMIT@
+  version:    @VERSION@
+
+together with the pinned upstream checkouts (PS2Recomp, PCSX2) and the patches in patches/ of that commit; the
+exact pins are in tools/setup/fetch_ps2recomp.sh and patches/*/series. If the link above is not available,
+ask the distributor of this archive for a copy of the source.

@@ -1,0 +1,348 @@
+Feed the sceMpeg decoder stub from the IPU_TO DMA channel (channel 4, 0x1000B400) and report its starvation.
+
+What it fixes: Battle Stadium D.O.N does not give the movie's video stream to sceMpegAddBs. CRI's
+Sofdec keeps the raw MPEG-2 video elementary stream in a ring of 2048-byte sectors and sends it to
+the IPU through DMA channel 4, in source-chain mode (one ref tag per sector; the last valid sector
+ends in a refe tag). The runtime had no channel-4 path, so the stub's sceMpegGetPicture waited
+for frames that never came (journal 034).
+
+1. PS2Memory::ipuToPull walks the started chain lazily, one tag payload at a time, advancing
+   MADR/TADR/QWC/CHCR as the hardware does, and completes the channel (STR cleared, D_STAT cause 4)
+   at the chain end. A CHCR write only sets a "started" flag; a stop clears it and keeps the cursor.
+   sceMpegGetPicture pulls 2048 bytes at a time into the decoder until a picture is ready.
+2. The end of the movie. libmpeg tells the game's player that the decoder needs bytes through the
+   Nodata callback (sceMpegAddCallback type 1; the game registers 0x35D340 with error 0, stop-DMA 2
+   and restart-DMA 3). With nothing left the game's callback sets the player's end flag and pushes
+   a sequence end, and the player loop (0x36A820) ends. The stub never ran it, so GetPicture
+   waited for ever after the last picture. Now, when no picture is ready, bytes were taken from
+   channel 4 and the channel is idle, GetPicture queues the registered Nodata callback once per
+   amount of data taken (and wakes its own wait when it returns); asked again with nothing new
+   it returns without waiting. The CD-stream path is unchanged; other games are affected only if
+   they start channel 4 and call sceMpegGetPicture.
+
+How it was verified: tests/runtime/mpeg_ipu_dma_test.cpp (a synthetic 64x32 colour-bar MPEG-2
+stream sent through a channel-4 chain: the picture has its size and bar colours, STR is cleared
+and D_STAT bit 4 set at the end) passes with the patch and crashes without it (no frame ever
+decodes). Game: with DON_PLAY_MOVIES=1 the opening movie plays in the right colours from blank
+~1830 to ~6930, the title screen follows by itself and Start opens the main menu; the sound starts
+about 1 s after the first picture. The scramble seen with this patch alone was a separate fault
+(patch 0065). Depends on patch 0063. Original work; no outside source.
+
+diff --git a/ps2xRuntime/include/runtime/ps2_memory.h b/ps2xRuntime/include/runtime/ps2_memory.h
+index 6094067..00ff94c 100644
+--- a/ps2xRuntime/include/runtime/ps2_memory.h
++++ b/ps2xRuntime/include/runtime/ps2_memory.h
+@@ -308,6 +308,16 @@ public:
+     bool writeIORegister(uint32_t address, uint32_t value);
+     uint32_t readIORegister(uint32_t address);
+ 
++    // IPU_TO (DMA channel 4, 0x1000B400): the channel has no IPU behind it, so the bytes it would
++    // send are taken by a consumer that stands in for the decoder. Appends up to maxBytes of the
++    // started chain to `out` (whole tag payloads at most; a payload larger than maxBytes is
++    // split), advancing MADR/TADR/QWC/CHCR as the hardware does, and completes the channel
++    // (STR cleared, D_STAT cause 4) when the chain ends. Returns the bytes appended; 0 when the
++    // channel is not started or the chain has ended.
++    uint32_t ipuToPull(std::vector<uint8_t> &out, uint32_t maxBytes);
++    // True while channel 4 is started and its chain has not ended.
++    bool ipuToActive() const { return m_ipuToStarted; }
++
+     // EE timers advance from the scheduler's emulated EE-cycle clock. The
+     // returned mask uses bits 0..3 for newly raised TIM0..TIM3 interrupts.
+     uint32_t advanceEeTimers(uint64_t eeCycles) noexcept;
+@@ -433,6 +443,7 @@ public:
+     Ps2Vif1TapFn m_vif1Tap = nullptr;
+     void *m_vif1TapUser = nullptr;
+     bool m_path3Masked = false;
++    bool m_ipuToStarted = false; // DMA channel 4 started (STR written) and not yet ended or stopped
+     uint32_t m_vif1PendingPath2ImageQwc = 0u;
+     bool m_vif1PendingPath2DirectHl = false;
+     std::vector<std::vector<uint8_t>> m_path3MaskedFifo;
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+index ef3450b..2e8e9de 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+@@ -495,6 +495,8 @@ namespace ps2_stubs
+             bool sawSequenceEnd = false;
+             bool streamEnded = false;
+             bool decoderFailed = false;
++            uint64_t ipuPulledBytes = 0u;                 // bytes taken from DMA channel 4
++            uint64_t nodataAtBytes = ~0ull;               // ipuPulledBytes when the Nodata callback last ran
+             uint64_t cdStreamGeneration = 0u;
+             bool waitingForVideoSequenceHeader = true;
+             std::vector<uint8_t> videoSequenceSyncBuffer;
+@@ -1110,6 +1112,27 @@ namespace ps2_stubs
+             flushDecoderIfEnded(playback);
+         }
+ 
++        // The game (CRI's Sofdec) does not hand the stream to sceMpegAddBs: it sends it to the IPU
++        // through DMA channel 4, and libmpeg's decoder takes it from there. With no IPU, the bytes
++        // the decoder would have taken are pulled from the started channel here, one tag payload at
++        // a time, only while no picture is ready; the chain ends at the last valid sector.
++        void pullIpuToInput(PS2Runtime *runtime, MpegPlaybackState &playback)
++        {
++            constexpr uint32_t kPullBytes = 2048u;
++            std::vector<uint8_t> chunk;
++            while (runtime != nullptr && playback.decodedFrames.empty() && !playback.decoderFailed &&
++                   !playback.streamEnded)
++            {
++                chunk.clear();
++                if (runtime->memory().ipuToPull(chunk, kPullBytes) == 0u)
++                {
++                    break;
++                }
++                playback.ipuPulledBytes += chunk.size();
++                feedElementaryStream(playback, chunk.data(), chunk.size());
++            }
++        }
++
+         void erasePssPrefix(MpegPlaybackState &playback, size_t count)
+         {
+             std::vector<uint8_t> &buffer = playback.pssBuffer;
+@@ -1652,6 +1675,43 @@ namespace ps2_stubs
+             dispatchStreamCallbacks(rdram, ctx, runtime, events);
+         }
+ 
++        // Runs the game's Nodata callback (type 1, sceMpegAddCallback) on the calling thread and wakes
++        // its GetPicture wait when the callback returns. Called with g_mpeg_stub_mutex held.
++        void dispatchNodataCallback(uint8_t *rdram, R5900Context *callerCtx, PS2Runtime *runtime, uint32_t mpegAddr)
++        {
++            auto it = g_mpeg_stub_state.callbacksByMpeg.find(mpegAddr);
++            if (it == g_mpeg_stub_state.callbacksByMpeg.end())
++            {
++                return;
++            }
++            for (const MpegRegisteredCallback &callback : it->second)
++            {
++                if (callback.stream || callback.type != 1u || callback.func == 0u ||
++                    !runtime->hasFunction(callback.func))
++                {
++                    continue;
++                }
++                R5900Context callbackCtx = *callerCtx;
++                SET_GPR_U32(&callbackCtx, 4, mpegAddr);
++                SET_GPR_U32(&callbackCtx, 5, 0u);
++                SET_GPR_U32(&callbackCtx, 6, callback.data);
++                SET_GPR_U32(&callbackCtx, 7, 0u);
++                SET_GPR_U32(&callbackCtx, 29, 0u);
++                SET_GPR_U32(&callbackCtx, 31, 0u);
++                callbackCtx.pc = callback.func;
++
++                GuestInvocation invocation{};
++                invocation.kind = GuestInvocationKind::RpcCallback;
++                invocation.context = callbackCtx;
++                invocation.onComplete = [runtime, mpegAddr](const R5900Context &, R5900Context &)
++                {
++                    runtime->eeScheduler().completeExternalWait(kMpegPictureWaitType, mpegAddr, KE_OK);
++                };
++                runtime->eeScheduler().queueInvocation(std::move(invocation));
++                return;
++            }
++        }
++
+         void writeBlankMpegFrame(uint8_t *rdram, uint32_t destAddr, uint32_t width, uint32_t height)
+         {
+             if (!rdram || destAddr == 0u)
+@@ -1705,9 +1765,8 @@ namespace ps2_stubs
+                     static_cast<size_t>(mbx) * static_cast<size_t>(outHeight) * 16u * 4u;
+                 for (uint32_t y = 0u; y < outHeight; ++y)
+                 {
+-                    uint8_t *dst = getMemPtr(
+-                        rdram,
+-                        destAddr + static_cast<uint32_t>(stripOffset + static_cast<size_t>(y) * 16u * 4u));
++                    const size_t rowOffset = stripOffset + static_cast<size_t>(y) * 16u * 4u;
++                    uint8_t *dst = getMemPtr(rdram, destAddr + static_cast<uint32_t>(rowOffset));
+                     if (!dst)
+                     {
+                         continue;
+@@ -2282,7 +2341,26 @@ namespace ps2_stubs
+         {
+             std::unique_lock<std::mutex> lock(g_mpeg_stub_mutex);
+             MpegPlaybackState &playback = getPlaybackState(mpegAddr);
+-            if (playback.decodedFrames.empty() &&
++            pullIpuToInput(runtime, playback);
++            // libmpeg runs the Nodata callback when the decoder needs bytes and the DMA is idle; the
++            // game's callback feeds more or, with nothing left, marks the end (and GetPicture reports it
++            // through the player's state). Run it once per amount of data taken from channel 4; asked
++            // again with nothing new, return instead of waiting for ever.
++            bool ipuStarved = false;
++            if (playback.decodedFrames.empty() && playback.ipuPulledBytes != 0u &&
++                !runtime->memory().ipuToActive() && !playback.decoderFailed)
++            {
++                if (playback.nodataAtBytes == playback.ipuPulledBytes)
++                {
++                    ipuStarved = true;
++                }
++                else
++                {
++                    playback.nodataAtBytes = playback.ipuPulledBytes;
++                    dispatchNodataCallback(rdram, ctx, runtime, mpegAddr);
++                }
++            }
++            if (playback.decodedFrames.empty() && !ipuStarved &&
+                 !g_mpeg_stub_state.currentCdStreamEofSeen &&
+                 !playback.streamEnded &&
+                 !playback.decoderFailed)
+diff --git a/ps2xRuntime/src/lib/ps2_memory.cpp b/ps2xRuntime/src/lib/ps2_memory.cpp
+index 873825c..dba0ca8 100644
+--- a/ps2xRuntime/src/lib/ps2_memory.cpp
++++ b/ps2xRuntime/src/lib/ps2_memory.cpp
+@@ -1283,6 +1283,9 @@ bool PS2Memory::writeIORegister(uint32_t address, uint32_t value)
+ 
+     m_ioRegisters[address] = value;
+ 
++    if (address == 0x1000B400u)
++        m_ipuToStarted = (value & 0x100u) != 0u;
++
+     if (address >= 0x10003C00u && address < 0x10003E00u)
+     {
+         m_vifWriteCount.fetch_add(1, std::memory_order_relaxed);
+@@ -1708,6 +1711,149 @@ bool PS2Memory::tryProcessScratchpadDma(uint32_t channelBase, uint32_t chcr)
+     return true;
+ }
+ 
++uint32_t PS2Memory::ipuToPull(std::vector<uint8_t> &out, uint32_t maxBytes)
++{
++    static constexpr uint32_t kChannel = 0x1000B400u;
++    static constexpr uint32_t kChcr = kChannel + 0x00u;
++    static constexpr uint32_t kMadr = kChannel + 0x10u;
++    static constexpr uint32_t kQwc = kChannel + 0x20u;
++    static constexpr uint32_t kTadr = kChannel + 0x30u;
++    static constexpr uint32_t kAsr0 = kChannel + 0x40u;
++    static constexpr uint32_t kAsr1 = kChannel + 0x50u;
++    static constexpr uint32_t kCause = 4u;
++
++    uint32_t chcr = m_ioRegisters[kChcr];
++    if (!m_ipuToStarted || maxBytes < 16u)
++        return 0u;
++
++    const uint32_t mode = (chcr >> 2u) & 0x3u;
++    uint32_t madr = m_ioRegisters[kMadr];
++    uint32_t qwc = m_ioRegisters[kQwc] & 0xFFFFu;
++    uint32_t tadr = m_ioRegisters[kTadr];
++    uint32_t asr0 = m_ioRegisters[kAsr0];
++    uint32_t asr1 = m_ioRegisters[kAsr1];
++    uint32_t asp = (chcr >> 4u) & 0x3u;
++    // CHCR bits 28-30 hold the id of the tag whose payload is being sent: what follows it.
++    uint32_t tagId = (chcr >> 28u) & 0x7u;
++    uint32_t pulled = 0u;
++    bool finished = false;
++
++    auto isEndId = [](uint32_t id) { return id == 0u || id == 7u; };
++
++    while (pulled + 16u <= maxBytes)
++    {
++        if (qwc == 0u)
++        {
++            if (mode != 1u)
++            {
++                finished = true;
++                break;
++            }
++            const uint32_t tagPhys = tadr & 0x1FFFFFF0u;
++            const bool tagSpr = isScratchpad(tadr);
++            const uint8_t *base = tagSpr ? m_scratchpad : m_rdram;
++            const uint32_t limit = tagSpr ? PS2_SCRATCHPAD_SIZE : PS2_RAM_SIZE;
++            const uint32_t tagOff = tagSpr ? (tadr & (PS2_SCRATCHPAD_SIZE - 1u)) : (tagPhys & (PS2_RAM_SIZE - 1u));
++            if (tagOff + 16u > limit)
++            {
++                finished = true;
++                break;
++            }
++            uint64_t tag = 0;
++            std::memcpy(&tag, base + tagOff, sizeof(tag));
++            qwc = static_cast<uint32_t>(tag & 0xFFFFu);
++            tagId = static_cast<uint32_t>((tag >> 28u) & 0x7u);
++            const uint32_t addr = static_cast<uint32_t>((tag >> 32u) & 0x7FFFFFFFu);
++            chcr = (chcr & 0x0000FFFFu) | (static_cast<uint32_t>((tag >> 16u) & 0xFFFFu) << 16u);
++            switch (tagId)
++            {
++            case 0u: // refe
++            case 3u: // ref
++            case 4u: // refs
++                madr = addr;
++                tadr += 16u;
++                break;
++            case 1u: // cnt
++            case 7u: // end
++                madr = tadr + 16u;
++                tadr = madr + qwc * 16u;
++                break;
++            case 2u: // next
++                madr = tadr + 16u;
++                tadr = addr;
++                break;
++            case 5u: // call
++                madr = tadr + 16u;
++                if (asp == 0u)
++                    asr0 = madr + qwc * 16u;
++                else if (asp == 1u)
++                    asr1 = madr + qwc * 16u;
++                if (asp < 2u)
++                    ++asp;
++                tadr = addr;
++                break;
++            default: // ret
++                madr = tadr + 16u;
++                if (asp == 2u)
++                {
++                    tadr = asr1;
++                    asp = 1u;
++                }
++                else if (asp == 1u)
++                {
++                    tadr = asr0;
++                    asp = 0u;
++                }
++                else
++                    tagId = 7u;
++                break;
++            }
++            if (qwc == 0u)
++            {
++                if (isEndId(tagId))
++                {
++                    finished = true;
++                    break;
++                }
++                continue;
++            }
++        }
++
++        const uint32_t room = (maxBytes - pulled) / 16u;
++        const uint32_t take = std::min(qwc, room);
++        if (take == 0u)
++            break;
++        const bool spr = isScratchpad(madr);
++        const uint8_t *base = spr ? m_scratchpad : m_rdram;
++        const uint32_t limit = spr ? PS2_SCRATCHPAD_SIZE : PS2_RAM_SIZE;
++        const uint32_t off = spr ? (madr & (PS2_SCRATCHPAD_SIZE - 1u)) : (madr & 0x1FFFFFF0u & (PS2_RAM_SIZE - 1u));
++        const uint32_t bytes = std::min(take * 16u, limit - off);
++        out.insert(out.end(), base + off, base + off + bytes);
++        pulled += bytes;
++        madr += bytes;
++        qwc -= bytes / 16u;
++        if (qwc == 0u && (mode != 1u || isEndId(tagId)))
++        {
++            finished = true;
++            break;
++        }
++    }
++
++    m_ioRegisters[kMadr] = madr;
++    m_ioRegisters[kQwc] = qwc;
++    m_ioRegisters[kTadr] = tadr;
++    m_ioRegisters[kAsr0] = asr0;
++    m_ioRegisters[kAsr1] = asr1;
++    chcr = (chcr & ~(0x3u << 4u)) | ((asp & 0x3u) << 4u);
++    m_ioRegisters[kChcr] = chcr;
++    if (finished)
++    {
++        m_ipuToStarted = false;
++        completeDmacChannel(kChannel, kCause);
++    }
++    return pulled;
++}
++
+ void PS2Memory::completeDmacChannel(uint32_t channelBase, uint32_t cause)
+ {
+     static constexpr uint32_t kDStat = 0x1000E010u;

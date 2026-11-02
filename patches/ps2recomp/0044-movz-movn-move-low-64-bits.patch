@@ -1,0 +1,32 @@
+Recompiler: movz and movn move only the low 64 bits of the register, like the reference.
+
+What it fixes: SPECIAL_MOVZ / SPECIAL_MOVN were translated with SET_GPR_VEC(GPR_VEC), which copies all 128
+bits of $rs into $rd. The reference emulator's interpreter (third_party/pcsx2/pcsx2/R5900OpcodeImpl.cpp,
+Interpreter::OpcodeImpl::MOVZ / MOVN) copies only UD[0]; the upper 64 bits of $rd keep their value (the
+condition tests UD[0] of $rt in both). It only shows when a 128-bit (multimedia) register holds data in its
+upper half, i.e. code that mixes lq/MMI with movz/movn on the same register. Found by tests/conformance
+(family "compare"): movz failed 13 of 169 cases and movn 156 of 169, all in the upper half of $rd.
+
+How it was verified: the conformance tests of compare pass with a recompiler relinked with this change and
+fail without it (the pytest command of tests/conformance, see journal 025). The game has movz / movn sites
+(docs/knowledge/data/instruction_conformance.tsv); whether any of them reads the upper half afterwards is not
+known. Apply it only together with a regeneration and a regression run.
+
+Original work for this repository (no code from another project).
+
+diff --git a/ps2xRecomp/src/lib/special_translator.cpp b/ps2xRecomp/src/lib/special_translator.cpp
+index b01a937..e119f65 100644
+--- a/ps2xRecomp/src/lib/special_translator.cpp
++++ b/ps2xRecomp/src/lib/special_translator.cpp
+@@ -121,9 +121,9 @@ namespace ps2recomp
+         case SPECIAL_SLTU:
+             return fmt::format("SET_GPR_U64(ctx, {}, ((uint64_t)GPR_U64(ctx, {}) < (uint64_t)GPR_U64(ctx, {})) ? 1 : 0);", inst.rd, inst.rs, inst.rt);
+         case SPECIAL_MOVZ:
+-            return fmt::format("if (GPR_U64(ctx, {}) == 0) SET_GPR_VEC(ctx, {}, GPR_VEC(ctx, {}));", inst.rt, inst.rd, inst.rs);
++            return fmt::format("if (GPR_U64(ctx, {}) == 0) SET_GPR_U64(ctx, {}, GPR_U64(ctx, {}));", inst.rt, inst.rd, inst.rs);
+         case SPECIAL_MOVN:
+-            return fmt::format("if (GPR_U64(ctx, {}) != 0) SET_GPR_VEC(ctx, {}, GPR_VEC(ctx, {}));", inst.rt, inst.rd, inst.rs);
++            return fmt::format("if (GPR_U64(ctx, {}) != 0) SET_GPR_U64(ctx, {}, GPR_U64(ctx, {}));", inst.rt, inst.rd, inst.rs);
+         case SPECIAL_MFSA:
+             return fmt::format("SET_GPR_U32(ctx, {}, ctx->sa);", inst.rd);
+         case SPECIAL_MTSA:

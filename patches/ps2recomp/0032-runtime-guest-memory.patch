@@ -1,0 +1,603 @@
+The runtime's own guest memory gets a home of its own in the console's free kernel area
+
+What it fixes: the runtime kept the structures of its own that live in guest RAM - the invocation
+stacks of queued guest calls (PS2Runtime::reserveAsyncCallbackStack), the remote-call packet and
+server pools, the thread-local-storage pool and the boot-mode pool (Kernel/Syscalls/Helpers/State.h)
+- at 0x01F00000 and above, and its scratch allocator behind guestMalloc/guestCalloc/guestRealloc/
+guestFree (used by the GS, font and LibC handlers) handed out blocks from the base of the GAME's own
+heap, because SetupHeap passed the game's range to configureGuestHeap. Two collisions followed, both
+measured in this tree before the change (breakpoints during a 30 s run of the port): the first GS
+packet came from 0x5A6800, the base of the game's heap, whose own C library (recompiled, FUN_001270c0
+- real code, not a handler) keeps its bookkeeping there and puts its first arena at 0x5A6840; and the
+invocation stacks grew down from the top of RAM (0x02000000) over the main thread's stack
+(0x01F80000-0x02000000). To leave room for them the runtime clamped the game's heap to 0x01F00000,
+where the console's kernel lets it end at 0x01F80000: measured against the console's own memory image
+(work/ref/x/01/ee_ram.bin, the title screen; the same in 04 and 06), the game's first heap request of
+0x19D73F0 succeeds there - the arena word 0x4D69C4 is 0x9D73F0 (the request minus the first arena of
+0x1000000) and 0x4D69B8 is 0x1F50C20 - while in the port it did not (0x4D69C4 = 0x9596F0, 0x7DD00 =
+513.5 KiB smaller), so the boot shrank its own arena and every texture pool of the engine landed in
+the game's data instead of its heap (journal 006, items 27-30). The console's kernel occupies
+0x00080000 to 0x00100000 (measured on all six console images: 0x00080000-0x0009FFFF holds 3902
+non-zero 16-byte words, 0x000A0000-0x000FFFFF is all zeroes) and does not exist in this runtime, while
+nothing of the game lives below 0x00100000, so that is where the runtime's own memory now goes:
+
+    0x00080000-0x000BFFFF  invocation stacks: 16 of 0x4000, bumped downwards from 0x000C0000, never freed
+    0x000C0000-0x000CFFFF  remote-call packet pool (wraps, unchanged behaviour)
+    0x000D0000-0x000DFFFF  remote-call server pool (wraps, unchanged behaviour)
+    0x000E0000-0x000EFFFF  thread-local-storage pool (wraps, unchanged behaviour)
+    0x000F0000-0x000F0FFF  boot-mode pool (does not wrap)
+    0x000F1000-0x000FFFFF  the runtime's scratch allocator (guestMalloc and friends)
+
+The layout is defined once, in the new header runtime/ps2_guest_memory.h, with static_asserts that no
+region overlaps another and that all of them end at or below 0x00100000; State.h and ps2_runtime.h
+include it. SetupHeap and EndOfHeap follow the console's kernel: the end is start + size, or, when the
+size is -1 (0xFFFFFFFF), the bottom of the calling thread's stack as SetupThread recorded it (the game
+calls SetupThread with stack -1 and size 0x80000, so its stack is the top 0x80000 bytes of RAM and the
+heap ends at 0x01F80000); there is no 0x01F00000 clamp any more. SetupHeap's return value is unchanged
+(the aligned base): the game's own entry code (0x1001E8) ignores it, checked by decompiling it.
+Exhaustion is loud, never silent: the boot-mode pool, the invocation stacks and the runtime's
+allocator print one line naming the region and the size asked (the packet, server and TLS pools keep
+wrapping by design). The runtime's allocator now answers from 0xF000 bytes, so a handler asking for
+more is refused loudly instead of silently: the font handler asks 0x2010 and 0xc400 and CreateThread
+asks for a whole stack when the game passes stack 0 (this game passes its own stacks and does not call
+the font handlers; both paths were checked with breakpoints). Note for later: this game's C library is
+recompiled, so the runtime's malloc family (Kernel/Stubs/LibC.cpp, Compatibility.cpp) is not used by
+it; after this patch those handlers allocate from the runtime's private range, so a game that relied on
+them for its whole heap would need the previous behaviour.
+
+How it was verified: tests/runtime/guest_heap_limit_test.cpp (new) fails against the tree without this
+patch (13 checks: EndOfHeap answers 0x01F00000, the pools 0x01F00000/0x01F10000/0x01F20000/0x01F30000,
+the invocation stack 0x01FFBFF0 and the scratch block 0x005A6800, all inside the game's memory) and
+passes with it (EndOfHeap 0x01F80000, server 0x000D0080, packet 0x000C0040, tls 0x000E0100, bootmode
+0x000F0020, invocation stack 0x000B7FF0, scratch 0x000F1100); the other eight executables of
+tests/runtime still pass, built with PS2X_WITH_RAYLIB=OFF and DISPLAY unset. In the game: before the
+patch a 30 s run ended at frame 0 with RESULT: MISSING_BRANCH_TARGET 0x0; after it three 60 s runs give
+RESULT: OK_VSYNC_LOOP (frames and vsyncs of each run are in docs/journal/006-file-packages.md), the
+game boots to its memory-card warning dialog and draws it (--shots work/shots/boot writes
+frame_000300.png), the 14 module loads and the remote-call server registrations still happen, and the
+RAM dump against work/ref/x/01/ee_ram.bin gives the game's arena words equal to the console's at
+0x4D69B8 (0x01F50C20) and 0x4D69C4 (0x009D73F0), the first pool descriptor 0x5446E0 equal in both
+fields (0x00D29C00/0x0082A8C0) and 0x544708 equal in +0x14 (0x007A31F0, +0x10 0xE0 away: a different
+number of allocations by the end of the run). With breakpoints during a 60 s run: 4 of the 16
+invocation stacks are reserved (0x4000 bytes each) and the runtime's allocator serves 2 requests, both
+0x80 bytes.
+
+Origin: original work for this project (T-016). The console facts come from the memory images in
+work/ref/x/ (captures of the game on the reference emulator, taken by the orchestrator).
+
+diff --git a/ps2xRuntime/include/ps2_runtime.h b/ps2xRuntime/include/ps2_runtime.h
+index 705b1c1..805a15f 100644
+--- a/ps2xRuntime/include/ps2_runtime.h
++++ b/ps2xRuntime/include/ps2_runtime.h
+@@ -26,6 +26,7 @@
+ 
+ #include "ps2_log.h"
+ #include "runtime/ps2_address.h"
++#include "runtime/ps2_guest_memory.h"
+ #include "runtime/gs/ps2_gif_arbiter.h"
+ #include "runtime/gs/ps2_host_gs.h"
+ #include "runtime/ps2_memory.h"
+@@ -411,7 +412,11 @@ public:
+     void handleTLBWR(uint8_t *rdram, R5900Context *ctx);
+     void handleTLBP(uint8_t *rdram, R5900Context *ctx);
+     void clearLLBit(R5900Context *ctx);
+-    void configureGuestHeap(uint32_t guestBase, uint32_t guestLimit = PS2_RAM_SIZE);
++    // The runtime's own scratch allocator over its private guest-RAM range (runtime/ps2_guest_memory.h,
++    // 0x000F1000-0x00100000): the GS, font and LibC handlers allocate their buffers with guestMalloc.
++    // This is NOT the game's heap: the game's own C library (recompiled) manages that one through
++    // SetupHeap/EndOfHeap, which report the kernel heap recorded by configureKernelHeap.
++    void configureGuestHeap(uint32_t guestBase, uint32_t guestLimit = kRuntimeAllocatorEnd);
+     uint32_t guestMalloc(uint32_t size, uint32_t alignment = 16u);
+     uint32_t guestCalloc(uint32_t count, uint32_t size, uint32_t alignment = 16u);
+     uint32_t guestRealloc(uint32_t guestAddr, uint32_t newSize, uint32_t alignment = 16u);
+@@ -421,6 +426,12 @@ public:
+     uint32_t guestHeapLimit() const;
+     uint32_t reserveAsyncCallbackStack(uint32_t size, uint32_t alignment = 16u);
+ 
++    // The kernel heap the game sees: what the console's kernel reports through SetupHeap (base) and
++    // EndOfHeap (end). The runtime never allocates from it.
++    void configureKernelHeap(uint32_t base, uint32_t end);
++    uint32_t kernelHeapBase() const;
++    uint32_t kernelHeapEnd() const;
++
+     void drainCompletedDmacHandlers(uint8_t *rdram);
+ 
+     void requestStop();
+@@ -523,6 +534,7 @@ private:
+     uint32_t allocateGuestBlockLocked(uint32_t size, uint32_t alignment);
+     void freeGuestBlockLocked(uint32_t guestAddr);
+     void coalesceGuestHeapLocked();
++    void logInvocationStacksExhausted(uint32_t requested) const;
+     void HandleIntegerOverflow(R5900Context *ctx);
+ 
+     [[nodiscard]] ps2x::iop::RpcAbi selectIopRpcAbi(const ps2x::iop::RpcAbiRequest &request) const;
+@@ -562,13 +574,18 @@ private:
+     mutable std::mutex m_guestHeapMutex;
+     mutable std::mutex m_asyncCallbackStackMutex;
+     std::vector<GuestHeapBlock> m_guestHeapBlocks;
+-    uint32_t m_guestHeapBase = 0x00100000u;
+-    uint32_t m_guestHeapEnd = 0x00100000u;
+-    uint32_t m_guestHeapLimit = PS2_RAM_SIZE;
+-    uint32_t m_guestHeapSuggestedBase = 0x00100000u;
++    // The runtime's own scratch allocator: its private range, not the game's heap.
++    uint32_t m_guestHeapBase = kRuntimeAllocatorBase;
++    uint32_t m_guestHeapEnd = kRuntimeAllocatorBase;
++    uint32_t m_guestHeapLimit = kRuntimeAllocatorEnd;
++    uint32_t m_guestHeapSuggestedBase = kRuntimeAllocatorBase;
+     bool m_guestHeapConfigured = false;
+-    uint32_t m_asyncCallbackStackFloor = 0x01F00000u;
+-    uint32_t m_asyncCallbackStackTop = PS2_RAM_SIZE;
++    // The kernel heap the game sees (SetupHeap/EndOfHeap): recorded, never used to allocate.
++    uint32_t m_kernelHeapBase = 0x00100000u;
++    uint32_t m_kernelHeapEnd = PS2_RAM_SIZE;
++    // Invocation stacks: bumped downwards from kInvocationStackBase, never freed.
++    uint32_t m_asyncCallbackStackFloor = kInvocationStackFloor;
++    uint32_t m_asyncCallbackStackTop = kInvocationStackBase;
+ 
+     std::atomic<uint32_t> m_missingFunctionPolicy{static_cast<uint32_t>(MissingFunctionPolicy::ContinueToTarget)};
+     std::atomic<bool> m_missingFunctionReported{false};
+diff --git a/ps2xRuntime/include/runtime/ps2_guest_memory.h b/ps2xRuntime/include/runtime/ps2_guest_memory.h
+new file mode 100644
+index 0000000..1950314
+--- /dev/null
++++ b/ps2xRuntime/include/runtime/ps2_guest_memory.h
+@@ -0,0 +1,64 @@
++#pragma once
++
++#include <cstdint>
++
++// The runtime's own memory inside the guest's 32 MiB. The console's kernel lives in 0x00080000 to
++// 0x00100000 (measured on two console memory images: 0x00080000-0x0009FFFF holds the console's
++// kernel, 0x000A0000-0x000FFFFF is all zeroes, and nothing of the game lives below 0x00100000),
++// and none of that kernel exists in this runtime. The runtime's own guest-RAM structures therefore
++// live there, outside the game's image, its heap and its stacks. Before this change they sat at
++// 0x01F00000 and above: guestMalloc handed out blocks from the base of the game's own heap (0x5A6800)
++// and the invocation stacks grew down from the top of RAM over the main thread's stack
++// (0x01F80000-0x02000000), which is why the game's heap had to be clamped to 0x01F00000 to leave room.
++//
++//   0x00080000-0x000BFFFF  invocation stacks: 16 of 0x4000, bumped downwards from 0x000C0000
++//   0x000C0000-0x000CFFFF  remote-call packet pool (wraps by design)
++//   0x000D0000-0x000DFFFF  remote-call server pool (wraps by design)
++//   0x000E0000-0x000EFFFF  thread-local-storage pool (wraps by design)
++//   0x000F0000-0x000F0FFF  boot-mode pool (does not wrap)
++//   0x000F1000-0x000FFFFF  the runtime's own allocator: guestMalloc/guestCalloc/guestRealloc/guestFree
++static constexpr uint32_t kRuntimeGuestMemoryBase = 0x00080000;
++static constexpr uint32_t kRuntimeGuestMemoryEnd = 0x00100000;
++
++static constexpr uint32_t kInvocationStackSize = 0x4000;
++static constexpr uint32_t kInvocationStackBase = 0x000C0000;
++static constexpr uint32_t kInvocationStackFloor = 0x00080000;
++static constexpr uint32_t kInvocationStackCount =
++    (kInvocationStackBase - kInvocationStackFloor) / kInvocationStackSize;
++
++static constexpr uint32_t kRpcPacketSize = 64;
++static constexpr uint32_t kRpcPacketPoolBase = 0x000C0000;
++static constexpr uint32_t kRpcPacketPoolBytes = 0x00010000;
++static constexpr uint32_t kRpcPacketPoolCount = kRpcPacketPoolBytes / kRpcPacketSize;
++static constexpr uint32_t kRpcServerPoolBase = 0x000D0000;
++static constexpr uint32_t kRpcServerPoolBytes = 0x00010000;
++static constexpr uint32_t kRpcServerStride = 0x80;
++static constexpr uint32_t kRpcServerPoolCount = kRpcServerPoolBytes / kRpcServerStride;
++
++static constexpr uint32_t kTlsPoolBase = 0x000E0000;
++static constexpr uint32_t kTlsPoolBytes = 0x00010000;
++static constexpr uint32_t kTlsBlockSize = 0x100;
++static constexpr uint32_t kTlsPoolCount = kTlsPoolBytes / kTlsBlockSize;
++
++static constexpr uint32_t kBootModePoolBase = 0x000F0000;
++static constexpr uint32_t kBootModePoolBytes = 0x00001000;
++
++static constexpr uint32_t kRuntimeAllocatorBase = 0x000F1000;
++static constexpr uint32_t kRuntimeAllocatorEnd = 0x00100000;
++static constexpr uint32_t kRuntimeAllocatorBytes = kRuntimeAllocatorEnd - kRuntimeAllocatorBase;
++
++// The table above: no region overlaps another and all of them end at or below the game's image.
++static_assert(kInvocationStackBase == kRpcPacketPoolBase,
++              "the invocation stacks are bumped downwards from the packet pool");
++static_assert(kInvocationStackFloor >= kRuntimeGuestMemoryBase,
++              "the invocation stacks start at the runtime's own area");
++static_assert(kInvocationStackCount == 16u, "the area holds 16 invocation stacks of 0x4000 bytes");
++static_assert(kRpcPacketPoolBase + kRpcPacketPoolBytes == kRpcServerPoolBase, "packets, then servers");
++static_assert(kRpcServerPoolBase + kRpcServerPoolBytes == kTlsPoolBase, "servers, then TLS");
++static_assert(kTlsPoolBase + kTlsPoolBytes == kBootModePoolBase, "TLS, then boot mode");
++static_assert(kBootModePoolBase + kBootModePoolBytes <= kRuntimeAllocatorBase,
++              "boot mode, then the runtime's allocator");
++static_assert(kRuntimeAllocatorEnd <= kRuntimeGuestMemoryEnd,
++              "the runtime's allocator ends inside the runtime's own area");
++static_assert(kRuntimeGuestMemoryEnd <= 0x00100000u,
++              "the runtime's own memory must stay below the game's image");
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index 56bf878..01717d4 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -2,6 +2,9 @@
+ 
+ #include "ps2_log.h"
+ #include "ps2_runtime_macros.h"
++// The runtime's own guest-RAM regions (kInvocationStackSize): one place, ps2_guest_memory.h. Not
++// Syscalls/Helpers/State.h: its KE_* constants would clash with this file's own.
++#include "runtime/ps2_guest_memory.h"
+ 
+ #include <algorithm>
+ #include <cassert>
+@@ -1170,7 +1173,6 @@ uint32_t EeScheduler::invocationStackTop()
+     {
+         return existing->second;
+     }
+-    constexpr uint32_t kInvocationStackSize = 0x4000u;
+     const uint32_t top = m_runtime.reserveAsyncCallbackStack(kInvocationStackSize, 16u);
+     if (top == 0u)
+     {
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/Helpers/Runtime.h b/ps2xRuntime/src/lib/Kernel/Syscalls/Helpers/Runtime.h
+index 6204325..8452b9d 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/Helpers/Runtime.h
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/Helpers/Runtime.h
+@@ -344,7 +344,19 @@ static uint32_t allocBootModeAddr(uint8_t *rdram, size_t bytes)
+ 
+     size_t aligned = (bytes + 15u) & ~15u;
+     if (g_bootmode_pool_offset + aligned > kBootModePoolBytes)
++    {
++        // Loud, never silent: the boot-mode pool does not wrap by design and this request does not fit.
++        static uint32_t bootModeExhaustedLogs = 0;
++        if (bootModeExhaustedLogs < 8u)
++        {
++            std::cerr << "[ps2xRuntime] boot-mode pool exhausted: asked " << aligned
++                      << " bytes with " << (kBootModePoolBytes - g_bootmode_pool_offset)
++                      << " left in the region 0x" << std::hex << kBootModePoolBase << "-0x"
++                      << (kBootModePoolBase + kBootModePoolBytes) << std::dec << std::endl;
++            ++bootModeExhaustedLogs;
++        }
+         return 0;
++    }
+ 
+     uint32_t addr = kBootModePoolBase + g_bootmode_pool_offset;
+     g_bootmode_pool_offset += static_cast<uint32_t>(aligned);
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/Helpers/State.h b/ps2xRuntime/src/lib/Kernel/Syscalls/Helpers/State.h
+index d6b7549..054773d 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/Helpers/State.h
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/Helpers/State.h
+@@ -242,22 +242,9 @@ inline std::filesystem::path g_host_cwd;
+ inline std::filesystem::path g_cdrom_cwd;
+ inline std::string g_ps2_cwd_device = "host0";
+ 
+-static constexpr uint32_t kRpcPacketSize = 64;
+-static constexpr uint32_t kRpcPacketPoolBase = 0x01F00000;
+-static constexpr uint32_t kRpcPacketPoolBytes = 0x00010000;
+-static constexpr uint32_t kRpcPacketPoolCount = kRpcPacketPoolBytes / kRpcPacketSize;
+-static constexpr uint32_t kRpcServerPoolBase = 0x01F10000;
+-static constexpr uint32_t kRpcServerPoolBytes = 0x00010000;
+-static constexpr uint32_t kRpcServerStride = 0x80;
+-static constexpr uint32_t kRpcServerPoolCount = kRpcServerPoolBytes / kRpcServerStride;
+-
+-static constexpr uint32_t kTlsPoolBase = 0x01F20000;
+-static constexpr uint32_t kTlsPoolBytes = 0x00010000;
+-static constexpr uint32_t kTlsBlockSize = 0x100;
+-static constexpr uint32_t kTlsPoolCount = kTlsPoolBytes / kTlsBlockSize;
+-
+-static constexpr uint32_t kBootModePoolBase = 0x01F30000;
+-static constexpr uint32_t kBootModePoolBytes = 0x00001000;
++// The runtime's own memory inside the guest's RAM (the four pools, the invocation stacks and the
++// runtime's allocator) is defined in one place: runtime/ps2_guest_memory.h.
++#include "runtime/ps2_guest_memory.h"
+ 
+ static constexpr uint32_t kSifRpcModeNowait = 0x01;
+ static constexpr uint32_t kSifRpcModeNoWbDc = 0x02;
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp b/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
+index 9614016..351e9f9 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
+@@ -534,7 +534,11 @@ namespace ps2_syscalls
+         setReturnU32(ctx, sp);
+     }
+ 
+-    // 0x3D SetupHeap: returns heap base/start pointer
++    // 0x3D SetupHeap: the kernel's heap. The console's kernel answers with the base it was given, and
++    // the end that EndOfHeap reports is start + size, or - when the size is -1 (0xFFFFFFFF) - the
++    // bottom of the calling thread's stack, which SetupThread recorded (the game calls SetupThread
++    // with stack -1 and size 0x80000, so its stack is the top 0x80000 bytes of RAM and the heap ends
++    // at 0x01F80000). The runtime's own allocator has its private range and is not configured here.
+     void SetupHeap(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
+         const uint32_t heapBaseRaw = getRegU32(ctx, 4); // $a0
+@@ -542,54 +546,54 @@ namespace ps2_syscalls
+ 
+         const uint32_t heapBase = (heapBaseRaw + 0xFu) & ~0xFu;
+ 
+-        // Silent Hill and other games often pass -1 (0xFFFFFFFF) to mean "rest of RAM".
+-        static constexpr uint32_t kDefaultGuestHeapEnd = 0x01F00000u;
+-        uint32_t heapLimit = kDefaultGuestHeapEnd;
+-
++        uint32_t heapEnd = PS2_RAM_SIZE;
+         if (heapSize != 0u && heapSize != 0xFFFFFFFFu)
+         {
+-            const uint64_t candidate = static_cast<uint64_t>(heapBase) + static_cast<uint64_t>(heapSize);
+-            heapLimit = static_cast<uint32_t>(std::min<uint64_t>(candidate, kDefaultGuestHeapEnd));
++            heapEnd = heapBase + heapSize; // the console's kernel: start + size, no clamp
+         }
+-
+-        if (heapLimit <= heapBase)
++        else
+         {
+-            heapLimit = kDefaultGuestHeapEnd;
++            EeScheduler &scheduler = runtime->eeScheduler();
++            scheduler.bindMainContextForSyscall(*ctx, rdram);
++            if (const GuestThread *self = scheduler.currentThread(); self != nullptr && self->stack != 0u)
++            {
++                heapEnd = self->stack; // the bottom of this thread's stack, as SetupThread set it up
++            }
++        }
++        if (heapEnd <= heapBase)
++        {
++            heapEnd = heapBase;
+         }
+ 
+         if (runtime)
+         {
+-            runtime->configureGuestHeap(heapBase, heapLimit);
++            runtime->configureKernelHeap(heapBase, heapEnd);
+ 
+             PS2_IF_AGRESSIVE_LOGS({
+                 std::cerr << "[SetupHeap]"
+                           << " base=0x" << std::hex << heapBaseRaw
+                           << " alignedBase=0x" << heapBase
+                           << " size=0x" << heapSize
+-                          << " runtimeBase=0x" << runtime->guestHeapBase()
+-                          << " runtimeEnd=0x" << runtime->guestHeapEnd()
++                          << " kernelBase=0x" << runtime->kernelHeapBase()
++                          << " kernelEnd=0x" << runtime->kernelHeapEnd()
+                           << std::dec << std::endl;
+             });
+ 
+-            setReturnU32(ctx, runtime->guestHeapBase());
++            // The game ignores this return value (checked in the ELF entry at 0x1001E8), so it stays
++            // what it always was: the aligned base.
++            setReturnU32(ctx, heapBase);
+             return;
+         }
+ 
+         setReturnU32(ctx, heapBase);
+     }
+ 
+-    // 0x3E EndOfHeap: commonly returns current heap end; keep it stable for now.
++    // 0x3E EndOfHeap: the end of the kernel heap recorded by SetupHeap (the console's kernel).
+     void EndOfHeap(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
+         (void)rdram;
+ 
+-        static constexpr uint32_t kDefaultGuestHeapEnd = 0x01F00000u;
+-
+-        const uint32_t ret = runtime
+-                                 ? runtime->guestHeapLimit()
+-                                 : kDefaultGuestHeapEnd;
+-
+-        setReturnU32(ctx, ret);
++        setReturnU32(ctx, runtime ? runtime->kernelHeapEnd() : PS2_RAM_SIZE);
+     }
+ 
+     void GetMemorySize(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index 6ad4aae..413302e 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -88,10 +88,10 @@ struct ProgramHeader
+ 
+ namespace
+ {
+-    constexpr uint32_t kGuestHeapDefaultBase = 0x00100000u;
++    // The runtime's own scratch allocator lives in its private guest-RAM range (ps2_guest_memory.h,
++    // kRuntimeAllocatorBase-kRuntimeAllocatorEnd); the game's heap is only *recorded* here (the kernel
++    // heap of configureKernelHeap) and is never used for the runtime's own allocations.
+     constexpr uint32_t kGuestHeapDefaultAlignment = 16u;
+-    constexpr uint32_t kGuestHeapSafetyPad = 0x1000u;
+-    constexpr uint32_t kGuestHeapHardLimit = 0x01F00000u;
+ 
+     constexpr uint32_t COP0_CAUSE_EXCCODE_MASK = 0x0000007Cu;
+     constexpr uint32_t COP0_CAUSE_BD = 0x80000000u;
+@@ -501,13 +501,16 @@ PS2Runtime::PS2Runtime()
+ 
+     m_loadedModules.clear();
+     m_guestHeapBlocks.clear();
+-    m_guestHeapBase = kGuestHeapDefaultBase;
+-    m_guestHeapEnd = kGuestHeapDefaultBase;
+-    m_guestHeapLimit = std::min(kGuestHeapHardLimit, PS2_RAM_SIZE);
+-    m_guestHeapSuggestedBase = kGuestHeapDefaultBase;
++    // The runtime's own allocator: its private range, never the game's heap (ps2_guest_memory.h).
++    m_guestHeapBase = kRuntimeAllocatorBase;
++    m_guestHeapEnd = kRuntimeAllocatorBase;
++    m_guestHeapLimit = kRuntimeAllocatorEnd;
++    m_guestHeapSuggestedBase = kRuntimeAllocatorBase;
+     m_guestHeapConfigured = false;
+-    m_asyncCallbackStackFloor = std::min(kGuestHeapHardLimit, PS2_RAM_SIZE);
+-    m_asyncCallbackStackTop = PS2_RAM_SIZE;
++    m_asyncCallbackStackFloor = kInvocationStackFloor;
++    m_asyncCallbackStackTop = kInvocationStackBase;
++    m_kernelHeapBase = 0x00100000u;
++    m_kernelHeapEnd = PS2_RAM_SIZE;
+ }
+ 
+ void PS2Runtime::setDebugUiCallbacks(DebugUiCallback initCallback,
+@@ -863,7 +866,7 @@ bool PS2Runtime::loadELF(const std::string &elfPath)
+     m_cpuContext.pc = header.entry;
+     m_debugPc.store(m_cpuContext.pc, std::memory_order_relaxed);
+ 
+-    uint32_t maxLoadedRdramEnd = kGuestHeapDefaultBase;
++    uint32_t maxLoadedRdramEnd = 0x00100000u;
+     uint32_t moduleBase = std::numeric_limits<uint32_t>::max();
+     uint32_t moduleEnd = 0u;
+     bool loadedAnySegment = false;
+@@ -997,27 +1000,12 @@ bool PS2Runtime::loadELF(const std::string &elfPath)
+         maxLoadedRdramEnd = PS2_RAM_SIZE;
+     }
+ 
+-    const uint32_t paddedEnd = (maxLoadedRdramEnd > (PS2_RAM_SIZE - kGuestHeapSafetyPad))
+-                                   ? PS2_RAM_SIZE
+-                                   : (maxLoadedRdramEnd + kGuestHeapSafetyPad);
+-    const uint32_t suggestedHeapBase = alignGuestHeapValue(paddedEnd, kGuestHeapDefaultAlignment);
+-    {
+-        std::lock_guard<std::mutex> lock(m_guestHeapMutex);
+-        if (!m_guestHeapConfigured)
+-        {
+-            const uint32_t hardLimit = std::min(kGuestHeapHardLimit, PS2_RAM_SIZE);
+-            m_guestHeapSuggestedBase = std::min(suggestedHeapBase, hardLimit);
+-            m_guestHeapBase = m_guestHeapSuggestedBase;
+-            m_guestHeapEnd = m_guestHeapSuggestedBase;
+-            m_guestHeapLimit = hardLimit;
+-        }
+-    }
+-    {
+-        std::lock_guard<std::mutex> lock(m_asyncCallbackStackMutex);
+-        const uint32_t hardLimit = std::min(kGuestHeapHardLimit, PS2_RAM_SIZE);
+-        m_asyncCallbackStackFloor = std::min(std::max(hardLimit, suggestedHeapBase), PS2_RAM_SIZE);
+-        m_asyncCallbackStackTop = PS2_RAM_SIZE;
+-    }
++    // The runtime's own guest memory is not placed after the game's image any more: it lives in the
++    // console's free kernel area, below 0x00100000 (ps2_guest_memory.h). The game's heap is the one
++    // SetupHeap records, and the invocation stacks come from their own region.
++    RUNTIME_LOG("[ps2xRuntime] game image ends at 0x" << std::hex << maxLoadedRdramEnd
++                                                      << "; the runtime's own guest memory is below 0x"
++                                                      << kRuntimeGuestMemoryEnd << std::dec << std::endl);
+ 
+     LoadedModule module;
+     module.name = elfPath.substr(elfPath.find_last_of("/\\") + 1);
+@@ -1660,21 +1648,20 @@ uint32_t PS2Runtime::normalizeGuestHeapAlignment(uint32_t alignment)
+ 
+ uint32_t PS2Runtime::clampGuestHeapBase(uint32_t guestBase) const
+ {
++    // The runtime's allocator only ever serves its own private range (ps2_guest_memory.h).
+     uint32_t normalized = guestBase;
+-    if (normalized >= PS2_RAM_SIZE)
++    if (normalized < kRuntimeAllocatorBase || normalized >= kRuntimeAllocatorEnd)
+     {
+-        normalized &= PS2_RAM_MASK;
++        normalized = kRuntimeAllocatorBase;
+     }
+-    const uint32_t hardLimit = std::min(kGuestHeapHardLimit, PS2_RAM_SIZE);
+-    return std::min(normalized, hardLimit);
++    return normalized;
+ }
+ 
+ uint32_t PS2Runtime::clampGuestHeapLimit(uint32_t guestLimit) const
+ {
+-    const uint32_t hardLimit = std::min(kGuestHeapHardLimit, PS2_RAM_SIZE);
+-    if (guestLimit == 0u || guestLimit > hardLimit)
++    if (guestLimit <= kRuntimeAllocatorBase || guestLimit > kRuntimeAllocatorEnd)
+     {
+-        return hardLimit;
++        return kRuntimeAllocatorEnd;
+     }
+     return guestLimit;
+ }
+@@ -1685,7 +1672,7 @@ void PS2Runtime::resetGuestHeapLocked(uint32_t guestBase, uint32_t guestLimit)
+     uint32_t limit = clampGuestHeapLimit(guestLimit);
+     if (base == 0u)
+     {
+-        const uint32_t fallbackBase = (m_guestHeapSuggestedBase != 0u) ? m_guestHeapSuggestedBase : kGuestHeapDefaultBase;
++        const uint32_t fallbackBase = (m_guestHeapSuggestedBase != 0u) ? m_guestHeapSuggestedBase : kRuntimeAllocatorBase;
+         base = alignGuestHeapValue(clampGuestHeapBase(fallbackBase), kGuestHeapDefaultAlignment);
+     }
+ 
+@@ -1720,7 +1707,7 @@ void PS2Runtime::ensureGuestHeapInitializedLocked()
+         return;
+     }
+ 
+-    const uint32_t suggested = (m_guestHeapSuggestedBase == 0u) ? kGuestHeapDefaultBase : m_guestHeapSuggestedBase;
++    const uint32_t suggested = (m_guestHeapSuggestedBase == 0u) ? kRuntimeAllocatorBase : m_guestHeapSuggestedBase;
+     resetGuestHeapLocked(suggested, clampGuestHeapLimit(0u));
+ }
+ 
+@@ -1847,13 +1834,16 @@ void PS2Runtime::freeGuestBlockLocked(uint32_t guestAddr)
+     coalesceGuestHeapLocked();
+ }
+ 
++// The runtime's own scratch allocator (guestMalloc and friends). Its range is its private guest-RAM
++// area (kRuntimeAllocatorBase-kRuntimeAllocatorEnd); the arguments only pick a sub-range of it, so a
++// caller can never hand the runtime the game's heap (that was the behaviour before this change).
+ void PS2Runtime::configureGuestHeap(uint32_t guestBase, uint32_t guestLimit)
+ {
+     std::lock_guard<std::mutex> lock(m_guestHeapMutex);
+     uint32_t normalizedBase = alignGuestHeapValue(clampGuestHeapBase(guestBase), kGuestHeapDefaultAlignment);
+     if (normalizedBase == 0u)
+     {
+-        normalizedBase = (m_guestHeapSuggestedBase != 0u) ? m_guestHeapSuggestedBase : kGuestHeapDefaultBase;
++        normalizedBase = (m_guestHeapSuggestedBase != 0u) ? m_guestHeapSuggestedBase : kRuntimeAllocatorBase;
+     }
+     m_guestHeapSuggestedBase = normalizedBase;
+     resetGuestHeapLocked(normalizedBase, guestLimit);
+@@ -2018,6 +2008,27 @@ uint32_t PS2Runtime::guestHeapLimit() const
+     return m_guestHeapConfigured ? m_guestHeapLimit : m_guestHeapSuggestedBase;
+ }
+ 
++// The kernel heap the game sees: what the console's kernel reports through SetupHeap (base) and
++// EndOfHeap (end). Recorded only: the runtime's own allocator never uses it.
++void PS2Runtime::configureKernelHeap(uint32_t base, uint32_t end)
++{
++    std::lock_guard<std::mutex> lock(m_guestHeapMutex);
++    m_kernelHeapBase = base;
++    m_kernelHeapEnd = (end > base) ? end : base;
++}
++
++uint32_t PS2Runtime::kernelHeapBase() const
++{
++    std::lock_guard<std::mutex> lock(m_guestHeapMutex);
++    return m_kernelHeapBase;
++}
++
++uint32_t PS2Runtime::kernelHeapEnd() const
++{
++    std::lock_guard<std::mutex> lock(m_guestHeapMutex);
++    return m_kernelHeapEnd;
++}
++
+ uint32_t PS2Runtime::reserveAsyncCallbackStack(uint32_t size, uint32_t alignment)
+ {
+     if (size == 0u)
+@@ -2033,15 +2044,12 @@ uint32_t PS2Runtime::reserveAsyncCallbackStack(uint32_t size, uint32_t alignment
+     }
+ 
+     std::lock_guard<std::mutex> lock(m_asyncCallbackStackMutex);
+-    uint32_t top = m_asyncCallbackStackTop;
+-    if (top > PS2_RAM_SIZE)
+-    {
+-        top = PS2_RAM_SIZE;
+-    }
++    uint32_t top = m_asyncCallbackStackTop; // starts at kInvocationStackBase and only moves down
+     top &= ~(kGuestHeapDefaultAlignment - 1u);
+ 
+     if (top <= allocSize)
+     {
++        logInvocationStacksExhausted(allocSize);
+         return 0u;
+     }
+ 
+@@ -2049,6 +2057,7 @@ uint32_t PS2Runtime::reserveAsyncCallbackStack(uint32_t size, uint32_t alignment
+     base &= ~(normalizedAlignment - 1u);
+     if (base < m_asyncCallbackStackFloor || base >= top)
+     {
++        logInvocationStacksExhausted(allocSize);
+         return 0u;
+     }
+ 
+@@ -2056,6 +2065,23 @@ uint32_t PS2Runtime::reserveAsyncCallbackStack(uint32_t size, uint32_t alignment
+     return top - 0x10u;
+ }
+ 
++// Loud, never silent: the invocation stacks are a bump allocator that never frees, so the region
++// holds exactly kInvocationStackCount stacks of kInvocationStackSize bytes. EeScheduler throws when
++// this returns 0, and the exception fails the game thread.
++void PS2Runtime::logInvocationStacksExhausted(uint32_t requested) const
++{
++    static uint32_t logs = 0;
++    if (logs < 8u)
++    {
++        std::cerr << "[ps2xRuntime] invocation stacks exhausted: asked 0x" << std::hex << requested
++                  << " bytes with 0x" << (m_asyncCallbackStackTop - kInvocationStackFloor)
++                  << " left in the region 0x" << kInvocationStackFloor << "-0x" << kInvocationStackBase
++                  << std::dec << " (at most " << kInvocationStackCount << " stacks of 0x"
++                  << kInvocationStackSize << " bytes, never freed)" << std::endl;
++        ++logs;
++    }
++}
++
+ uint8_t PS2Runtime::Load8(uint8_t *rdram, R5900Context *ctx, uint32_t vaddr)
+ {
+     try

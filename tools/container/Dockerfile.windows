@@ -1,0 +1,39 @@
+# Windows cross-build image (experiment of T-400). Tag: don-build-win:1.
+# Built by tools/container/build_image_windows.sh. Starts from the Linux build image, so it has
+# the same clang-17, lld-17, CMake and Linux dependencies, and adds:
+#   route 1: the LLVM 17 tools clang-cl needs (lld-link, llvm-ml, llvm-lib, llvm-rc, llvm-mt)
+#            and the `xwin` binary. The Microsoft CRT and Windows SDK are NOT in the image: they
+#            are fetched by xwin into third_party/xwin/ on the host (license accepted by the
+#            owner on 2026-10-11) and reach the container through the repository mount.
+#   route 2: llvm-mingw (clang for x86_64-w64-mingw32, UCRT flavour), pinned and verified.
+# Contains no game files.
+FROM don-build:1
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# --- Route 1: LLVM 17 tools from apt.llvm.org (the repository is already set up) ---
+# clang-cl is the clang driver started under that name (the apt package has no clang-cl-17).
+RUN apt-get update && apt-get install -y --no-install-recommends llvm-17 \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s /usr/lib/llvm-17/bin/clang /usr/local/bin/clang-cl \
+    && ln -s /usr/lib/llvm-17/bin/lld-link /usr/local/bin/lld-link \
+    && for t in llvm-ml llvm-lib llvm-rc llvm-mt llvm-ar llvm-ranlib llvm-nm llvm-objdump llvm-readobj; do \
+         test -x /usr/lib/llvm-17/bin/$t && ln -sf /usr/lib/llvm-17/bin/$t /usr/local/bin/$t \
+         || { echo "missing $t" >&2; exit 1; }; \
+       done
+
+# --- xwin 0.10.0 (static musl binary), pinned by SHA-256 ---
+RUN curl -fsSL -o /tmp/xwin.tar.gz https://github.com/Jake-Shadle/xwin/releases/download/0.10.0/xwin-0.10.0-x86_64-unknown-linux-musl.tar.gz \
+    && echo "d870eb4b2f390878af6da1ccd3cf321d22fcb72720984853b4be732ae597fc88  /tmp/xwin.tar.gz" | sha256sum --check --strict - \
+    && mkdir /opt/xwin && tar -xzf /tmp/xwin.tar.gz -C /opt/xwin --strip-components=1 \
+    && ln -s /opt/xwin/xwin /usr/local/bin/xwin && rm /tmp/xwin.tar.gz
+
+# --- Route 2: llvm-mingw 20261006, UCRT flavour, pinned by SHA-256 ---
+RUN curl -fsSL -o /tmp/llvm-mingw.tar.xz https://github.com/mstorsjo/llvm-mingw/releases/download/20261006/llvm-mingw-20261006-ucrt-ubuntu-22.04-x86_64.tar.xz \
+    && echo "5f9c6ed95b2d4bdb2869a488c5fd5857fbdabcf288a0aa3eb1da43f6a08d8ab4  /tmp/llvm-mingw.tar.xz" | sha256sum --check --strict - \
+    && mkdir /opt/llvm-mingw && tar -xJf /tmp/llvm-mingw.tar.xz -C /opt/llvm-mingw --strip-components=1 \
+    && rm /tmp/llvm-mingw.tar.xz
+# Not on the default PATH: the Linux builds must keep using clang-17. Windows scripts add it.
+ENV LLVM_MINGW=/opt/llvm-mingw
+
+WORKDIR /work
