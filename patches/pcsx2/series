@@ -5,3 +5,4 @@
 0005-clang-cl-cross-build-fixes.patch
 0006-per-process-gs-mem.patch
 0007-aligned-malloc-size-multiple-of-alignment.patch
+0008-texture-replacements-serial-override.patch

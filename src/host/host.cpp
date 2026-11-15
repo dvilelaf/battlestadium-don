@@ -77,12 +77,15 @@ namespace
         int renderer;
         bool rumble;
         bool fullscreen;
+        int upscale;
+        bool textures;
     };
 
     GameChoices apply_local_choices(const DonHostOptions &options, int local_players, int renderer, bool vibration,
-                                    bool fullscreen)
+                                    bool fullscreen, int upscale, bool textures)
     {
-        GameChoices out{options.players, options.renderer, options.rumble, options.fullscreen};
+        GameChoices out{options.players, options.renderer, options.rumble, options.fullscreen,
+                        options.upscale, options.textures};
         const int local = (local_players >= 1 && local_players <= 4) ? local_players : 1;
         if (!options.players_given)
             out.players = (local >= 3) ? 4 : 2;
@@ -92,7 +95,26 @@ namespace
             out.rumble = vibration;
         if (!options.fullscreen)
             out.fullscreen = fullscreen;
+        if (!options.upscale_given)
+            out.upscale = (upscale >= 1 && upscale <= 8) ? upscale : 1;
+        if (!options.textures_given)
+            out.textures = textures;
         return out;
+    }
+
+    // The textures folder (PCSX2's layout: the pack in <it>/SLPS-25675/replacements): --textures-dir, else
+    // net.ini's textures_dir, else <user folder>/textures. Given to the GS library as UTF-8, as net.ini holds it.
+    std::string textures_dir_utf8(const DonHostOptions &options, const don_host::NetConfigFile &remembered)
+    {
+        if (!options.textures_dir.empty())
+        {
+            const std::u8string u8 = std::filesystem::path(options.textures_dir).u8string();
+            return std::string(u8.begin(), u8.end());
+        }
+        if (!remembered.textures_dir.empty())
+            return remembered.textures_dir;
+        const std::u8string u8 = don_host::don_default_textures_dir().u8string();
+        return std::string(u8.begin(), u8.end());
     }
 
     // Initial window size: the PS2's 640x448 picture, doubled.
@@ -484,6 +506,15 @@ namespace
         int game_renderer = options.renderer;
         bool game_rumble = options.rumble;
         bool game_fullscreen = options.fullscreen;
+        int game_upscale = options.upscale;
+        bool game_textures = options.textures;
+        // net.ini's textures_dir has no menu row (it is set by hand): read here, so every way into the game
+        // finds it.
+        don_host::NetConfigFile remembered_textures;
+        {
+            std::string ignored;
+            don_host::don_net_config_load(don_host::don_net_config_path(), remembered_textures, ignored);
+        }
 
         std::unique_ptr<don_host::StartScreenNetLayer> screen_net;
         if (no_net_args && game.skip_start_screen)
@@ -495,11 +526,14 @@ namespace
             if (!don_host::don_net_config_load(don_host::don_net_config_path(), remembered, config_error))
                 std::fprintf(stderr, "[don] net.ini: %s\n", config_error.c_str());
             const GameChoices c = apply_local_choices(options, remembered.local_players, remembered.renderer,
-                                                      remembered.vibration, remembered.fullscreen);
+                                                      remembered.vibration, remembered.fullscreen, remembered.upscale,
+                                                      remembered.textures);
             game_players = c.players;
             game_renderer = c.renderer;
             game_rumble = c.rumble;
             game_fullscreen = c.fullscreen;
+            game_upscale = c.upscale;
+            game_textures = c.textures;
             std::fprintf(stderr, "[don] the start screen: skipped, setup ended with PLAY\n");
         }
         if (start_screen)
@@ -519,6 +553,8 @@ namespace
             request.remembered.local_players = remembered.local_players;
             request.remembered.fullscreen = remembered.fullscreen;
             request.remembered.renderer = remembered.renderer;
+            request.remembered.upscale = remembered.upscale;
+            request.remembered.textures = remembered.textures;
             request.remembered.vibration = remembered.vibration;
             request.remembered.net_delay = remembered.net_delay;
             request.remembered.default_name = don_host::don_os_user_name();
@@ -558,6 +594,9 @@ namespace
             save.local_players = outcome.local_players;
             save.fullscreen = outcome.fullscreen;
             save.renderer = outcome.renderer;
+            save.upscale = outcome.upscale;
+            save.textures = outcome.textures;
+            save.textures_dir = remembered.textures_dir; // no menu row: kept as the file had it
             save.vibration = outcome.vibration;
             save.net_delay = outcome.net_delay;
             std::string save_error;
@@ -583,11 +622,14 @@ namespace
 
             // 7.3 (T-522): the LocalSetup and Settings choices become what the game uses; the command line wins.
             const GameChoices c = apply_local_choices(options, outcome.local_players, outcome.renderer,
-                                                      outcome.vibration, outcome.fullscreen);
+                                                      outcome.vibration, outcome.fullscreen, outcome.upscale,
+                                                      outcome.textures);
             game_players = c.players;
             game_renderer = c.renderer;
             game_rumble = c.rumble;
             game_fullscreen = c.fullscreen;
+            game_upscale = c.upscale;
+            game_textures = c.textures;
 
             screen_net.reset(); // the layer is done: it owns nothing now
         }
@@ -608,7 +650,18 @@ namespace
         HostWindow window;
         HostGsParams gs_params;
         gs_params.renderer = game_renderer;
-        gs_params.upscale = options.upscale;
+        gs_params.upscale = game_upscale;
+        // Texture packs (PCSX2's texture replacement): load the pack, dump the game's textures, or both.
+        gs_params.textures_flags = (game_textures ? DON_GS_TEXTURES_LOAD : 0) |
+                                   (options.dump_textures ? DON_GS_TEXTURES_DUMP : 0);
+        if (gs_params.textures_flags != 0)
+        {
+            gs_params.textures_dir = textures_dir_utf8(options, remembered_textures);
+            std::fprintf(stderr, "[don] textures %s%s%s in %s%s\n", game_textures ? "load" : "",
+                         game_textures && options.dump_textures ? " + " : "", options.dump_textures ? "dump" : "",
+                         gs_params.textures_dir.c_str(),
+                         game_renderer == DON_GS_RENDERER_SOFTWARE ? " (ignored: software renderer)" : "");
+        }
         // T-305 (journal 031): the default presents without waiting for the display (the swapchain's mailbox mode,
         // no tearing) and leaves the loop's own 60 Hz clock as the only pace; DON_HOST_VSYNC=1 is the old behaviour
         // (FIFO: the present waits for the refresh), 0 is the same as unset.

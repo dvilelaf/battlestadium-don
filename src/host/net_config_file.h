@@ -25,7 +25,13 @@ struct NetConfigFile
     int renderer = 0;        // 0 Vulkan, 1 software
     bool vibration = true;   // the game's vibration on the gamepads
     int net_delay = 0;       // 0 = automatic, 1..10 frames (hosting)
+    int upscale = 1;         // the GS's internal resolution multiplier, 1..8 (hardware renderer only)
+    bool textures = false;   // load the texture pack (PCSX2's texture replacement)
+    std::string textures_dir; // PCSX2's "textures" folder; empty = don_default_textures_dir()
 };
+
+// <user folder>/textures (see user_dir.h). The pack goes in <that>/SLPS-25675/replacements, as in PCSX2.
+std::filesystem::path don_default_textures_dir();
 
 // The per-user configuration folder: $XDG_CONFIG_HOME/don, else ~/.config/don, else %APPDATA%\don.
 std::filesystem::path don_net_config_dir();

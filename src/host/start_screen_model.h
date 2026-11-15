@@ -27,7 +27,7 @@ enum class Screen
     JoinSetup,   // Address: <IP or domain[:port]>
     Connecting,  // "Connecting to <address>… N s"
     ClientLobby, // "Connected to <host>. Waiting for the host to start." and the list
-    Settings,    // name, fullscreen, renderer, vibration, net delay (7.3)
+    Settings,    // name, fullscreen, renderer, upscale, texture pack, vibration, net delay, host port (7.3)
     Error,       // one line with the reason and Back
     Done,        // result() is set: the view leaves and the caller starts the game (or exits)
 };
@@ -124,6 +124,20 @@ struct ViewLine
     bool dim = false;
 };
 
+// The rows of the Settings screen, top to bottom (StartScreenView::settings_item).
+enum SettingsRow : int
+{
+    kSettingsName = 0,
+    kSettingsFullscreen,
+    kSettingsRenderer,
+    kSettingsUpscale,  // the GS's internal resolution, 1..8 (Vulkan only)
+    kSettingsTextures, // the texture pack on/off (Vulkan only)
+    kSettingsVibration,
+    kSettingsNetDelay,
+    kSettingsHostPort,
+    kSettingsRowCount,
+};
+
 // Everything the view needs for one frame: no game state, no SDL.
 struct StartScreenView
 {
@@ -140,9 +154,11 @@ struct StartScreenView
     int local_players = 1;            // LocalSetup: the chosen count, 1..4
     bool settings_fullscreen = false;
     int settings_renderer = 0;        // 0 Vulkan, 1 software
+    int settings_upscale = 1;         // 1..8
+    bool settings_textures = false;
     bool settings_vibration = true;
     int settings_net_delay = 0;       // 0 = auto, 1..10
-    int settings_item = 0;            // Settings: 0 name, 1 fullscreen, 2 renderer, 3 vibration, 4 net delay, 5 port
+    int settings_item = 0;            // Settings: a SettingsRow
     bool settings_name_editing = false;
     bool settings_port_editing = false;
 };
@@ -168,6 +184,8 @@ public:
         int local_players = 1;    // net.ini (7.3): the last local player count (1..4)
         bool fullscreen = false;  // net.ini (7.3): the game window opens fullscreen
         int renderer = 0;         // net.ini (7.3): 0 Vulkan, 1 software
+        int upscale = 1;          // net.ini: the GS's internal resolution multiplier, 1..8
+        bool textures = false;    // net.ini: load the texture pack
         bool vibration = true;    // net.ini (7.3): the game's vibration on the gamepads
         int net_delay = 0;        // net.ini (7.3): 0 = automatic, 1..10 frames (hosting)
         std::string default_name; // the OS user name, used when the name is left empty
@@ -204,6 +222,8 @@ public:
     int local_players() const { return m_local_players; }
     bool fullscreen() const { return m_fullscreen; }
     int renderer() const { return m_renderer; }  // 0 Vulkan, 1 software
+    int upscale() const { return m_upscale; }    // 1..8
+    bool textures() const { return m_textures; }
     bool vibration() const { return m_vibration; }
     int net_delay() const { return m_net_delay; }
 
@@ -254,6 +274,8 @@ private:
     int m_local_players = 1;
     bool m_fullscreen = false;
     int m_renderer = 0;
+    int m_upscale = 1;
+    bool m_textures = false;
     bool m_vibration = true;
     int m_net_delay = 0;
     int m_settings_item = 0;           // Settings: the selected control

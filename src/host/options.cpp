@@ -76,7 +76,12 @@ void don_print_usage(const char *program, bool needs_elf)
                  "                          (the keyboard is player 1, gamepads follow in the order they were connected)\n"
                  "  --renderer vulkan|software   GS renderer (default vulkan)\n"
                  "  --fullscreen             the game window opens fullscreen (F11 or Alt+Enter toggles it)\n"
-                 "  --upscale <n>           internal resolution multiplier 1..8 (hardware renderer only)\n"
+                 "  --upscale <n>           internal resolution multiplier 1..8 (hardware renderer only; default:\n"
+                 "                          the start screen's Upscale setting, else 1)\n"
+                 "  --textures on|off       load the texture pack from <textures folder>/SLPS-25675/replacements\n"
+                 "                          (PCSX2's layout; hardware renderer only; default: the start screen's setting)\n"
+                 "  --textures-dir <folder> the textures folder (default <user folder>/textures)\n"
+                 "  --dump-textures         write the game's textures to <textures folder>/SLPS-25675/dumps, to make a pack\n"
                  "  --gs-dir <folder>       folder with the GS library (else DON_GS_DIR, else next to the executable)\n"
                  "  --vu-dir <folder>       folder with the VU1 library (else DON_VU_DIR, else next to the executable);\n"
                  "                          DON_VU1=microvu|runtime|interp|pcsx2interp selects the VU1\n"
@@ -151,12 +156,18 @@ DonParseResult don_parse_options(int argc, char **argv, bool needs_elf, DonHostO
             out.setup_demo = true;
             continue;
         }
+        if (arg == "--dump-textures")
+        {
+            out.dump_textures = true;
+            continue;
+        }
         if (arg.size() > 2 && arg.substr(0, 2) == "--")
         {
             const char *v = nullptr;
             if (arg == "--iso" || arg == "--mc-dir" || arg == "--shots" || arg == "--input-script" || arg == "--gs-dir" ||
                 arg == "--vu-dir" || arg == "--spu2-dir" || arg == "--wav" || arg == "--game-module" ||
-                arg == "--prepare" || arg == "--screenshot-dir" || arg == "--setup-auto-pick")
+                arg == "--prepare" || arg == "--screenshot-dir" || arg == "--setup-auto-pick" ||
+                arg == "--textures-dir")
             {
                 if (!value(v))
                     return fail("missing value for %s", argv[i]);
@@ -182,6 +193,8 @@ DonParseResult don_parse_options(int argc, char **argv, bool needs_elf, DonHostO
                     out.vu_dir = v;
                 else if (arg == "--spu2-dir")
                     out.spu2_dir = v;
+                else if (arg == "--textures-dir")
+                    out.textures_dir = v;
                 else
                     out.wav_path = v;
             }
@@ -250,6 +263,19 @@ DonParseResult don_parse_options(int argc, char **argv, bool needs_elf, DonHostO
                 if (!value(v) || !parse_uint(v, n, 8) || n < 1)
                     return fail("--upscale needs a number from 1 to 8", "");
                 out.upscale = static_cast<int>(n);
+                out.upscale_given = true;
+            }
+            else if (arg == "--textures")
+            {
+                if (!value(v))
+                    return fail("missing value for %s", argv[i]);
+                out.textures_given = true;
+                if (std::string_view(v) == "on")
+                    out.textures = true;
+                else if (std::string_view(v) == "off")
+                    out.textures = false;
+                else
+                    return fail("--textures must be on or off, got '%s'", v);
             }
             else if (arg == "--net-host" || arg == "--net-join" || arg == "--net-name")
             {

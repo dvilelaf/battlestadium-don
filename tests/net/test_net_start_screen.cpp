@@ -300,6 +300,8 @@ void test_settings_values_and_back_saves()
     Fixture f;
     f.r.fullscreen = true;
     f.r.renderer = 1;
+    f.r.upscale = 3;
+    f.r.textures = true;
     f.r.vibration = false;
     f.r.net_delay = 3;
     f.model = std::make_unique<StartScreenModel>(&f.net, f.r);
@@ -307,6 +309,8 @@ void test_settings_values_and_back_saves()
     CHECK(f.v().screen == Screen::Settings);
     CHECK(f.model->fullscreen());
     CHECK_EQ(f.model->renderer(), 1);
+    CHECK_EQ(f.model->upscale(), 3);
+    CHECK(f.model->textures());
     CHECK(!f.model->vibration());
     CHECK_EQ(f.model->net_delay(), 3);
     CHECK_EQ(f.v().settings_item, 0);
@@ -327,15 +331,38 @@ void test_settings_values_and_back_saves()
     f.key(Key::Right);
     CHECK_EQ(f.model->renderer(), 1);
 
-    // Vibration (item 3): toggle.
+    // Upscale (item 3): 1..8, wrapping at both ends.
     f.key(Key::Down);
-    CHECK_EQ(f.v().settings_item, 3);
+    CHECK_EQ(f.v().settings_item, kSettingsUpscale);
+    CHECK_EQ(f.v().settings_upscale, 3);
+    CHECK(f.v().lines[kSettingsUpscale].text == "Upscale: 3x");
+    f.key(Key::Left);
+    f.key(Key::Left);
+    CHECK_EQ(f.model->upscale(), 1);
+    CHECK(f.v().lines[kSettingsUpscale].text == "Upscale: Native");
+    f.key(Key::Left);
+    CHECK_EQ(f.model->upscale(), 8);
+    f.key(Key::Right);
+    CHECK_EQ(f.model->upscale(), 1);
+    f.key(Key::Right);
+    CHECK_EQ(f.model->upscale(), 2);
+
+    // Texture pack (item 4): toggle.
+    f.key(Key::Down);
+    CHECK_EQ(f.v().settings_item, kSettingsTextures);
+    f.key(Key::Right);
+    CHECK(!f.model->textures());
+    CHECK(f.v().lines[kSettingsTextures].text == "Texture pack: Off");
+
+    // Vibration (item 5): toggle.
+    f.key(Key::Down);
+    CHECK_EQ(f.v().settings_item, kSettingsVibration);
     f.key(Key::Right);
     CHECK(f.model->vibration());
 
-    // Net delay (item 4): cycle, wrapping at both ends.
+    // Net delay (item 6): cycle, wrapping at both ends.
     f.key(Key::Down);
-    CHECK_EQ(f.v().settings_item, 4);
+    CHECK_EQ(f.v().settings_item, kSettingsNetDelay);
     CHECK_EQ(f.model->net_delay(), 3);
     f.key(Key::Left);
     CHECK_EQ(f.model->net_delay(), 2);
@@ -353,8 +380,18 @@ void test_settings_values_and_back_saves()
     CHECK(f.v().screen == Screen::Menu);
     CHECK(f.model->fullscreen());
     CHECK_EQ(f.model->renderer(), 1);
+    CHECK_EQ(f.model->upscale(), 2);
+    CHECK(!f.model->textures());
     CHECK(f.model->vibration());
     CHECK_EQ(f.model->net_delay(), 0);
+}
+
+void test_settings_upscale_out_of_range_is_native()
+{
+    Fixture f;
+    f.r.upscale = 12; // a value net.ini never holds: the model falls back to native
+    f.model = std::make_unique<StartScreenModel>(&f.net, f.r);
+    CHECK_EQ(f.model->upscale(), 1);
 }
 
 void test_settings_net_delay_reaches_the_host()
@@ -375,10 +412,10 @@ void test_settings_host_port()
     go_to_settings(f);
     CHECK_EQ(f.model->port(), 7877); // the default
 
-    // Move to the HOST PORT row (item 5) and edit it.
-    for (int i = 0; i < 5; ++i)
+    // Move to the HOST PORT row (the last one) and edit it.
+    for (int i = 0; i < kSettingsHostPort; ++i)
         f.key(Key::Down);
-    CHECK_EQ(f.v().settings_item, 5);
+    CHECK_EQ(f.v().settings_item, kSettingsHostPort);
     f.key(Key::Confirm); // enter the field
     CHECK(f.v().settings_port_editing);
     f.key(Key::Left); // clear the field (a gamepad-only player)
@@ -1031,6 +1068,9 @@ void test_net_ini_round_trip()
     in.renderer = 1;
     in.vibration = false;
     in.net_delay = 7;
+    in.upscale = 4;
+    in.textures = true;
+    in.textures_dir = "D:/Packs/textures";
     std::string error;
     CHECK(don_net_config_save(file, in, error));
     CHECK(error.empty());
@@ -1048,6 +1088,9 @@ void test_net_ini_round_trip()
     CHECK_EQ(out.renderer, 1);
     CHECK(!out.vibration);
     CHECK_EQ(out.net_delay, 7);
+    CHECK_EQ(out.upscale, 4);
+    CHECK(out.textures);
+    CHECK(out.textures_dir == "D:/Packs/textures");
 
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
@@ -1072,6 +1115,9 @@ void test_net_ini_settings_keys_default_when_missing()
     CHECK_EQ(out.renderer, 0);
     CHECK(out.vibration);
     CHECK_EQ(out.net_delay, 0);
+    CHECK_EQ(out.upscale, 1);
+    CHECK(!out.textures);
+    CHECK(out.textures_dir.empty());
 
     // Bad values are ignored, the defaults stand.
     {
@@ -1146,6 +1192,7 @@ int main()
     test_settings_values_and_back_saves();
     test_settings_net_delay_reaches_the_host();
     test_settings_host_port();
+    test_settings_upscale_out_of_range_is_native();
     test_host_begin_four_players();
     test_host_lobby_bound_and_upnp_mapped();
     test_host_lobby_upnp_failed_shows_the_forward_hint();

@@ -68,6 +68,8 @@ std::filesystem::path don_net_config_dir()
 
 std::filesystem::path don_net_config_path() { return don_net_config_dir() / "net.ini"; }
 
+std::filesystem::path don_default_textures_dir() { return don_user_dir() / "textures"; }
+
 bool don_net_config_load(const std::filesystem::path &path, NetConfigFile &out, std::string &error)
 {
     error.clear();
@@ -142,6 +144,20 @@ bool don_net_config_load(const std::filesystem::path &path, NetConfigFile &out, 
             if (n >= 0 && n <= 10)
                 out.net_delay = static_cast<int>(n);
         }
+        else if (key == "upscale")
+        {
+            const long n = parse_int(value);
+            if (n >= 1 && n <= 8)
+                out.upscale = static_cast<int>(n);
+        }
+        else if (key == "textures")
+        {
+            const long n = parse_int(value);
+            if (n == 0 || n == 1)
+                out.textures = (n == 1);
+        }
+        else if (key == "textures_dir")
+            out.textures_dir = value;
     }
     if (!in.eof() && in.fail())
     {
@@ -183,6 +199,9 @@ bool don_net_config_save(const std::filesystem::path &path, const NetConfigFile 
         out << "renderer=" << in.renderer << "\n";
         out << "vibration=" << (in.vibration ? 1 : 0) << "\n";
         out << "net_delay=" << in.net_delay << "\n";
+        out << "upscale=" << in.upscale << "\n";
+        out << "textures=" << (in.textures ? 1 : 0) << "\n";
+        out << "textures_dir=" << in.textures_dir << "\n";
         out.flush();
         if (!out)
         {

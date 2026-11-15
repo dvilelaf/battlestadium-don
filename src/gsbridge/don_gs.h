@@ -149,6 +149,23 @@ DON_GS_API void don_gs_resize(int width, int height);
  * not loaded. May be called only from the thread that opened the GS (threading: see the top). */
 DON_GS_API int don_gs_device_info(char* buf, int buf_len);
 
+/* Flags for don_gs_set_textures. */
+#define DON_GS_TEXTURES_LOAD 1 /* load replacement textures (a PCSX2 texture pack) */
+#define DON_GS_TEXTURES_DUMP 2 /* write the game's textures to PNG files, the raw material of a pack */
+
+/* PCSX2's texture replacement, for the next don_gs_open (it does nothing to a GS already open).
+ *   textures_dir: a UTF-8 path, PCSX2's "textures" folder. The pack is read from
+ *                 <textures_dir>/SLPS-25675/replacements (the layout of PCSX2, so a pack made for it is
+ *                 copied as it is) and the dumps go to <textures_dir>/SLPS-25675/dumps. NULL or "" with
+ *                 flags 0 turns it off again.
+ *   flags:        DON_GS_TEXTURES_* ORed; 0 = off (the default).
+ * Hardware renderer only: the software renderer ignores it. Replacements are loaded in the background
+ * (PCSX2's asynchronous loading), so a texture may show its original for a few frames the first time.
+ * Returns 0; negative if the GS is open, the flags are unknown, or flags is not 0 and textures_dir is
+ * empty. Optional: libraries older than this function lack the symbol (don_gs_version still returns 1),
+ * so a host looks it up and goes on without packs when it is absent. */
+DON_GS_API int don_gs_set_textures(const char* textures_dir, int flags);
+
 #ifdef __cplusplus
 }
 #endif

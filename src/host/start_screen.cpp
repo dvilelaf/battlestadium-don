@@ -8,6 +8,8 @@
 // SDL_Renderer and to this model (the model owns the selection).
 #include "start_screen.h"
 
+#include "net_config_file.h"
+
 #include <SDL3/SDL.h>
 
 #include "imgui.h"
@@ -129,7 +131,7 @@ void menu_activate(StartScreenModel &model, const StartScreenView &v, int target
 // Moves the Settings cursor to `target` (by the shortest wrap), so a click can then change that control.
 void settings_select(StartScreenModel &model, const StartScreenView &v, int target)
 {
-    constexpr int n = 6; // name, fullscreen, renderer, vibration, net delay, host port
+    constexpr int n = kSettingsRowCount;
     const int cur = v.settings_item;
     const int down = (target - cur + n) % n;
     const int up = (cur - target + n) % n;
@@ -141,7 +143,18 @@ void settings_select(StartScreenModel &model, const StartScreenView &v, int targ
             model.key(Key::Up);
 }
 
-// Sets the net delay (item 4: Auto = 0, then 1..10) to `target` by the shortest wrap of Left/Right.
+// Sets the upscale (1..8) to `target` by the shortest wrap of Left/Right.
+void settings_set_upscale(StartScreenModel &model, int target)
+{
+    const int cur = model.upscale() - 1;
+    const int diff = (target - 1 - cur + 8) % 8;
+    const Key step = (diff <= 4) ? Key::Right : Key::Left;
+    const int times = (diff <= 4) ? diff : 8 - diff;
+    for (int i = 0; i < times; ++i)
+        model.key(step);
+}
+
+// Sets the net delay (Auto = 0, then 1..10) to `target` by the shortest wrap of Left/Right.
 void settings_set_delay(StartScreenModel &model, int target)
 {
     const int cur = model.net_delay();
@@ -485,6 +498,7 @@ void render_settings(StartScreenModel &model, const StartScreenView &v)
     bool back = close_button();
 
     static const char *const kRendererNames[] = {"Vulkan", "Software"};
+    static const char *const kUpscaleNames[] = {"Native", "2x", "3x", "4x", "5x", "6x", "7x", "8x"};
     const char *const kDelayNames[] = {"Auto", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"};
 
     ui::don_opt_begin("##settings_rows");
@@ -499,11 +513,11 @@ void render_settings(StartScreenModel &model, const StartScreenView &v)
     else
     {
         const std::string val = v.lines.empty() ? std::string() : v.lines[0].text.substr(6); // after "Name: "
-        const int r = ui::don_opt_row("Name", val, false, v.settings_item == 0, false,
+        const int r = ui::don_opt_row("Name", val, false, v.settings_item == kSettingsName, false,
                                       "The name other players see when you host or join.");
         if (r == 2)
         {
-            settings_select(model, v, 0);
+            settings_select(model, v, kSettingsName);
             model.key(Key::Confirm);
         }
     }
@@ -511,10 +525,10 @@ void render_settings(StartScreenModel &model, const StartScreenView &v)
     // FULLSCREEN (toggle)
     {
         const int r = ui::don_opt_row("Fullscreen", v.settings_fullscreen ? "On" : "Off", v.settings_fullscreen,
-                                      v.settings_item == 1, false, "Open the game window fullscreen.");
+                                      v.settings_item == kSettingsFullscreen, false, "Open the game window fullscreen.");
         if (r != 0)
         {
-            settings_select(model, v, 1);
+            settings_select(model, v, kSettingsFullscreen);
             model.key(Key::Right);
         }
     }
@@ -522,18 +536,54 @@ void render_settings(StartScreenModel &model, const StartScreenView &v)
     // RENDERER (dropdown)
     {
         const int r = ui::don_opt_row("Renderer", kRendererNames[v.settings_renderer], v.settings_renderer != 0,
-                                      v.settings_item == 2, true, "Vulkan is faster; Software is the fallback.");
+                                      v.settings_item == kSettingsRenderer, true, "Vulkan is faster; Software is the fallback.");
         if (r == 2)
             ImGui::OpenPopup("##renderer_dd");
         else if (r != 0)
         {
-            settings_select(model, v, 2);
+            settings_select(model, v, kSettingsRenderer);
             model.key(r < 0 ? Key::Left : Key::Right);
         }
         const int pick = ui::don_ui_dropdown("##renderer_dd", kRendererNames, 2, v.settings_renderer);
         if (pick >= 0 && pick != v.settings_renderer)
         {
-            settings_select(model, v, 2);
+            settings_select(model, v, kSettingsRenderer);
+            model.key(Key::Right);
+        }
+    }
+
+    // UPSCALE (dropdown)
+    {
+        const int r = ui::don_opt_row("Upscale", kUpscaleNames[v.settings_upscale - 1], v.settings_upscale != 1,
+                                      v.settings_item == kSettingsUpscale, true,
+                                      "Draw the game at a multiple of the PS2's resolution: sharper, heavier on "
+                                      "the GPU. Vulkan only (Software always draws at Native).");
+        if (r == 2)
+            ImGui::OpenPopup("##upscale_dd");
+        else if (r != 0)
+        {
+            settings_select(model, v, kSettingsUpscale);
+            model.key(r < 0 ? Key::Left : Key::Right);
+        }
+        const int pick = ui::don_ui_dropdown("##upscale_dd", kUpscaleNames, 8, v.settings_upscale - 1);
+        if (pick >= 0 && pick != v.settings_upscale - 1)
+        {
+            settings_select(model, v, kSettingsUpscale);
+            settings_set_upscale(model, pick + 1);
+        }
+    }
+
+    // TEXTURE PACK (toggle)
+    {
+        static const std::string kTexturesDesc =
+            "Replace the game's textures with a PCSX2 texture pack. Put the pack in " +
+            (don_host::don_default_textures_dir() / "SLPS-25675" / "replacements").string() +
+            ". Vulkan only.";
+        const int r = ui::don_opt_row("Texture pack", v.settings_textures ? "On" : "Off", v.settings_textures,
+                                      v.settings_item == kSettingsTextures, false, kTexturesDesc.c_str());
+        if (r != 0)
+        {
+            settings_select(model, v, kSettingsTextures);
             model.key(Key::Right);
         }
     }
@@ -541,10 +591,10 @@ void render_settings(StartScreenModel &model, const StartScreenView &v)
     // VIBRATION (toggle)
     {
         const int r = ui::don_opt_row("Vibration", v.settings_vibration ? "On" : "Off", !v.settings_vibration,
-                                      v.settings_item == 3, false, "Rumble on the gamepads.");
+                                      v.settings_item == kSettingsVibration, false, "Rumble on the gamepads.");
         if (r != 0)
         {
-            settings_select(model, v, 3);
+            settings_select(model, v, kSettingsVibration);
             model.key(Key::Right);
         }
     }
@@ -552,19 +602,19 @@ void render_settings(StartScreenModel &model, const StartScreenView &v)
     // ONLINE INPUT DELAY (dropdown)
     {
         const int r = ui::don_opt_row("Online input delay", kDelayNames[v.settings_net_delay],
-                                      v.settings_net_delay != 0, v.settings_item == 4, true,
+                                      v.settings_net_delay != 0, v.settings_item == kSettingsNetDelay, true,
                                       "Extra frames of delay so every player stays in sync. Auto measures the ping.");
         if (r == 2)
             ImGui::OpenPopup("##delay_dd");
         else if (r != 0)
         {
-            settings_select(model, v, 4);
+            settings_select(model, v, kSettingsNetDelay);
             model.key(r < 0 ? Key::Left : Key::Right);
         }
         const int pick = ui::don_ui_dropdown("##delay_dd", kDelayNames, 11, v.settings_net_delay);
         if (pick >= 0 && pick != v.settings_net_delay)
         {
-            settings_select(model, v, 4);
+            settings_select(model, v, kSettingsNetDelay);
             settings_set_delay(model, pick);
         }
     }
@@ -576,10 +626,10 @@ void render_settings(StartScreenModel &model, const StartScreenView &v)
             "not open it by itself. Players who join type your address as address:port when it is not 7877.";
         const std::string val = std::to_string(model.port());
         const int r = ui::don_opt_row("Host port", v.settings_port_editing ? std::string(model.field()) + "_" : val,
-                                      model.port() != 7877, v.settings_item == 5, false, kPortDesc);
+                                      model.port() != 7877, v.settings_item == kSettingsHostPort, false, kPortDesc);
         if (r == 2)
         {
-            settings_select(model, v, 5);
+            settings_select(model, v, kSettingsHostPort);
             model.key(Key::Confirm); // enter the port field
         }
     }
@@ -913,6 +963,8 @@ StartScreenOutcome don_run_start_screen(const StartScreenRequest &request, Start
     outcome.local_players = (1 + connected > 4) ? 4 : 1 + connected;
     outcome.fullscreen = model.fullscreen();
     outcome.renderer = model.renderer();
+    outcome.upscale = model.upscale();
+    outcome.textures = model.textures();
     outcome.vibration = model.vibration();
     outcome.net_delay = model.net_delay();
 

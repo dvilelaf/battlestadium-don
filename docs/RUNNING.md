@@ -95,6 +95,19 @@ and `DON_VU1=microvu` in front: `DON_VU1=microvu build/linux-3d/don --iso ... ..
 The window needs a Vulkan GPU; without one add `--renderer software` (slow). The memory cards, the cache and
 the log go to the user folder, as with every other way of starting the port (see "Where the port keeps your things").
 
+### Resolution and texture packs
+
+The start screen's **Settings** has **Upscale** (Native, 2x ... 8x: the GS's internal resolution, Vulkan only) and
+**Texture pack** (On/Off). Both are kept in `net.ini` (`upscale=`, `textures=`); `--upscale N` and
+`--textures on|off` win over them for one run.
+
+A texture pack is PCSX2's texture replacement, with PCSX2's folders, so a pack made for this game in PCSX2 is
+copied as it is: the images go in `<user folder>/textures/SLPS-25675/replacements` (`--textures-dir` or
+`textures_dir=` in `net.ini` use another `textures` folder). The pack is loaded in the background, so a texture can
+show its original for a moment the first time. To make one, run once with `--dump-textures`: the game's textures
+are written to `<user folder>/textures/SLPS-25675/dumps` as PNG files; edit them and put them, with the same names,
+in `replacements`. The software renderer ignores both. The log says what was used (`[don] textures load in ...`).
+
 ### On Windows, from the packaged folder
 
 **Make or refresh the package** (on the Linux machine, from the main checkout; one command):
@@ -248,7 +261,8 @@ the Windows package) and with the same contents on both systems (decision D15):
 |---|---|
 | `memcards/` | the memory cards, `mc0` and `mc1` |
 | `gs-cache/` | the shader and pipeline cache (deleting it brings back the first-time stutters) |
-| `net.ini` | the start screen's settings: name, last address, host port, renderer, fullscreen... |
+| `net.ini` | the start screen's settings: name, last address, host port, renderer, upscale, texture pack, fullscreen... (`textures_dir=` points the texture packs at another folder; it has no menu row) |
+| `textures/` | texture packs, in PCSX2's layout: `textures/SLPS-25675/replacements` (see "Texture packs") |
 | `don.log` | what the program did. Every start adds a block at the end, under `===== Battle Stadium D.O.N started <date> (pid, build) =====`; the messages still reach the terminal too when there is one. Past 10 MB it becomes `don.old.log`. A start that did not end normally is noted at the next start. Send this file with a report of a problem |
 | `launcher.conf` | the launcher's settings (developers) |
 
