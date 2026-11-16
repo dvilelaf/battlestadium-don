@@ -31,6 +31,17 @@ def cached_var(build_dir: Path, var: str) -> str | None:
     return None
 
 
+def check_game_not_linked(game: Path) -> None:
+    """Stops unless the game build folder's cache says DON_LINK_GENERATED=OFF (incident 2026-11-16).
+
+    An old folder configured without the option gets CMake's default ON and builds the program with the game code
+    inside: a download must never hold it (AGENTS.md Rule 1). A missing entry is as bad as ON."""
+    value = cached_var(game, "DON_LINK_GENERATED")
+    if value != "OFF":
+        sys.exit(f"build folder {game} has DON_LINK_GENERATED={value} in its CMakeCache.txt (must be OFF): the program "
+                 f"would contain the game code. Delete it and run again: rm -rf {game}")
+
+
 def check_path_maps(folders: list[Path], wanted: list[str]) -> None:
     """Stops when a configured build folder was made without the current -ffile-prefix-map options.
 

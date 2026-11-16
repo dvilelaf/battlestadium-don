@@ -159,6 +159,7 @@ def build(main: Path, src: Path, runtime: Path, pcsx2: Path, deps: Path, jobs: i
         container(main, 'cmake -S "$1" -B "$2" -G Ninja "${@:4}" "-DDON_RUNTIME_DIR=$3"', src, game, runtime,
                   *flags, jobs=jobs)
     container(main, 'cmake --build "$1" --parallel "$2" --target don', game, str(jobs), jobs=jobs)
+    package_checks.check_game_not_linked(game)
     for name, folder in (("spu2", spu2), ("vu", vu)):
         if not (folder / "build.ninja").is_file():
             container(main, 'cmake -S "$1" -B "$2" -G Ninja "${@:3}"', src / "src" / f"{name}bridge", folder,

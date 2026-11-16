@@ -51,7 +51,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools" / "module"))
 sys.path.insert(0, str(ROOT / "tools" / "pipeline"))
 import stage_install  # noqa: E402
-from package_checks import cached_var, check_path_maps  # noqa: E402
+from package_checks import cached_var, check_game_not_linked, check_path_maps  # noqa: E402
 import make_appimage  # noqa: E402
 JOBS_DEFAULT = int(os.environ.get("DON_JOBS", "4"))
 
@@ -173,13 +173,16 @@ def preset_flags(src: Path, name: str) -> list[str]:
 
 
 def needs_configure(build_dir: Path, runtime: Path, flags: list[str] | None = None) -> bool:
-    """No build files yet, made against another PS2Recomp tree, or a preset value (-DNAME=value) changed since."""
+    """No build files yet, made against another PS2Recomp tree, or a preset value (-DNAME=value) changed or missing.
+
+    A flag absent from the cache means a folder configured without that option (incident 2026-11-16: an old folder
+    had no DON_LINK_GENERATED, so CMake's default ON linked the game code into the download)."""
     if not (build_dir / "build.ninja").is_file() or cached_var(build_dir, "DON_RUNTIME_DIR") != str(runtime):
         return True
     for flag in flags or []:
         name, _, value = flag[2:].partition("=")
         cached = cached_var(build_dir, name)
-        if cached is not None and cached != value:
+        if cached != value:
             return True
     return False
 
@@ -204,6 +207,7 @@ def build(main: Path, src: Path, runtime: Path, pcsx2: Path, jobs: int) -> dict[
     if needs_configure(game, runtime, flags):
         container(main, 'exec "$@"', *configure_game_cmd(src, game, runtime), jobs=jobs)
     container(main, 'cmake --build "$1" -j "$2" --target don', game, str(jobs), jobs=jobs)
+    check_game_not_linked(game)
 
     common = ["-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld", "-DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld"]
     if not (gs / "build.ninja").is_file():
