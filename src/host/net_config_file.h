@@ -28,6 +28,7 @@ struct NetConfigFile
     int upscale = 1;         // the GS's internal resolution multiplier, 1..8 (hardware renderer only)
     bool textures = false;   // load the texture pack (PCSX2's texture replacement)
     std::string textures_dir; // PCSX2's "textures" folder; empty = don_default_textures_dir()
+    bool widescreen = false;  // 3D scenes drawn and shown 16:9 (issue #2)
 };
 
 // <user folder>/textures (see user_dir.h). The pack goes in <that>/SLPS-25675/replacements, as in PCSX2.

@@ -132,6 +132,7 @@ enum SettingsRow : int
     kSettingsRenderer,
     kSettingsUpscale,  // the GS's internal resolution, 1..8 (Vulkan only)
     kSettingsTextures, // the texture pack on/off (Vulkan only)
+    kSettingsWidescreen, // 16:9 3D scenes on/off (issue #2)
     kSettingsVibration,
     kSettingsNetDelay,
     kSettingsHostPort,
@@ -156,6 +157,7 @@ struct StartScreenView
     int settings_renderer = 0;        // 0 Vulkan, 1 software
     int settings_upscale = 1;         // 1..8
     bool settings_textures = false;
+    bool settings_widescreen = false;
     bool settings_vibration = true;
     int settings_net_delay = 0;       // 0 = auto, 1..10
     int settings_item = 0;            // Settings: a SettingsRow
@@ -186,6 +188,7 @@ public:
         int renderer = 0;         // net.ini (7.3): 0 Vulkan, 1 software
         int upscale = 1;          // net.ini: the GS's internal resolution multiplier, 1..8
         bool textures = false;    // net.ini: load the texture pack
+        bool widescreen = false;  // net.ini: 16:9 3D scenes
         bool vibration = true;    // net.ini (7.3): the game's vibration on the gamepads
         int net_delay = 0;        // net.ini (7.3): 0 = automatic, 1..10 frames (hosting)
         std::string default_name; // the OS user name, used when the name is left empty
@@ -224,6 +227,7 @@ public:
     int renderer() const { return m_renderer; }  // 0 Vulkan, 1 software
     int upscale() const { return m_upscale; }    // 1..8
     bool textures() const { return m_textures; }
+    bool widescreen() const { return m_widescreen; }
     bool vibration() const { return m_vibration; }
     int net_delay() const { return m_net_delay; }
 
@@ -276,6 +280,7 @@ private:
     int m_renderer = 0;
     int m_upscale = 1;
     bool m_textures = false;
+    bool m_widescreen = false;
     bool m_vibration = true;
     int m_net_delay = 0;
     int m_settings_item = 0;           // Settings: the selected control

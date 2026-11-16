@@ -588,6 +588,19 @@ void render_settings(StartScreenModel &model, const StartScreenView &v)
         }
     }
 
+    // WIDESCREEN (toggle)
+    {
+        const int r = ui::don_opt_row("Widescreen", v.settings_widescreen ? "On" : "Off", v.settings_widescreen,
+                                      v.settings_item == kSettingsWidescreen, false,
+                                      "16:9: the fights show more of the stage at the sides instead of being stretched. "
+                                      "Menus and other 2D screens stay 4:3. Off in online play.");
+        if (r != 0)
+        {
+            settings_select(model, v, kSettingsWidescreen);
+            model.key(Key::Right);
+        }
+    }
+
     // VIBRATION (toggle)
     {
         const int r = ui::don_opt_row("Vibration", v.settings_vibration ? "On" : "Off", !v.settings_vibration,
@@ -965,6 +978,7 @@ StartScreenOutcome don_run_start_screen(const StartScreenRequest &request, Start
     outcome.renderer = model.renderer();
     outcome.upscale = model.upscale();
     outcome.textures = model.textures();
+    outcome.widescreen = model.widescreen();
     outcome.vibration = model.vibration();
     outcome.net_delay = model.net_delay();
 

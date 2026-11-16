@@ -95,6 +95,15 @@ and `DON_VU1=microvu` in front: `DON_VU1=microvu build/linux-3d/don --iso ... ..
 The window needs a Vulkan GPU; without one add `--renderer software` (slow). The memory cards, the cache and
 the log go to the user folder, as with every other way of starting the port (see "Where the port keeps your things").
 
+### Widescreen
+
+**Widescreen** in the start screen's Settings (or `--widescreen on|off`, kept as `widescreen=` in `net.ini`) shows
+the fights 16:9: the stage is drawn wider ("Hor+": more of it at the sides, nothing stretched), and the HUD's
+portraits, badges and corner pieces keep their round shape (the health bars are left wide). Menus and the other 2D
+screens stay 4:3 with bars at the sides. It is off in online play (the camera is part of the game state the PCs
+compare). With `DON_HOST_LOG=1` the log has a `[don] widescreen: picture 16:9|4:3 at blank N` line at each change.
+Turning it on or off needs nothing else: the prepared game is the same with or without it.
+
 ### Resolution and texture packs
 
 The start screen's **Settings** has **Upscale** (Native, 2x ... 8x: the GS's internal resolution, Vulkan only) and
@@ -261,7 +270,7 @@ the Windows package) and with the same contents on both systems (decision D15):
 |---|---|
 | `memcards/` | the memory cards, `mc0` and `mc1` |
 | `gs-cache/` | the shader and pipeline cache (deleting it brings back the first-time stutters) |
-| `net.ini` | the start screen's settings: name, last address, host port, renderer, upscale, texture pack, fullscreen... (`textures_dir=` points the texture packs at another folder; it has no menu row) |
+| `net.ini` | the start screen's settings: name, last address, host port, renderer, upscale, texture pack, widescreen, fullscreen... (`textures_dir=` points the texture packs at another folder; it has no menu row) |
 | `textures/` | texture packs, in PCSX2's layout: `textures/SLPS-25675/replacements` (see "Texture packs") |
 | `don.log` | what the program did. Every start adds a block at the end, under `===== Battle Stadium D.O.N started <date> (pid, build) =====`; the messages still reach the terminal too when there is one. Past 10 MB it becomes `don.old.log`. A start that did not end normally is noted at the next start. Send this file with a report of a problem |
 | `launcher.conf` | the launcher's settings (developers) |

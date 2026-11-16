@@ -78,6 +78,8 @@ void don_print_usage(const char *program, bool needs_elf)
                  "  --fullscreen             the game window opens fullscreen (F11 or Alt+Enter toggles it)\n"
                  "  --upscale <n>           internal resolution multiplier 1..8 (hardware renderer only; default:\n"
                  "                          the start screen's Upscale setting, else 1)\n"
+                 "  --widescreen on|off     16:9: 3D scenes show more at the sides, 2D screens stay 4:3 (Vulkan or\n"
+                 "                          software; off in online play; default: the start screen's setting)\n"
                  "  --textures on|off       load the texture pack from <textures folder>/SLPS-25675/replacements\n"
                  "                          (PCSX2's layout; hardware renderer only; default: the start screen's setting)\n"
                  "  --textures-dir <folder> the textures folder (default <user folder>/textures)\n"
@@ -264,6 +266,18 @@ DonParseResult don_parse_options(int argc, char **argv, bool needs_elf, DonHostO
                     return fail("--upscale needs a number from 1 to 8", "");
                 out.upscale = static_cast<int>(n);
                 out.upscale_given = true;
+            }
+            else if (arg == "--widescreen")
+            {
+                if (!value(v))
+                    return fail("missing value for %s", argv[i]);
+                out.widescreen_given = true;
+                if (std::string_view(v) == "on")
+                    out.widescreen = true;
+                else if (std::string_view(v) == "off")
+                    out.widescreen = false;
+                else
+                    return fail("--widescreen must be on or off, got '%s'", v);
             }
             else if (arg == "--textures")
             {

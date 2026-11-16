@@ -354,6 +354,14 @@ void test_settings_values_and_back_saves()
     CHECK(!f.model->textures());
     CHECK(f.v().lines[kSettingsTextures].text == "Texture pack: Off");
 
+    // Widescreen (issue #2): toggle.
+    f.key(Key::Down);
+    CHECK_EQ(f.v().settings_item, kSettingsWidescreen);
+    CHECK(!f.model->widescreen());
+    f.key(Key::Right);
+    CHECK(f.model->widescreen());
+    CHECK(f.v().lines[kSettingsWidescreen].text == "Widescreen: On");
+
     // Vibration (item 5): toggle.
     f.key(Key::Down);
     CHECK_EQ(f.v().settings_item, kSettingsVibration);
@@ -382,6 +390,7 @@ void test_settings_values_and_back_saves()
     CHECK_EQ(f.model->renderer(), 1);
     CHECK_EQ(f.model->upscale(), 2);
     CHECK(!f.model->textures());
+    CHECK(f.model->widescreen());
     CHECK(f.model->vibration());
     CHECK_EQ(f.model->net_delay(), 0);
 }
@@ -1071,6 +1080,7 @@ void test_net_ini_round_trip()
     in.upscale = 4;
     in.textures = true;
     in.textures_dir = "D:/Packs/textures";
+    in.widescreen = true;
     std::string error;
     CHECK(don_net_config_save(file, in, error));
     CHECK(error.empty());
@@ -1091,6 +1101,7 @@ void test_net_ini_round_trip()
     CHECK_EQ(out.upscale, 4);
     CHECK(out.textures);
     CHECK(out.textures_dir == "D:/Packs/textures");
+    CHECK(out.widescreen);
 
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
@@ -1118,6 +1129,7 @@ void test_net_ini_settings_keys_default_when_missing()
     CHECK_EQ(out.upscale, 1);
     CHECK(!out.textures);
     CHECK(out.textures_dir.empty());
+    CHECK(!out.widescreen);
 
     // Bad values are ignored, the defaults stand.
     {

@@ -38,6 +38,8 @@ struct DonHostOptions
     bool textures_given = false; // --textures was given (it wins over the start screen's Texture pack)
     std::string textures_dir;    // --textures-dir: PCSX2's "textures" folder (empty = net.ini's, else the default)
     bool dump_textures = false;  // --dump-textures: write the game's textures to <textures_dir>/SLPS-25675/dumps
+    bool widescreen = false;       // --widescreen on|off (issue #2): 3D scenes drawn and shown 16:9
+    bool widescreen_given = false; // --widescreen was given (it wins over the start screen's Widescreen)
     bool fullscreen = false;  // --fullscreen (7.3): the game window opens fullscreen (F11 / Alt+Enter toggles)
     std::string gs_dir;       // --gs-dir: folder with the GS library (else DON_GS_DIR, else next to the executable)
     // T-205/T-303: the VU1 and SPU2 libraries, both off/absent by default.

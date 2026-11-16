@@ -43,6 +43,8 @@ if(UNIX AND NOT APPLE)
 endif()
 
 # T-305: the arithmetic of DON_PACING_LOG's summary (header only).
+add_executable(widescreen_hud_test widescreen_hud_test.cpp)
+target_compile_features(widescreen_hud_test PRIVATE cxx_std_20)
 add_executable(pacing_stats_test pacing_stats_test.cpp)
 target_compile_features(pacing_stats_test PRIVATE cxx_std_20)
 

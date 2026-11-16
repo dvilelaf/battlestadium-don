@@ -43,6 +43,7 @@ window. The options are:
    --renderer software    use the software renderer (default: vulkan)
    --upscale 2            draw at twice the resolution (1 to 8; also in the start screen's Settings)
    --textures on          load a texture pack (also in the start screen's Settings, see 5)
+   --widescreen on        16:9 fights: more of the stage at the sides (also in Settings; menus stay 4:3)
    --players 4            three or four players (a multitap is presented to the game)
    --seconds 60           end after 60 seconds (for tests)
 No library option is needed: the program finds gs\, vu\ and spu2\ next to itself.

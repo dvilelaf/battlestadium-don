@@ -23,6 +23,7 @@
 #include "options.h"
 #include "pacing_stats.h"
 #include "runtime/gs/ps2_host_gs.h"
+#include "widescreen_hud.h"
 
 #include <atomic>
 #include <chrono>
@@ -52,6 +53,8 @@ struct DonGsApi
     int (*device_info)(char *, int) = nullptr;
     // Texture packs (don_gs_set_textures), optional (older libraries lack it: no packs then).
     int (*set_textures)(const char *, int) = nullptr;
+    // Widescreen: the shape the picture is shown with (don_gs_set_aspect), optional.
+    int (*set_aspect)(int) = nullptr;
 };
 
 // Looks for the library in `gs_dir` if given, else in $DON_GS_DIR if set (an explicit folder is the only one
@@ -67,6 +70,9 @@ struct HostGsParams
     // don_gs_set_textures: DON_GS_TEXTURES_* flags (0 = off) and PCSX2's textures folder, UTF-8.
     int textures_flags = 0;
     std::string textures_dir;
+    // Widescreen (issue #2): the game draws its 3D scenes 16:9 (widescreen_flag.h); the picture is then shown 16:9
+    // while 3D is drawn and 4:3 otherwise (menus, 2D screens), see HostGs::update_aspect.
+    bool widescreen = false;
     // Native window for the GS, or window_type DON_GS_WINDOW_NONE for headless (see window.h).
     DonGsConfig window{}; // zero: headless (an uninitialised window_type was read by the GS on Windows)
 };
@@ -173,6 +179,17 @@ private:
     std::function<void()> m_on_thread_end;
 
     std::unique_ptr<GsThread> m_gs_thread; // null: synchronous path
+    // Widescreen (issue #2, widescreen_flag.h): one bit per recent blank (1 = the fight camera was updated), the blanks
+    // since the last update, whether a fight is on, and the shape currently asked of the GS. Game thread only.
+    uint32_t m_fight_history = 0;
+    bool m_fight = false;
+    // Widescreen: while the picture is shown 16:9, the HUD's round pieces are kept round (widescreen_hud.h). Game thread.
+    bool m_hud_fix = false;
+    don_widescreen::HudState m_hud_state;
+    std::vector<uint8_t> m_hud_scratch;
+    uint64_t m_blanks_without_3d = UINT64_MAX / 2;
+    int m_aspect = DON_GS_ASPECT_4_3;
+    void update_aspect();
     uint64_t m_gs_frames = 0;              // blanks executed by the GS (GS side, for the DON_HOST_LOG line)
     std::atomic<State> m_state{Pending};
     std::string m_error;

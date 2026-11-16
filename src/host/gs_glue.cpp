@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "gs_glue.h"
+#include "widescreen_flag.h"
+
+#include <bit>
 
 #include "fp_env.h"
 #include "gs_thread.h"
@@ -108,6 +111,8 @@ bool don_gs_load(const std::string &gs_dir, DonGsApi &api, std::string &err)
         load_symbol(library, "don_gs_device_info", loaded.device_info, bind_error);
         // Optional: texture packs; without it the host runs without them (one [don] line when one is asked for).
         load_symbol(library, "don_gs_set_textures", loaded.set_textures, bind_error);
+        // Optional: the picture's shape (widescreen); without it the picture stays 4:3.
+        load_symbol(library, "don_gs_set_aspect", loaded.set_aspect, bind_error);
         if (!ok || version() != 1)
         {
             err += "  " + absolute.string() + ": " + (ok ? "unsupported API version" : bind_error) + "\n";
@@ -279,6 +284,14 @@ void HostGs::gif_transfer(void *self, int path, const uint8_t *data, uint32_t by
     // names a file (one getenv at startup); this is the only place that sees every transfer with the
     // path the runtime used.
     gs_trace::transfer(path, data, bytes);
+    // Widescreen (issue #2): during a fight the HUD's square pieces are narrowed to keep their shape at 16:9. The game's
+    // buffer is not touched: a copy goes to the GS.
+    if (gs->m_hud_fix && path == 1)
+    {
+        gs->m_hud_scratch.assign(data, data + bytes);
+        if (don_widescreen::compress_square_hud(gs->m_hud_scratch.data(), bytes, gs->m_hud_state) != 0)
+            data = gs->m_hud_scratch.data();
+    }
     if (gs->m_gs_thread)
     {
         // The GS thread has the host's mode; here the packet is only copied into the ring.
@@ -318,6 +331,41 @@ void HostGs::exec_gif(int path, const uint8_t *data, uint32_t bytes)
     m_bytes_total += bytes;
 }
 
+// Widescreen (issue #2, widescreen_flag.h): once per blank, on the game thread before the blank is queued (so a new
+// shape applies to this blank), decides whether a fight is on screen from the fight camera's updates, tells the game
+// side, and shows the picture 16:9 during a fight and 4:3 (bars at the sides) otherwise. Neither the GIF path (the
+// game's 2D dialogs come through VU1 too) nor "a perspective camera began a frame" (the menus draw 3D backgrounds)
+// tells a fight from a menu, **Measured**; the fight camera routine does.
+void HostGs::update_aspect()
+{
+    if (!m_params.widescreen)
+        return;
+    const bool updated = don_widescreen::fight_camera_updates().exchange(0, std::memory_order_relaxed) != 0;
+    m_fight_history = (m_fight_history << 1) | (updated ? 1u : 0u);
+    constexpr int kBlanksToStart = 12;         // of the last 16
+    constexpr uint64_t kBlanksToEnd = 30;      // in a row without an update
+    m_blanks_without_3d = updated ? 0 : m_blanks_without_3d + 1;
+    if (!m_fight && std::popcount(m_fight_history & 0xFFFFu) >= kBlanksToStart)
+        m_fight = true;
+    else if (m_fight && m_blanks_without_3d >= kBlanksToEnd)
+        m_fight = false;
+    don_widescreen::fight_active().store(m_fight, std::memory_order_relaxed);
+    if (!m_api.set_aspect)
+        return;
+    m_hud_fix = m_fight;
+    const int want = m_fight ? DON_GS_ASPECT_16_9 : DON_GS_ASPECT_4_3;
+    if (want == m_aspect)
+        return;
+    m_aspect = want;
+    if (m_log)
+        std::fprintf(stderr, "[don] widescreen: picture %s at blank %llu\n", want == DON_GS_ASPECT_16_9 ? "16:9" : "4:3",
+                     static_cast<unsigned long long>(m_vblanks.load(std::memory_order_relaxed)));
+    if (m_gs_thread)
+        m_gs_thread->post([this, want] { m_api.set_aspect(want); });
+    else
+        m_api.set_aspect(want);
+}
+
 void HostGs::vsync(void *self, const uint64_t regs[PS2_HOST_GS_PRIV_REG_COUNT], int field)
 {
     static_cast<HostGs *>(self)->on_vsync(regs, field);
@@ -344,6 +392,8 @@ void HostGs::on_vsync(const uint64_t *regs, int field)
 
     if (m_trace_regs)
         trace_registers(regs);
+
+    update_aspect();
 
     const auto renderer_start = m_pacing_log ? Clock::now() : Clock::time_point();
     if (m_gs_thread)

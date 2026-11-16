@@ -158,6 +158,12 @@ bool don_net_config_load(const std::filesystem::path &path, NetConfigFile &out, 
         }
         else if (key == "textures_dir")
             out.textures_dir = value;
+        else if (key == "widescreen")
+        {
+            const long n = parse_int(value);
+            if (n == 0 || n == 1)
+                out.widescreen = (n == 1);
+        }
     }
     if (!in.eof() && in.fail())
     {
@@ -202,6 +208,7 @@ bool don_net_config_save(const std::filesystem::path &path, const NetConfigFile 
         out << "upscale=" << in.upscale << "\n";
         out << "textures=" << (in.textures ? 1 : 0) << "\n";
         out << "textures_dir=" << in.textures_dir << "\n";
+        out << "widescreen=" << (in.widescreen ? 1 : 0) << "\n";
         out.flush();
         if (!out)
         {
