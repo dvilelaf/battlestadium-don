@@ -6,6 +6,7 @@
 #include "video_skip.h"
 #include "net_hash.h"
 #include "pad_layout_flag.h"
+#include "widescreen_flag.h"
 #include "ps2_runtime.h"
 #include "ps2_runtime_macros.h"
 #include "runtime/ee_scheduler.h"
@@ -65,6 +66,20 @@ namespace
     PS2Runtime::RecompiledFunction g_originalWrite = nullptr;
     PS2Runtime::RecompiledFunction g_originalFrameCounter = nullptr;
     PS2Runtime::RecompiledFunction g_originalVblank = nullptr;
+    PS2Runtime::RecompiledFunction g_originalSetViewWindow = nullptr;
+
+    // Widescreen (issue #2). RenderWare's RwCameraSetViewWindow(RwCamera *camera, const RwV2d *window) is at
+    // 0x2C45E0 in this game (**Measured**: it copies the 8 bytes at $a1 to camera+0x68, stores 1/x and 1/y at
+    // +0x70/+0x74 and marks the camera's frame dirty); RwCameraSetProjection (0x2C4648) keeps the projection at
+    // camera+0x14, 1 = perspective, 2 = parallel. The game's 3D cameras (0x165900 and the others that call it)
+    // give it x = tan(fov / 2) and y = x * 3/4-ish for a 4:3 picture.
+    constexpr uint32_t kSetViewWindowAddress = 0x002C45E0u;
+    // Where the fight camera routine 0x165900 returns to after its RwCameraSetViewWindow call (widescreen_flag.h).
+    constexpr uint32_t kFightCameraReturn = 0x00165A18u;
+    constexpr uint32_t kCameraProjectionOffset = 0x14u;
+    constexpr uint32_t kPerspective = 1u;
+    // 16:9 over 4:3: the horizontal half-width grows, the vertical one stays ("Hor+").
+    constexpr float kWidescreenFactor = (16.0f / 9.0f) / (4.0f / 3.0f);
 
     // The game's own multitap wrappers (docs/knowledge/14-iop-modules.md section E, **Measured** by
     // decompiling 0x255C40-0x2560C3 and their callers). They are thin SIF RPC wrappers to `mtapman`, which
@@ -217,6 +232,43 @@ namespace
         g_originalVblank(rdram, ctx, runtime);
     }
 
+    // Widescreen (issue #2, widescreen_flag.h): counts the fight camera routine's calls, which is how the host knows a
+    // fight is on screen. Changes nothing.
+    // Widescreen (issue #2, widescreen_flag.h): counts the fight camera routine's calls (how the host knows a fight
+    // is on screen) and, during a fight, gives a perspective camera a view window 4/3 wider. The caller's RwV2d is
+    // scaled for the call and put back afterwards, so only the camera sees it. Outside a fight, for a parallel camera
+    // and with the setting off, the original runs untouched. The fight camera is given its window every frame, so it
+    // is widened from the first frame the host calls a fight, and the menus' 3D backgrounds, whose windows are set
+    // when a screen is built, are never widened (**Measured** with the fight_practice route: the character and stage
+    // select screens are pixel-identical to the setting off, the fight shows more of the stage at the sides).
+    void donCameraSetViewWindow(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!don_widescreen::enabled().load(std::memory_order_relaxed))
+        {
+            g_originalSetViewWindow(rdram, ctx, runtime);
+            return;
+        }
+        if (getRegU32(ctx, 31) == kFightCameraReturn)
+            don_widescreen::fight_camera_updates().fetch_add(1, std::memory_order_relaxed);
+        const uint32_t camera = getRegU32(ctx, 4);
+        const uint32_t window = getRegU32(ctx, 5);
+        if (!don_widescreen::fight_active().load(std::memory_order_relaxed) || camera == 0u || window == 0u ||
+            Ps2FastRead32(rdram, camera + kCameraProjectionOffset) != kPerspective)
+        {
+            g_originalSetViewWindow(rdram, ctx, runtime);
+            return;
+        }
+        const uint32_t original_x = Ps2FastRead32(rdram, window);
+        float x;
+        std::memcpy(&x, &original_x, sizeof x);
+        const float wide = x * kWidescreenFactor;
+        uint32_t wide_bits;
+        std::memcpy(&wide_bits, &wide, sizeof wide_bits);
+        Ps2FastWrite32(rdram, window, wide_bits);
+        g_originalSetViewWindow(rdram, ctx, runtime);
+        Ps2FastWrite32(rdram, window, original_x);
+    }
+
     // config/native_overrides.txt (the list the recompiler reads so that no direct call bypasses a replacement),
     // compiled in by CMakeLists.txt. Every replaceFunction below goes through replaceListed().
     constexpr uint32_t kNativeOverrides[] = {DON_NATIVE_OVERRIDES 0u};
@@ -279,6 +331,12 @@ namespace
             {
                 std::fprintf(stderr, "[don] could not install the frame counters\n");
             }
+        }
+
+        // Widescreen (issue #2): always installed; it runs the original unless the host turned the setting on.
+        if (!replaceKeepingOriginal(runtime, kSetViewWindowAddress, donCameraSetViewWindow, g_originalSetViewWindow))
+        {
+            std::fprintf(stderr, "[don] could not replace RwCameraSetViewWindow at 0x%08X\n", kSetViewWindowAddress);
         }
 
         const FunctionReplacement replacements[] = {

@@ -166,6 +166,16 @@ DON_GS_API int don_gs_device_info(char* buf, int buf_len);
  * so a host looks it up and goes on without packs when it is absent. */
 DON_GS_API int don_gs_set_textures(const char* textures_dir, int flags);
 
+/* Values for don_gs_set_aspect. */
+#define DON_GS_ASPECT_4_3 0  /* the picture is shown 4:3, with bars at the sides of a wider window (the default) */
+#define DON_GS_ASPECT_16_9 1 /* the picture is shown 16:9: for a game that draws a wider view (widescreen) */
+
+/* The shape the picture is shown with, from the next composed frame on. It changes only how the GS output is
+ * fitted into the window (PCSX2's aspect ratio setting), not what the game draws. May be called before
+ * don_gs_open (it then applies from the open) and at any time while the GS is open, from the thread that opened
+ * it. Returns 0; negative for an unknown value. Optional: libraries older than this function lack the symbol. */
+DON_GS_API int don_gs_set_aspect(int aspect);
+
 #ifdef __cplusplus
 }
 #endif

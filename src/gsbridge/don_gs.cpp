@@ -174,6 +174,8 @@ std::string ValidateConfig(const DonGsConfig& cfg)
 // don_gs_set_textures: applied by the next don_gs_open.
 std::string s_textures_dir;
 int s_textures_flags = 0;
+// don_gs_set_aspect: the shape the picture is shown with.
+AspectRatioType s_aspect = AspectRatioType::R4_3;
 } // namespace
 
 extern "C" int don_gs_version(void)
@@ -230,6 +232,10 @@ extern "C" int don_gs_open(const DonGsConfig* cfg_in, char* err, int err_len)
 			LogLimited("%s: cannot create %s", "don_gs_open", s_textures_dir.c_str());
 	}
 	GSTextureReplacements::SetSerialOverride(textures ? kGameSerial : "");
+	// The picture's shape (don_gs_set_aspect). PCSX2 fits the output into the window with EmuConfig's current
+	// value, which can change between frames.
+	options.AspectRatio = s_aspect;
+	EmuConfig.CurrentAspectRatio = s_aspect;
 
 	std::memset(s_bridge.priv.data(), 0, kPrivBytes);
 	s_bridge.csr = 0;
@@ -528,5 +534,20 @@ extern "C" int don_gs_set_textures(const char* textures_dir, int flags)
 		return Fail(nullptr, 0, -3, "don_gs_set_textures: no textures folder");
 	s_textures_dir = flags != 0 ? dir : std::string();
 	s_textures_flags = flags;
+	return 0;
+}
+
+extern "C" int don_gs_set_aspect(int aspect)
+{
+	if (aspect != DON_GS_ASPECT_4_3 && aspect != DON_GS_ASPECT_16_9)
+		return Fail(nullptr, 0, -1, "don_gs_set_aspect: unknown value %d", aspect);
+	s_aspect = aspect == DON_GS_ASPECT_16_9 ? AspectRatioType::R16_9 : AspectRatioType::R4_3;
+	if (s_bridge.open)
+	{
+		if (s_bridge.owner != std::this_thread::get_id())
+			return Fail(nullptr, 0, -2, "don_gs_set_aspect: called from a thread other than the one that opened the GS");
+		EmuConfig.CurrentAspectRatio = s_aspect;
+		GSConfig.AspectRatio = s_aspect;
+	}
 	return 0;
 }

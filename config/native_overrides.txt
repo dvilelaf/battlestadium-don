@@ -14,5 +14,6 @@
 0x00255DC0  # donMtapPortOpen: the multitap port open
 0x00255E30  # donMtapPortClose: the multitap port close
 0x00255EA0  # donMtapGetConnection: the multitap connection query
+0x002C45E0  # donCameraSetViewWindow: RenderWare's RwCameraSetViewWindow, widened in fights for widescreen (issue #2)
 0x0011A7A8  # sceCdSearchFile handler (kHandlerBindings)
 0x001146C8  # sceSifFreeIopHeap handler (kHandlerBindings)

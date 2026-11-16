@@ -203,6 +203,7 @@ StartScreenModel::StartScreenModel(StartScreenNet *net, const Remembered &rememb
     m_renderer = (m_r.renderer == 0 || m_r.renderer == 1) ? m_r.renderer : 0;
     m_upscale = (m_r.upscale >= 1 && m_r.upscale <= 8) ? m_r.upscale : 1;
     m_textures = m_r.textures;
+    m_widescreen = m_r.widescreen;
     m_vibration = m_r.vibration;
     m_net_delay = (m_r.net_delay >= 0 && m_r.net_delay <= 10) ? m_r.net_delay : 0;
 }
@@ -347,6 +348,9 @@ void StartScreenModel::handle_key(Key k)
             }
             case kSettingsTextures:
                 m_textures = !m_textures;
+                break;
+            case kSettingsWidescreen:
+                m_widescreen = !m_widescreen;
                 break;
             case kSettingsVibration:
                 m_vibration = !m_vibration;
@@ -923,6 +927,7 @@ void StartScreenModel::rebuild() const
         v.settings_renderer = m_renderer;
         v.settings_upscale = m_upscale;
         v.settings_textures = m_textures;
+        v.settings_widescreen = m_widescreen;
         v.settings_vibration = m_vibration;
         v.settings_net_delay = m_net_delay;
         v.settings_item = m_settings_item;
@@ -939,6 +944,7 @@ void StartScreenModel::rebuild() const
                    {"Renderer: " + std::string(m_renderer == 0 ? "Vulkan" : "Software"), m_settings_item == kSettingsRenderer, false},
                    {"Upscale: " + upscale_text, m_settings_item == kSettingsUpscale, false},
                    {"Texture pack: " + std::string(m_textures ? "On" : "Off"), m_settings_item == kSettingsTextures, false},
+                   {"Widescreen: " + std::string(m_widescreen ? "On" : "Off"), m_settings_item == kSettingsWidescreen, false},
                    {"Vibration: " + std::string(m_vibration ? "On" : "Off"), m_settings_item == kSettingsVibration, false},
                    {"Online input delay: " + delay_text, m_settings_item == kSettingsNetDelay, false},
                    {"Host port: " + port_text, m_settings_item == kSettingsHostPort, false}};

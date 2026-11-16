@@ -52,6 +52,7 @@ struct StartScreenOutcome
     int renderer = 0;        // 0 Vulkan, 1 software
     int upscale = 1;         // the GS's internal resolution multiplier, 1..8
     bool textures = false;   // load the texture pack
+    bool widescreen = false; // 16:9 3D scenes (issue #2)
     bool vibration = true;   // the game's vibration on the gamepads
     int net_delay = 0;       // 0 = automatic, 1..10 frames (hosting)
 };

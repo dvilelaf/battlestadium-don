@@ -22,6 +22,7 @@
 #include "video_skip.h"
 #include "folder_warmup.h"
 #include "pad_layout_flag.h"
+#include "widescreen_flag.h"
 #include "input_sdl.h"
 #include "log_redirect.h"
 
@@ -79,13 +80,14 @@ namespace
         bool fullscreen;
         int upscale;
         bool textures;
+        bool widescreen;
     };
 
     GameChoices apply_local_choices(const DonHostOptions &options, int local_players, int renderer, bool vibration,
-                                    bool fullscreen, int upscale, bool textures)
+                                    bool fullscreen, int upscale, bool textures, bool widescreen)
     {
         GameChoices out{options.players, options.renderer, options.rumble, options.fullscreen,
-                        options.upscale, options.textures};
+                        options.upscale, options.textures, options.widescreen};
         const int local = (local_players >= 1 && local_players <= 4) ? local_players : 1;
         if (!options.players_given)
             out.players = (local >= 3) ? 4 : 2;
@@ -99,6 +101,8 @@ namespace
             out.upscale = (upscale >= 1 && upscale <= 8) ? upscale : 1;
         if (!options.textures_given)
             out.textures = textures;
+        if (!options.widescreen_given)
+            out.widescreen = widescreen;
         return out;
     }
 
@@ -508,6 +512,7 @@ namespace
         bool game_fullscreen = options.fullscreen;
         int game_upscale = options.upscale;
         bool game_textures = options.textures;
+        bool game_widescreen = options.widescreen;
         // net.ini's textures_dir has no menu row (it is set by hand): read here, so every way into the game
         // finds it.
         don_host::NetConfigFile remembered_textures;
@@ -527,13 +532,14 @@ namespace
                 std::fprintf(stderr, "[don] net.ini: %s\n", config_error.c_str());
             const GameChoices c = apply_local_choices(options, remembered.local_players, remembered.renderer,
                                                       remembered.vibration, remembered.fullscreen, remembered.upscale,
-                                                      remembered.textures);
+                                                      remembered.textures, remembered.widescreen);
             game_players = c.players;
             game_renderer = c.renderer;
             game_rumble = c.rumble;
             game_fullscreen = c.fullscreen;
             game_upscale = c.upscale;
             game_textures = c.textures;
+            game_widescreen = c.widescreen;
             std::fprintf(stderr, "[don] the start screen: skipped, setup ended with PLAY\n");
         }
         if (start_screen)
@@ -555,6 +561,7 @@ namespace
             request.remembered.renderer = remembered.renderer;
             request.remembered.upscale = remembered.upscale;
             request.remembered.textures = remembered.textures;
+            request.remembered.widescreen = remembered.widescreen;
             request.remembered.vibration = remembered.vibration;
             request.remembered.net_delay = remembered.net_delay;
             request.remembered.default_name = don_host::don_os_user_name();
@@ -596,6 +603,7 @@ namespace
             save.renderer = outcome.renderer;
             save.upscale = outcome.upscale;
             save.textures = outcome.textures;
+            save.widescreen = outcome.widescreen;
             save.textures_dir = remembered.textures_dir; // no menu row: kept as the file had it
             save.vibration = outcome.vibration;
             save.net_delay = outcome.net_delay;
@@ -623,13 +631,14 @@ namespace
             // 7.3 (T-522): the LocalSetup and Settings choices become what the game uses; the command line wins.
             const GameChoices c = apply_local_choices(options, outcome.local_players, outcome.renderer,
                                                       outcome.vibration, outcome.fullscreen, outcome.upscale,
-                                                      outcome.textures);
+                                                      outcome.textures, outcome.widescreen);
             game_players = c.players;
             game_renderer = c.renderer;
             game_rumble = c.rumble;
             game_fullscreen = c.fullscreen;
             game_upscale = c.upscale;
             game_textures = c.textures;
+            game_widescreen = c.widescreen;
 
             screen_net.reset(); // the layer is done: it owns nothing now
         }
@@ -651,6 +660,17 @@ namespace
         HostGsParams gs_params;
         gs_params.renderer = game_renderer;
         gs_params.upscale = game_upscale;
+        // Widescreen (issue #2): the game's 3D cameras and the picture's shape. Not in online play: the camera's view
+        // window is guest memory, which the netplay hash compares between the PCs.
+        if (game_widescreen && net_mode)
+        {
+            std::fprintf(stderr, "[don] widescreen: off in online play\n");
+            game_widescreen = false;
+        }
+        don_widescreen::enabled().store(game_widescreen);
+        gs_params.widescreen = game_widescreen;
+        if (game_widescreen)
+            std::fprintf(stderr, "[don] widescreen on\n");
         // Texture packs (PCSX2's texture replacement): load the pack, dump the game's textures, or both.
         gs_params.textures_flags = (game_textures ? DON_GS_TEXTURES_LOAD : 0) |
                                    (options.dump_textures ? DON_GS_TEXTURES_DUMP : 0);
