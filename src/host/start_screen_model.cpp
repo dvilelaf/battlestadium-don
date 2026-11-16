@@ -201,6 +201,8 @@ StartScreenModel::StartScreenModel(StartScreenNet *net, const Remembered &rememb
     m_local_players = (m_r.local_players >= 1 && m_r.local_players <= 4) ? m_r.local_players : 1;
     m_fullscreen = m_r.fullscreen;
     m_renderer = (m_r.renderer == 0 || m_r.renderer == 1) ? m_r.renderer : 0;
+    m_upscale = (m_r.upscale >= 1 && m_r.upscale <= 8) ? m_r.upscale : 1;
+    m_textures = m_r.textures;
     m_vibration = m_r.vibration;
     m_net_delay = (m_r.net_delay >= 0 && m_r.net_delay <= 10) ? m_r.net_delay : 0;
 }
@@ -246,7 +248,7 @@ void StartScreenModel::handle_key(Key k)
                 m_field = m_address; // 7.2: the address field starts on the last one
                 m_screen = Screen::JoinSetup;
                 break;
-            case 3: // Settings (7.3): the name, fullscreen, renderer, vibration, the net delay and the host port
+            case 3: // Settings (7.3): the name, fullscreen, renderer, upscale, texture pack, vibration, net delay, port
                 m_settings_item = 0;
                 m_settings_name_editing = false;
                 m_settings_port_editing = false;
@@ -282,7 +284,7 @@ void StartScreenModel::handle_key(Key k)
     }
     case Screen::Settings:
     {
-        constexpr int kItems = 6; // name, fullscreen, renderer, vibration, net delay, host port
+        constexpr int kItems = kSettingsRowCount;
         if (m_settings_name_editing || m_settings_port_editing)
         {
             if (k == Key::Backspace)
@@ -324,19 +326,32 @@ void StartScreenModel::handle_key(Key k)
             const int dir = (k == Key::Right) ? 1 : -1;
             switch (m_settings_item)
             {
-            case 0: // name: Confirm enters the field; Left/Right does nothing here
-            case 5: // host port: typed, Confirm enters the field
+            case kSettingsName:     // Confirm enters the field; Left/Right does nothing here
+            case kSettingsHostPort: // typed, Confirm enters the field
                 break;
-            case 1:
+            case kSettingsFullscreen:
                 m_fullscreen = !m_fullscreen;
                 break;
-            case 2:
+            case kSettingsRenderer:
                 m_renderer = (m_renderer == 0) ? 1 : 0;
                 break;
-            case 3:
+            case kSettingsUpscale: // 1..8, wrapping at both ends
+            {
+                int u = m_upscale + dir;
+                if (u < 1)
+                    u = 8;
+                if (u > 8)
+                    u = 1;
+                m_upscale = u;
+                break;
+            }
+            case kSettingsTextures:
+                m_textures = !m_textures;
+                break;
+            case kSettingsVibration:
                 m_vibration = !m_vibration;
                 break;
-            case 4:
+            case kSettingsNetDelay:
             {
                 int d = m_net_delay + dir;
                 if (d < 0)
@@ -350,12 +365,12 @@ void StartScreenModel::handle_key(Key k)
         }
         else if (k == Key::Confirm)
         {
-            if (m_settings_item == 0)
+            if (m_settings_item == kSettingsName)
             {
                 m_field = effective_name_of(m_r, m_name);
                 m_settings_name_editing = true;
             }
-            else if (m_settings_item == 5)
+            else if (m_settings_item == kSettingsHostPort)
             {
                 m_field = std::to_string(m_port);
                 m_settings_port_editing = true;
@@ -906,6 +921,8 @@ void StartScreenModel::rebuild() const
         v.title = "Settings";
         v.settings_fullscreen = m_fullscreen;
         v.settings_renderer = m_renderer;
+        v.settings_upscale = m_upscale;
+        v.settings_textures = m_textures;
         v.settings_vibration = m_vibration;
         v.settings_net_delay = m_net_delay;
         v.settings_item = m_settings_item;
@@ -916,12 +933,15 @@ void StartScreenModel::rebuild() const
         const std::string delay_text = (m_net_delay == 0) ? "Auto" : std::to_string(m_net_delay) + " frame" +
                                                                    (m_net_delay == 1 ? "" : "s");
         const std::string port_text = m_settings_port_editing ? m_field + "_" : std::to_string(m_port);
-        v.lines = {{"Name: " + shown_name, m_settings_item == 0, false},
-                   {"Fullscreen: " + std::string(m_fullscreen ? "On" : "Off"), m_settings_item == 1, false},
-                   {"Renderer: " + std::string(m_renderer == 0 ? "Vulkan" : "Software"), m_settings_item == 2, false},
-                   {"Vibration: " + std::string(m_vibration ? "On" : "Off"), m_settings_item == 3, false},
-                   {"Online input delay: " + delay_text, m_settings_item == 4, false},
-                   {"Host port: " + port_text, m_settings_item == 5, false}};
+        const std::string upscale_text = m_upscale == 1 ? "Native" : std::to_string(m_upscale) + "x";
+        v.lines = {{"Name: " + shown_name, m_settings_item == kSettingsName, false},
+                   {"Fullscreen: " + std::string(m_fullscreen ? "On" : "Off"), m_settings_item == kSettingsFullscreen, false},
+                   {"Renderer: " + std::string(m_renderer == 0 ? "Vulkan" : "Software"), m_settings_item == kSettingsRenderer, false},
+                   {"Upscale: " + upscale_text, m_settings_item == kSettingsUpscale, false},
+                   {"Texture pack: " + std::string(m_textures ? "On" : "Off"), m_settings_item == kSettingsTextures, false},
+                   {"Vibration: " + std::string(m_vibration ? "On" : "Off"), m_settings_item == kSettingsVibration, false},
+                   {"Online input delay: " + delay_text, m_settings_item == kSettingsNetDelay, false},
+                   {"Host port: " + port_text, m_settings_item == kSettingsHostPort, false}};
         v.note = "Up/Down: pick a setting. Left/Right: change it. Enter: edit. Esc: back (saves).";
         break;
     }

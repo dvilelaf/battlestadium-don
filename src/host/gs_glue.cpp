@@ -106,6 +106,8 @@ bool don_gs_load(const std::string &gs_dir, DonGsApi &api, std::string &err)
                         load_symbol(library, "don_gs_resize", loaded.resize, bind_error);
         // Optional (T-520): present in newer libraries only; the host skips the device block when absent.
         load_symbol(library, "don_gs_device_info", loaded.device_info, bind_error);
+        // Optional: texture packs; without it the host runs without them (one [don] line when one is asked for).
+        load_symbol(library, "don_gs_set_textures", loaded.set_textures, bind_error);
         if (!ok || version() != 1)
         {
             err += "  " + absolute.string() + ": " + (ok ? "unsupported API version" : bind_error) + "\n";
@@ -205,6 +207,16 @@ bool HostGs::open_gs()
     cfg.renderer = m_params.renderer;
     cfg.upscale = m_params.upscale;
     cfg.vsync = (cfg.native_window != nullptr && m_params.vsync) ? 1 : 0;
+
+    // Texture packs: set before the open, on the thread that opens (don_gs.h). A library without the function
+    // runs without them; a refused setting is one line, and the game still starts.
+    if (m_params.textures_flags != 0)
+    {
+        if (!m_api.set_textures)
+            std::fprintf(stderr, "[don] textures: this GS library has no texture pack support\n");
+        else if (m_api.set_textures(m_params.textures_dir.c_str(), m_params.textures_flags) != 0)
+            std::fprintf(stderr, "[don] textures: refused by the GS library\n");
+    }
 
     char err[512] = {};
     const auto start = Clock::now();

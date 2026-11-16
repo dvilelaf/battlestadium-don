@@ -12,11 +12,13 @@
 #include "don_gs_host.h"
 
 #include "common/FPControl.h"
+#include "common/FileSystem.h"
 #include "common/WindowInfo.h"
 #include "pcsx2/Config.h"
 #include "pcsx2/GS/GS.h"
 #include "pcsx2/GS/Renderers/Common/GSFunctionMap.h"
 #include "pcsx2/GS/Renderers/Common/GSRenderer.h"
+#include "pcsx2/GS/Renderers/HW/GSTextureReplacements.h"
 #include "pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h"
 #include "pcsx2/SaveState.h"
 
@@ -46,6 +48,8 @@ constexpr uint64_t kCsrField = 1ull << 13;
 // Highest GS state version PCSX2 v2.8.2 reads and writes (STATE_VERSION).
 constexpr uint32_t kMaxStateVersion = 9;
 constexpr int kMaxUpscale = 8;
+// The serial PCSX2 names the game's texture pack folder after (<textures>/SLPS-25675/replacements).
+constexpr const char* kGameSerial = "SLPS-25675";
 
 struct Bridge
 {
@@ -167,6 +171,9 @@ std::string ValidateConfig(const DonGsConfig& cfg)
 	}
 	return {};
 }
+// don_gs_set_textures: applied by the next don_gs_open.
+std::string s_textures_dir;
+int s_textures_flags = 0;
 } // namespace
 
 extern "C" int don_gs_version(void)
@@ -208,6 +215,21 @@ extern "C" int don_gs_open(const DonGsConfig* cfg_in, char* err, int err_len)
 	options.Renderer = renderer;
 	options.UpscaleMultiplier = renderer == GSRendererType::SW ? 1.0f : static_cast<float>(cfg.upscale);
 	options.VsyncEnable = window.has_value() && cfg.vsync != 0;
+	// Texture packs (don_gs_set_textures). The GS runs without a VM, so PCSX2 has no disc serial to name
+	// the pack's folder after: the bridge gives it the game's (patch 0008).
+	const bool textures = renderer != GSRendererType::SW && s_textures_flags != 0;
+	if (textures)
+	{
+		EmuFolders::Textures = s_textures_dir;
+		options.LoadTextureReplacements = (s_textures_flags & DON_GS_TEXTURES_LOAD) != 0;
+		options.LoadTextureReplacementsAsync = true;
+		options.DumpReplaceableTextures = (s_textures_flags & DON_GS_TEXTURES_DUMP) != 0;
+		// PCSX2 creates <textures>/<serial>/dumps but not <textures> itself (its own startup always makes it):
+		// without this a first dump into a new folder writes nothing.
+		if (options.DumpReplaceableTextures && !FileSystem::EnsureDirectoryExists(s_textures_dir.c_str(), true))
+			LogLimited("%s: cannot create %s", "don_gs_open", s_textures_dir.c_str());
+	}
+	GSTextureReplacements::SetSerialOverride(textures ? kGameSerial : "");
 
 	std::memset(s_bridge.priv.data(), 0, kPrivBytes);
 	s_bridge.csr = 0;
@@ -492,5 +514,19 @@ extern "C" int don_gs_device_info(char* buf, int buf_len)
 	}
 	std::strncpy(buf, out.c_str(), static_cast<size_t>(buf_len) - 1);
 	buf[buf_len - 1] = '\0';
+	return 0;
+}
+
+extern "C" int don_gs_set_textures(const char* textures_dir, int flags)
+{
+	if (s_bridge.open)
+		return Fail(nullptr, 0, -1, "don_gs_set_textures: the GS is already open");
+	if ((flags & ~(DON_GS_TEXTURES_LOAD | DON_GS_TEXTURES_DUMP)) != 0)
+		return Fail(nullptr, 0, -2, "don_gs_set_textures: unknown flags 0x%x", static_cast<unsigned>(flags));
+	const std::string dir = textures_dir ? textures_dir : "";
+	if (flags != 0 && dir.empty())
+		return Fail(nullptr, 0, -3, "don_gs_set_textures: no textures folder");
+	s_textures_dir = flags != 0 ? dir : std::string();
+	s_textures_flags = flags;
 	return 0;
 }

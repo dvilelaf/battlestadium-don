@@ -50,6 +50,8 @@ struct DonGsApi
     void (*resize)(int, int) = nullptr;
     // T-520: the renderer and the Vulkan devices (don_gs_device_info), optional (older libraries lack it).
     int (*device_info)(char *, int) = nullptr;
+    // Texture packs (don_gs_set_textures), optional (older libraries lack it: no packs then).
+    int (*set_textures)(const char *, int) = nullptr;
 };
 
 // Looks for the library in `gs_dir` if given, else in $DON_GS_DIR if set (an explicit folder is the only one
@@ -62,6 +64,9 @@ struct HostGsParams
     int renderer = DON_GS_RENDERER_VULKAN;
     int upscale = 1;
     bool vsync = true;
+    // don_gs_set_textures: DON_GS_TEXTURES_* flags (0 = off) and PCSX2's textures folder, UTF-8.
+    int textures_flags = 0;
+    std::string textures_dir;
     // Native window for the GS, or window_type DON_GS_WINDOW_NONE for headless (see window.h).
     DonGsConfig window{}; // zero: headless (an uninitialised window_type was read by the GS on Windows)
 };

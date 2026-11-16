@@ -50,6 +50,8 @@ struct StartScreenOutcome
     int local_players = 1;   // Play: 1..4 (the host maps 3..4 to the multitap layout)
     bool fullscreen = false; // the game window opens fullscreen
     int renderer = 0;        // 0 Vulkan, 1 software
+    int upscale = 1;         // the GS's internal resolution multiplier, 1..8
+    bool textures = false;   // load the texture pack
     bool vibration = true;   // the game's vibration on the gamepads
     int net_delay = 0;       // 0 = automatic, 1..10 frames (hosting)
 };

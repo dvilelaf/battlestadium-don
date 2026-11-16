@@ -1,0 +1,72 @@
+# Texture replacements (PCSX2's texture packs) for a host that runs the GS without a VM.
+#
+# What it fixes: GSTextureReplacements takes the game's serial from VMManager::GetDiscSerial() and builds
+# the pack folder as <EmuFolders::Textures>/<serial>/replacements. libdon_gs runs the GS with no VM, so the
+# serial is always empty and ReloadReplacementMap() returns before looking for files: a pack is never
+# loaded, whatever LoadTextureReplacements says. SetSerialOverride() lets the bridge (src/gsbridge/don_gs.cpp)
+# name the serial; Initialize() and GameChanged() use it instead of VMManager's when it is not empty. PCSX2
+# itself never calls it, so its behaviour is unchanged.
+# Verified: applies with `git apply --check` on the pinned tree; don_gs.dll rebuilt with it loaded a test pack
+# from <user folder>/textures/SLPS-25675/replacements (see the pull request).
+#
+# Written for this project. License GPL-3.0-or-later.
+diff --git a/pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp b/pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp
+index 41c98ca..c0462cf 100644
+--- a/pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp
++++ b/pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp
+@@ -121,6 +121,9 @@ namespace GSTextureReplacements
+ 	static void CancelPendingLoadsAndDumps();
+ 
+ 	static std::string s_current_serial;
++	static std::string s_serial_override;
++
++	static std::string GetSerial();
+ 
+ 	/// Textures that have been dumped, to save stat() calls.
+ 	static std::unordered_set<TextureName> s_dumped_textures;
+@@ -330,9 +333,19 @@ std::string GSTextureReplacements::GetDumpFilename(const TextureName& name, u32
+ 	return ret;
+ }
+ 
++std::string GSTextureReplacements::GetSerial()
++{
++	return s_serial_override.empty() ? VMManager::GetDiscSerial() : s_serial_override;
++}
++
++void GSTextureReplacements::SetSerialOverride(std::string serial)
++{
++	s_serial_override = std::move(serial);
++}
++
+ void GSTextureReplacements::Initialize()
+ {
+-	s_current_serial = VMManager::GetDiscSerial();
++	s_current_serial = GetSerial();
+ 
+ 	if (GSConfig.DumpReplaceableTextures || GSConfig.LoadTextureReplacements)
+ 		StartWorkerThread();
+@@ -342,7 +355,7 @@ void GSTextureReplacements::Initialize()
+ 
+ void GSTextureReplacements::GameChanged()
+ {
+-	std::string new_serial = VMManager::GetDiscSerial();
++	std::string new_serial = GetSerial();
+ 	if (s_current_serial == new_serial)
+ 		return;
+ 
+diff --git a/pcsx2/GS/Renderers/HW/GSTextureReplacements.h b/pcsx2/GS/Renderers/HW/GSTextureReplacements.h
+index ef176ed..7f12ac5 100644
+--- a/pcsx2/GS/Renderers/HW/GSTextureReplacements.h
++++ b/pcsx2/GS/Renderers/HW/GSTextureReplacements.h
+@@ -31,6 +31,11 @@ namespace GSTextureReplacements
+ 
+ 	void Initialize();
+ 	void GameChanged();
++
++	/// Uses this serial instead of VMManager's disc serial (empty = VMManager's again). For a host that
++	/// runs the GS without a VM, which then has no disc serial. Takes effect at the next Initialize() or
++	/// GameChanged().
++	void SetSerialOverride(std::string serial);
+ 	void ReloadReplacementMap();
+ 	void UpdateConfig(Pcsx2Config::GSOptions& old_config);
+ 	void Shutdown();

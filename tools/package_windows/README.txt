@@ -41,7 +41,8 @@ Its messages always go to %APPDATA%\don\don.log; started from a command prompt t
 window. The options are:
    --sound off            no sound
    --renderer software    use the software renderer (default: vulkan)
-   --upscale 2            draw at twice the resolution (1 to 8)
+   --upscale 2            draw at twice the resolution (1 to 8; also in the start screen's Settings)
+   --textures on          load a texture pack (also in the start screen's Settings, see 5)
    --players 4            three or four players (a multitap is presented to the game)
    --seconds 60           end after 60 seconds (for tests)
 No library option is needed: the program finds gs\, vu\ and spu2\ next to itself.
@@ -60,7 +61,10 @@ Everything the program keeps for you is in one folder, %APPDATA%\don (type it in
 bar to open it):
     memcards\     your memory cards (mc0 and mc1)
     gs-cache\     the graphics cache (deleting it only brings back the first-time stutters)
-    net.ini       the start screen's settings (name, address, host port...)
+    net.ini       the start screen's settings (name, address, host port, upscale...)
+    textures\     texture packs: a PCSX2 pack for this game goes in textures\SLPS-25675\replacements
+                  (Settings, Texture pack: On; Vulkan only). --dump-textures writes the game's own
+                  textures to textures\SLPS-25675\dumps, the starting point of a pack.
     don.log       what the program did (see 6)
 Save from the game's main menu: OPTIONS, MEMORY CARD, SAVE. Copy memcards\ to keep your saves. A version
 older than this one kept the saves in a `saves` folder beside the program: this one copies them to

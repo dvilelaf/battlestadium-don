@@ -31,6 +31,13 @@ struct DonHostOptions
     int renderer = 0;         // --renderer: DON_GS_RENDERER_VULKAN (0) or DON_GS_RENDERER_SOFTWARE (1)
     bool renderer_given = false; // --renderer was given
     int upscale = 1;          // --upscale 1..8 (hardware renderer only)
+    bool upscale_given = false; // --upscale was given (it wins over the start screen's Upscale)
+    // Texture packs (PCSX2's texture replacement, hardware renderer only). The pack is read from
+    // <textures_dir>/SLPS-25675/replacements; textures_dir defaults to <user folder>/textures.
+    bool textures = false;       // --textures on|off: load the texture pack
+    bool textures_given = false; // --textures was given (it wins over the start screen's Texture pack)
+    std::string textures_dir;    // --textures-dir: PCSX2's "textures" folder (empty = net.ini's, else the default)
+    bool dump_textures = false;  // --dump-textures: write the game's textures to <textures_dir>/SLPS-25675/dumps
     bool fullscreen = false;  // --fullscreen (7.3): the game window opens fullscreen (F11 / Alt+Enter toggles)
     std::string gs_dir;       // --gs-dir: folder with the GS library (else DON_GS_DIR, else next to the executable)
     // T-205/T-303: the VU1 and SPU2 libraries, both off/absent by default.
