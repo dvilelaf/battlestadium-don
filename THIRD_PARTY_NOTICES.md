@@ -18,6 +18,7 @@ copyright; nothing here changes them. Exact pinned versions and commits are in `
 | **FFmpeg** 7.1.1 (unmodified official tarball, SHA-256 pinned in `tools/setup/build_ffmpeg.sh`) | MPEG-1/2 video decoding for the game's videos | **LGPL-2.1-or-later**. Configuration: no `--enable-gpl`, no `--enable-nonfree`, no external libraries; only the MPEG-1/2 video decoder, its parser, the MPEG-PS demuxer and swscale are enabled. Statically linked into a GPL-3.0 program, which LGPL allows; its source is the pinned tarball, and our configure line is in the two build scripts | https://ffmpeg.org |
 | **Nunito** (Regular, ExtraBold) | font of the start screen, embedded | **SIL Open Font License 1.1** (copy: `src/host/ui/fonts/OFL.txt`, copyright 2014 The Nunito Project Authors) | https://github.com/googlefonts/nunito |
 | **SDL3** | window, input, audio output | zlib | https://libsdl.org |
+| **libchdr** (PCSX2's vendored copy in `3rdparty/libchdr`, with its `3rdparty/lzma` LZMA SDK), statically linked | reads `.chd` disc images in the first-run setup (`src/setup/chd_reader.cpp`) | libchdr: BSD-3-Clause; LZMA SDK: public domain; uses zlib and zstd (above and below) | https://github.com/rtissera/libchdr , https://www.7-zip.org/sdk.html |
 | **miniupnpc** 2.2.8 | fetched into `third_party/` by the setup scripts (the project does not open ports automatically) | BSD-3-Clause | https://miniupnp.tuxfamily.org |
 
 ## Libraries shipped next to the Windows program

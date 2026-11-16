@@ -181,7 +181,7 @@ DiscIdentity identify_disc(const std::filesystem::path& image, const DiscTable& 
                 return fail(DiscVerdict::Unreadable, ErrorId::E07, std::to_string(file_size) + " bytes");
             return fail(DiscVerdict::Unreadable, ErrorId::E15, cls.detail);
         }
-        case Kind::Chd: case Kind::Cso: case Kind::Zso: case Kind::SevenZip: case Kind::Rar: case Kind::Ecm:
+        case Kind::Cso: case Kind::Zso: case Kind::SevenZip: case Kind::Rar: case Kind::Ecm:
         case Kind::Nrg: case Kind::Mdf: case Kind::Cue:
             return fail(DiscVerdict::Unreadable, ErrorId::E10, kind_name(cls.kind));
         case Kind::Xdelta: case Kind::Ppf: case Kind::Ips: case Kind::Bps:
@@ -191,6 +191,7 @@ DiscIdentity identify_disc(const std::filesystem::path& image, const DiscTable& 
             return fail(DiscVerdict::Unreadable, partial ? ErrorId::E09 : ErrorId::E15, cls.detail);
         case Kind::Folder: case Kind::DirectoryWithGame: break;  // folders are handled above, before classify
         case Kind::Iso: case Kind::Gz: case Kind::Zip: break;  // gz and zip are read as before (T-623b)
+        case Kind::Chd: break;  // issue #6: read through libchdr (chd_reader.h); one it can't open is E15
     }
     ImageReader img;
     std::string err;

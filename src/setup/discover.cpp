@@ -113,10 +113,10 @@ private:
 
     void file(const fs::path& shown, const fs::path& real) {
         switch (classify(real).kind) {
-            case Kind::Iso:
+            case Kind::Iso: case Kind::Chd:  // a CHD is read through libchdr like an ISO (issue #6)
                 if (is_this_game(real)) out_.found.push_back(shown);
                 break;
-            case Kind::Gz: case Kind::Zip: case Kind::SevenZip: case Kind::Rar: case Kind::Chd: case Kind::Cso:
+            case Kind::Gz: case Kind::Zip: case Kind::SevenZip: case Kind::Rar: case Kind::Cso:
             case Kind::Zso: case Kind::Ecm:
                 out_.possible.push_back(shown);
                 break;
