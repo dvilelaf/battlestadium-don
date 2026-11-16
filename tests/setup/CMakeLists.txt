@@ -36,6 +36,9 @@ list(APPEND SETUP_SRC ${SETUP_PLATFORM_SRC})
 add_library(don_setup STATIC ${SETUP_SRC})
 target_include_directories(don_setup PUBLIC "${SETUP_DIR}")
 target_link_libraries(don_setup PUBLIC ZLIB::ZLIB)
+# Issue #6: CHD disc images (src/setup/chd_reader.cpp).
+include("${DON_REPO_ROOT}/cmake/libchdr.cmake")
+target_link_libraries(don_setup PRIVATE libchdr)
 
 file(GLOB SETUP_TESTS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/test_setup_*.cpp")
 # Not built for Windows, each for a reason that is the test's subject and has no Windows meaning (the Windows

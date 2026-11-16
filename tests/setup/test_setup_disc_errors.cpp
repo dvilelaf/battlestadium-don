@@ -144,7 +144,7 @@ int main() {
     // E10: containers by their magic bytes
     {
         struct { const char* file; Bytes head; const char* name; } cases[] = {
-            {"a.chd", text("MComprHD"), "CHD"}, {"a.cso", text("CISO"), "CSO"}, {"a.zso", text("ZISO"), "ZSO"},
+            {"a.cso", text("CISO"), "CSO"}, {"a.zso", text("ZISO"), "ZSO"},  // CHD is read now (test_setup_chd)
             {"a.7z", {'7', 'z', 0xBC, 0xAF, 0x27, 0x1C}, "7z"}, {"a.rar", text("Rar!\x1A\x07"), "RAR"},
             {"a.ecm", Bytes{'E', 'C', 'M', 0}, "ECM"}, {"a.mdf", text("MEDIA DESCRIPTOR"), "MDF"},
             {"a.cue", text("FILE \"a.bin\" BINARY\n TRACK 01 MODE2/2352\n  INDEX 01 00:00:00\n"), "CUE"}};

@@ -6,11 +6,12 @@ nobody in this project will provide one.
 
 ## What the program accepts
 
-- A single file of the whole disc: **`.iso`**, or the same file compressed as **`.gz`** or inside a **`.zip`**.
+- A single file of the whole disc: **`.iso`**, or the same file compressed as **`.gz`**, inside a **`.zip`**, or as a
+  **`.chd`** made by MAME's `chdman` (`createdvd`, or `createcd`; a CHD that needs a parent CHD is refused).
 - The disc is a DVD, so the image is about 1.7 GB (1.77 GB).
 - Either the original Japanese disc, or that disc with the English fan translation by Lord Izen applied by you.
   The language of the game is the language of the image.
-- Not accepted: images in other formats (`.bin`/`.cue`, `.chd`, `.cso`, `.nrg`, `.mdf`). Convert them to `.iso`
+- Not accepted: images in other formats (`.bin`/`.cue`, `.cso`, `.nrg`, `.mdf`). Convert them to `.iso`
   first. An incomplete or still-downloading file is detected and refused.
 
 The setup screen checks the image and tells you if it is the wrong disc, damaged or incomplete.

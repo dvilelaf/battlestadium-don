@@ -103,10 +103,20 @@ bool ImageReader::open(const std::filesystem::path& path, std::string& err) {
     auto end_pos = in_.tellg();
     size_known_ = end_pos > 0;
     file_size_ = size_known_ ? uint64_t(end_pos) : 0;
-    uint8_t head[4] = {0, 0, 0, 0};
+    uint8_t head[8] = {0, 0, 0, 0, 0, 0, 0, 0};
     in_.seekg(0);
-    in_.read(reinterpret_cast<char*>(head), 4);
+    in_.read(reinterpret_cast<char*>(head), 8);
     in_.clear();
+    if (std::memcmp(head, "MComprHD", 8) == 0) {
+        // A CHD (MAME's tag): libchdr reads it with its own stream; ours is not needed.
+        in_.close();
+        chd_ = std::make_unique<ChdImage>();
+        if (!chd_->open(path, err)) { chd_.reset(); return false; }
+        mode_ = Mode::Chd;
+        file_size_ = chd_->size();
+        size_known_ = true;
+        return true;
+    }
     if (head[0] == 0x1f && head[1] == 0x8b) {
         mode_ = Mode::Gzip; base_ = 0; csize_ = file_size_;
     } else if (head[0] == 'P' && head[1] == 'K') {
@@ -120,6 +130,12 @@ bool ImageReader::open(const std::filesystem::path& path, std::string& err) {
 bool ImageReader::read_at(uint64_t off, void* buf, size_t n) {
     std::string err;
     fail_ = ReadFail::None;
+    if (mode_ == Mode::Chd) {
+        bool eof = false;
+        if (chd_->read(off, buf, n, eof)) return true;
+        fail_ = eof ? ReadFail::Eof : ReadFail::Corrupt;
+        return false;
+    }
     if (mode_ == Mode::Raw || mode_ == Mode::Stored) {
         uint64_t limit = mode_ == Mode::Raw ? file_size_ : csize_;
         if (off + n > limit) { fail_ = ReadFail::Eof; return false; }
@@ -151,7 +167,7 @@ bool ImageReader::drain() {
 }
 
 uint64_t ImageReader::have() const {
-    return mode_ == Mode::Raw ? file_size_ : mode_ == Mode::Stored ? csize_ : pos_;
+    return mode_ == Mode::Raw || mode_ == Mode::Chd ? file_size_ : mode_ == Mode::Stored ? csize_ : pos_;
 }
 
 bool ImageReader::open_zip(std::string& err) {

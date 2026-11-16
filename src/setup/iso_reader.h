@@ -13,6 +13,7 @@
 
 #include <zlib.h>
 
+#include "chd_reader.h"
 #include "disc_image.h"
 
 namespace don_setup {
@@ -136,7 +137,7 @@ inline uint32_t le32(const uint8_t* p) { return p[0] | p[1] << 8 | p[2] << 16 | 
 inline uint16_t le16(const uint8_t* p) { return uint16_t(p[0] | p[1] << 8); }
 inline uint64_t le64(const uint8_t* p) { return le32(p) | uint64_t(le32(p + 4)) << 32; }
 
-// Random access to the bytes of the ISO, whether it is plain, gzip or a deflated/stored zip member.
+// Random access to the bytes of the ISO, whether it is plain, gzip, a deflated/stored zip member or a CHD (issue #6).
 // Compressed sources are read forward only; a backward seek restarts the stream.
 enum class ReadFail { None, Eof, Io, Corrupt };  // the image ended early / the OS failed / gz or zip data is bad
 
@@ -150,7 +151,7 @@ public:
     bool read_at(uint64_t off, void* buf, size_t n);
     // Why the last read_at or drain failed.
     ReadFail fail() const { return fail_; }
-    // Reads a gz/zip stream to its end so its CRC and length are checked; true for a plain image.
+    // Reads a gz/zip stream to its end so its CRC and length are checked; true for a plain image or a CHD.
     bool drain();
     bool compressed() const { return mode_ == Mode::Gzip || mode_ == Mode::Deflate; }
     // Bytes of the ISO known to exist so far (the whole size for plain and stored images).
@@ -165,7 +166,7 @@ public:
     const std::string& zip_problem() const { return zip_problem_; }
 
 private:
-    enum class Mode { Raw, Stored, Gzip, Deflate };
+    enum class Mode { Raw, Stored, Gzip, Deflate, Chd };
 
     bool open_zip(std::string& err);
 
@@ -183,6 +184,7 @@ private:
     z_stream zs_{};
     bool zs_ready_ = false, done_ = false, size_known_ = true;
     std::array<uint8_t, 65536> in_buf_;
+    std::unique_ptr<ChdImage> chd_; // Mode::Chd: random access through libchdr (chd_reader.h)
 };
 
 constexpr uint32_t kSector = 2048;
