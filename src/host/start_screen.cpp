@@ -9,6 +9,7 @@
 #include "start_screen.h"
 
 #include "net_config_file.h"
+#include "../setup/path_text.h"
 
 #include <SDL3/SDL.h>
 
@@ -577,7 +578,7 @@ void render_settings(StartScreenModel &model, const StartScreenView &v)
     {
         static const std::string kTexturesDesc =
             "Replace the game's textures with a PCSX2 texture pack. Put the pack in " +
-            (don_host::don_default_textures_dir() / "SLPS-25675" / "replacements").string() +
+            don_setup::path_text(don_host::don_default_textures_dir() / "SLPS-25675" / "replacements") +
             ". Vulkan only.";
         const int r = ui::don_opt_row("Texture pack", v.settings_textures ? "On" : "Off", v.settings_textures,
                                       v.settings_item == kSettingsTextures, false, kTexturesDesc.c_str());
