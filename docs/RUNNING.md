@@ -137,8 +137,15 @@ uv run --no-project --with pillow --with numpy python -I tools/textures/import_d
     --out "<user folder>/textures/SLPS-25675/replacements" --report import.tsv
 ```
 
-It prints how many dumps it imported and why the others were left out (no pack image of that size, ambiguous, no
+It prints how many dumps it imported and why the others were left out (no pack image of that size, ambiguous, rejected content, no
 match: pictures that differ between the versions, such as button icons).
+
+Always convert into a fresh output folder. The importer refuses existing PNG files so a rejected match cannot
+leave an older replacement active. Candidate thumbnails are checked at the original PS2 resolution using
+opacity overlap, spatial colour agreement and edge agreement. Constant textures require nearly exact colour
+and opacity. Use `--rejected-report rejected.tsv` to inspect candidates rejected by these checks. They are
+conservative: an uncertain pair keeps the original PS2 texture. Inspect the accepted and rejected reports
+before installing the resulting pack. Matching validates source content, not the artistic quality of a pack.
 
 ### On Windows, from the packaged folder
 
