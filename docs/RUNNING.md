@@ -117,6 +117,36 @@ show its original for a moment the first time. To make one, run once with `--dum
 are written to `<user folder>/textures/SLPS-25675/dumps` as PNG files; edit them and put them, with the same names,
 in `replacements`. The software renderer ignores both. The log says what was used (`[don] textures load in ...`).
 
+**A skin, step by step** (issue #5): start with `--dump-textures` and play the screens you want to change (for a
+character: pick them and fight with them, so their model, portrait and special-move cut-in are drawn); quit; in
+`dumps/`, find the character's textures (sort by date: the newest are the last screens); edit copies in any image
+editor, at the same size or 2x/4x larger (larger is sharper); keep the file names and save them as PNG in
+`replacements/`; start with Texture pack On. Alpha follows the PS2: in a dump whose alpha never passes 128, 128 is
+opaque, so keep the edited image's alpha in that range. Don't share game textures you did not make yourself.
+
+**From a Dolphin (GameCube) pack.** Packs made for the GameCube version (game ID `G8SJ..`, files named
+`tex1_<W>x<H>_..._<n>.png`) do not load as they are: Dolphin and PCSX2 name textures after different hashes. Most
+pictures are the same in both versions, so `tools/textures/import_dolphin_pack.py` matches the dumps of your own
+game against the pack (same original size, compared on a small thumbnail) and writes the pack's images under the dumps'
+names, with the alpha brought to the PS2's range. Dump first (every screen, stage and character you want covered),
+then:
+
+```bash
+uv run --no-project --with pillow --with numpy python -I tools/textures/import_dolphin_pack.py \
+    --dumps "<user folder>/textures/SLPS-25675/dumps" --pack <folder with the tex1_*.png files> \
+    --out "<user folder>/textures/SLPS-25675/replacements" --report import.tsv
+```
+
+It prints how many dumps it imported and why the others were left out (no pack image of that size, ambiguous, rejected content, no
+match: pictures that differ between the versions, such as button icons).
+
+Always convert into a fresh output folder. The importer refuses existing PNG files so a rejected match cannot
+leave an older replacement active. Candidate thumbnails are checked at the original PS2 resolution using
+opacity overlap, spatial colour agreement and edge agreement. Constant textures require nearly exact colour
+and opacity. Use `--rejected-report rejected.tsv` to inspect candidates rejected by these checks. They are
+conservative: an uncertain pair keeps the original PS2 texture. Inspect the accepted and rejected reports
+before installing the resulting pack. Matching validates source content, not the artistic quality of a pack.
+
 ### On Windows, from the packaged folder
 
 **Make or refresh the package** (on the Linux machine, from the main checkout; one command):
