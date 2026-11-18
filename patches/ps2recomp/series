@@ -74,3 +74,4 @@
 0091-emit-module-abi.patch
 0092-recomp-windows-static.patch
 0093-ee-scheduler-hot-state-once.patch
+0094-dma-chain-tag-limit.patch
