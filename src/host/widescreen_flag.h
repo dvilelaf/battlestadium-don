@@ -19,6 +19,14 @@
 
 namespace don_widescreen
 {
+// Fight detection without widescreen (fast loading needs to know a fight from a loading screen). Set by the host
+// before the runtime starts; the camera hook then counts fight camera updates whatever the widescreen setting.
+inline std::atomic<bool> &fight_tracking()
+{
+    static std::atomic<bool> on{false};
+    return on;
+}
+
 // The setting. The host sets it before the runtime starts and never changes it.
 inline std::atomic<bool> &enabled()
 {
