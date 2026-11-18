@@ -338,7 +338,7 @@ void HostGs::exec_gif(int path, const uint8_t *data, uint32_t bytes)
 // tells a fight from a menu, **Measured**; the fight camera routine does.
 void HostGs::update_aspect()
 {
-    if (!m_params.widescreen)
+    if (!m_params.widescreen && !m_blank_hook)
         return;
     const bool updated = don_widescreen::fight_camera_updates().exchange(0, std::memory_order_relaxed) != 0;
     m_fight_history = (m_fight_history << 1) | (updated ? 1u : 0u);
@@ -350,7 +350,9 @@ void HostGs::update_aspect()
     else if (m_fight && m_blanks_without_3d >= kBlanksToEnd)
         m_fight = false;
     don_widescreen::fight_active().store(m_fight, std::memory_order_relaxed);
-    if (!m_api.set_aspect)
+    if (m_blank_hook)
+        m_blank_hook(m_fight);
+    if (!m_params.widescreen || !m_api.set_aspect)
         return;
     m_hud_fix = m_fight;
     const int want = m_fight ? DON_GS_ASPECT_16_9 : DON_GS_ASPECT_4_3;

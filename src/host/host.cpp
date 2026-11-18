@@ -55,6 +55,8 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <array>
+#include "runtime/don_read_counter.h"
 
 #ifdef _WIN32
 #include <process.h>
@@ -836,6 +838,43 @@ namespace
         HostGs gs(api, gs_params, std::move(shots));
         PS2Runtime *runtime_ptr = runtime.get();
         gs.set_on_open_failed([runtime_ptr]() { runtime_ptr->requestStop(); });
+        // Fast loading: while the game reads the disc in bulk outside a fight and no video plays, the scheduler stops
+        // waiting for real time (EeScheduler::setTurbo), so those blanks pass as fast as the PC allows. A bulk read is
+        // 256 KiB or more within 8 blanks (menu music streams far less); it stays on 60 blanks after the last one.
+        // DON_FAST_LOAD=0 turns it off, DON_FAST_LOAD_LOG=1 logs it; never in online play (both PCs must stay in step).
+        const bool fast_load = !net_mode && !(std::getenv("DON_FAST_LOAD") && std::getenv("DON_FAST_LOAD")[0] == '0');
+        if (fast_load)
+        {
+            don_widescreen::fight_tracking().store(true, std::memory_order_relaxed);
+            const bool fast_load_log = env_flag("DON_FAST_LOAD_LOG");
+            gs.set_blank_hook([runtime_ptr, fast_load_log, blank = uint64_t{0}, last_bytes = uint64_t{0},
+                               last_read = uint64_t{0}, window = std::array<uint64_t, 8>{}, last_mpeg = 0,
+                               mpeg_blank = uint64_t{0}, turbo = false](bool fight) mutable {
+                ++blank;
+                const uint64_t bytes = g_donReadBytes.load(std::memory_order_relaxed);
+                window[blank % window.size()] = bytes - last_bytes;
+                last_bytes = bytes;
+                uint64_t recent = 0;
+                for (const uint64_t v : window)
+                    recent += v;
+                if (recent >= 256u * 1024u)
+                    last_read = blank;
+                if (const int m = g_donMpegActive.load(std::memory_order_relaxed); m != last_mpeg)
+                {
+                    last_mpeg = m;
+                    mpeg_blank = blank;
+                }
+                const bool want = !fight && blank > 600 && last_read != 0 && blank - last_read < 60 &&
+                                  (mpeg_blank == 0 || blank - mpeg_blank > 30);
+                if (want == turbo)
+                    return;
+                runtime_ptr->eeScheduler().setTurbo(want);
+                turbo = want;
+                if (fast_load_log)
+                    std::fprintf(stderr, "[don] fast loading %s at blank %llu\n", want ? "on" : "off",
+                                 static_cast<unsigned long long>(blank));
+            });
+        }
         runtime->setHostGs(&gs.iface());
         if (gs.pacing_log())
             gs.set_pacing_wait_source([runtime_ptr]() { return runtime_ptr->eeScheduler().pacingWaitNs(); });

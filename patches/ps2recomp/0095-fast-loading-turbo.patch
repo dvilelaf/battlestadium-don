@@ -1,0 +1,175 @@
+Fast loading: the scheduler can stop waiting for real time (EeScheduler::setTurbo), and the runtime counts what
+the game reads and when a video is playing, so the host can decide when to use it.
+
+What it adds: `setTurbo(true)` makes processDueDeadlines and waitForEvent skip their host-deadline waits (the guest
+still sees every event at its emulated cycle, in the same order; only the wall time between them shrinks).
+`setTurbo(false)` puts every pending host deadline back at its emulated distance from now, so pacing resumes
+without a stall for the time gained. Executor thread only (the host's vblank callback runs there).
+`include/runtime/don_read_counter.h`: g_donReadBytes (bytes from readCdSectors and fioRead) and g_donMpegActive
+(bumped by sceMpegGetPicture, sceMpegGetPictureRAW8, sceMpegDemuxPssRing and sceMpegIsEnd, so a playing video is
+seen). Nothing changes unless the host calls setTurbo.
+Verified: the port's fight_short.txt and tools/run/scripts/konoha_ougi.txt run to their normal end with the host's
+fast loading on (docs/journal/070).
+
+diff --git a/ps2xRuntime/include/runtime/don_read_counter.h b/ps2xRuntime/include/runtime/don_read_counter.h
+new file mode 100644
+index 0000000..efb24b0
+--- /dev/null
++++ b/ps2xRuntime/include/runtime/don_read_counter.h
+@@ -0,0 +1,7 @@
++#pragma once
++#include <atomic>
++#include <cstdint>
++// DON: bytes the game read from the disc or files (fast loading watches it).
++inline std::atomic<uint64_t> g_donReadBytes{0};
++// DON: calls a playing video makes every picture; fast loading never runs while it changes.
++inline std::atomic<int> g_donMpegActive{0};
+diff --git a/ps2xRuntime/include/runtime/ee_scheduler.h b/ps2xRuntime/include/runtime/ee_scheduler.h
+index c14c69f..4a1a377 100644
+--- a/ps2xRuntime/include/runtime/ee_scheduler.h
++++ b/ps2xRuntime/include/runtime/ee_scheduler.h
+@@ -324,6 +324,11 @@ public:
+     [[nodiscard]] bool unwinding() const noexcept { return m_hot->unwinding; }
+     // Patch 0056: the total nanoseconds this scheduler has spent waiting for a host deadline (the pacing sleep
+     // of the idle path and of the vertical-blank wait); read by the host's DON_PACING_LOG diagnostic.
++    // Fast loading (DON): while on, the scheduler does not wait for the host deadlines, so the game runs as fast
++    // as the host allows. Turning it off puts the pending host deadlines back at their emulated distance from now.
++    // Executor thread only (the host's GS-vblank callback runs there).
++    void setTurbo(bool on);
++    [[nodiscard]] bool turbo() const noexcept { return m_turbo; }
+     [[nodiscard]] uint64_t pacingWaitNs() const noexcept { return m_pacingWaitNs.load(std::memory_order_relaxed); }
+     inline void accountCycles(uint32_t cycles) noexcept;
+     __attribute__((always_inline)) inline uint64_t accountCycles(DonHotState &hot, uint32_t cycles) noexcept;
+@@ -520,6 +525,7 @@ private:
+     int m_currentThreadCacheId = 0;
+     std::atomic<uint64_t> m_pacingWaitNs{0};
+     uint64_t m_slowPathCount = 0;
++    bool m_turbo = false; // executor thread only (fast loading)
+     mutable std::atomic<bool> m_snapshotRequested{false};
+ 
+     mutable std::mutex m_eventMutex;
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index a112807..9bc5e89 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -1497,6 +1497,26 @@ void EeScheduler::dispatchIrq(bool dmac, uint32_t cause)
+     }
+ }
+ 
++void EeScheduler::setTurbo(bool on)
++{
++    assertExecutor();
++    if (on == m_turbo)
++        return;
++    m_turbo = on;
++    if (on)
++        return;
++    // Back to real time: the deadlines taken while running ahead lie in the future by as much as the run gained;
++    // put each one at its emulated distance from now, so pacing resumes without a stall.
++    std::unique_lock lock(m_eventMutex);
++    const auto now = std::chrono::steady_clock::now();
++    for (ScheduledEvent &item : m_deadlines)
++    {
++        const uint64_t ahead = item.deadlineCycle > m_hot->eeCycle ? item.deadlineCycle - m_hot->eeCycle : 0u;
++        item.hostDeadline = now + eeCyclesToHostDuration(ahead);
++    }
++    updateNextDeadline();
++}
++
+ void EeScheduler::setVSyncFlag(uint32_t flagAddress, uint32_t tickAddress)
+ {
+     assertExecutor();
+@@ -2032,7 +2052,7 @@ void EeScheduler::processDueDeadlines()
+                 return;
+             }
+ 
+-            if (now < pacingDeadline)
++            if (now < pacingDeadline && !m_turbo)
+             {
+                 const auto waitStart = std::chrono::steady_clock::now();
+                 m_eventCv.wait_until(lock, pacingDeadline, [this]()
+@@ -2288,6 +2308,8 @@ void EeScheduler::waitForEvent()
+     }
+ 
+     const auto waitStart = std::chrono::steady_clock::now();
++    if (m_turbo)
++        hostDeadline = std::chrono::steady_clock::now(); // fast loading: no idle wait
+     const bool signaled = m_eventCv.wait_until(lock, hostDeadline, [this]()
+                                                { return !m_events.empty() ||
+                                                         m_stopRequested.load(std::memory_order_acquire); });
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h b/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
+index b0722a9..751670f 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
+@@ -1,3 +1,4 @@
++#include "runtime/don_read_counter.h"
+ #include <algorithm>
+ #include <cctype>
+ 
+@@ -434,6 +435,7 @@ namespace
+ 
+     bool readCdSectors(uint32_t lbn, uint32_t sectors, uint8_t *dst, size_t byteCount)
+     {
++        g_donReadBytes.fetch_add(byteCount, std::memory_order_relaxed);
+         for (const auto &[key, entry] : g_cdFilesByKey)
+         {
+             const uint32_t endLbn = entry.baseLbn + entry.sectors;
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+index 402e726..eb7481f 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+@@ -1,3 +1,4 @@
++#include "runtime/don_read_counter.h"
+ #include "Common.h"
+ #include "MPEG.h"
+ #include "runtime/ee_scheduler.h"
+@@ -2244,6 +2245,7 @@ namespace ps2_stubs
+ 
+     void sceMpegDemuxPssRing(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
++        g_donMpegActive.fetch_add(1, std::memory_order_relaxed);
+         static std::atomic<uint32_t> s_demuxRingEntryCount{0u};
+         const uint32_t entryIdx = s_demuxRingEntryCount.fetch_add(1u, std::memory_order_relaxed);
+         if (entryIdx < 4u)
+@@ -2379,6 +2381,7 @@ namespace ps2_stubs
+ 
+     void sceMpegGetPicture(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
++        g_donMpegActive.fetch_add(1, std::memory_order_relaxed);
+         const uint32_t mpegAddr = getRegU32(ctx, 4);
+         const uint32_t imageAddr = getRegU32(ctx, 5);
+         uint32_t width = kStubMovieWidth;
+@@ -2536,6 +2539,7 @@ namespace ps2_stubs
+ 
+     void sceMpegGetPictureRAW8(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
++        g_donMpegActive.fetch_add(1, std::memory_order_relaxed);
+         TODO_NAMED("sceMpegGetPictureRAW8", rdram, ctx, runtime);
+     }
+ 
+@@ -2565,6 +2569,7 @@ namespace ps2_stubs
+ 
+     void sceMpegIsEnd(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
++        g_donMpegActive.fetch_add(1, std::memory_order_relaxed);
+         (void)rdram;
+         const uint32_t mpegAddr = getRegU32(ctx, 4);
+ 
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/FileIO.cpp b/ps2xRuntime/src/lib/Kernel/Syscalls/FileIO.cpp
+index 1cbd05f..c5c14f0 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/FileIO.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/FileIO.cpp
+@@ -1,3 +1,4 @@
++#include "runtime/don_read_counter.h"
+ #include "Common.h"
+ #include "FileIO.h"
+ 
+@@ -115,6 +116,8 @@ namespace ps2_syscalls
+         }
+ 
+         const int64_t readResult = runtime->vfs().read(ps2Fd, hostBuf, size);
++        if (readResult > 0)
++            g_donReadBytes.fetch_add(static_cast<uint64_t>(readResult), std::memory_order_relaxed);
+         if (readResult < 0)
+         {
+             setReturnS32(ctx, -1);

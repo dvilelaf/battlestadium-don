@@ -243,13 +243,15 @@ namespace
     // select screens are pixel-identical to the setting off, the fight shows more of the stage at the sides).
     void donCameraSetViewWindow(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
-        if (!don_widescreen::enabled().load(std::memory_order_relaxed))
+        const bool wide_on = don_widescreen::enabled().load(std::memory_order_relaxed);
+        if ((wide_on || don_widescreen::fight_tracking().load(std::memory_order_relaxed)) &&
+            getRegU32(ctx, 31) == kFightCameraReturn)
+            don_widescreen::fight_camera_updates().fetch_add(1, std::memory_order_relaxed);
+        if (!wide_on)
         {
             g_originalSetViewWindow(rdram, ctx, runtime);
             return;
         }
-        if (getRegU32(ctx, 31) == kFightCameraReturn)
-            don_widescreen::fight_camera_updates().fetch_add(1, std::memory_order_relaxed);
         const uint32_t camera = getRegU32(ctx, 4);
         const uint32_t window = getRegU32(ctx, 5);
         if (!don_widescreen::fight_active().load(std::memory_order_relaxed) || camera == 0u || window == 0u ||

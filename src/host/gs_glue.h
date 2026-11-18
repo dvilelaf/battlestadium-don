@@ -97,6 +97,8 @@ public:
 
     // Called on the game thread from thread_begin when don_gs_open fails, to ask the runtime to stop.
     void set_on_open_failed(std::function<void()> fn) { m_on_open_failed = std::move(fn); }
+    // Called on the game thread once per vertical blank with "a fight is on screen" (fast loading). Set before start.
+    void set_blank_hook(std::function<void(bool fight)> fn) { m_blank_hook = std::move(fn); }
 
     // Any thread.
     State state() const { return m_state.load(std::memory_order_acquire); }
@@ -174,6 +176,7 @@ private:
     std::unique_ptr<ScreenshotWriter> m_shots;
     Ps2HostGs m_iface;
     std::function<void()> m_on_open_failed;
+    std::function<void(bool)> m_blank_hook;
     std::function<void(uint64_t)> m_on_vblank;
     std::function<void()> m_on_thread_begin;
     std::function<void()> m_on_thread_end;
